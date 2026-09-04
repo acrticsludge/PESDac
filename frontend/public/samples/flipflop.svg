@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 240" font-family="sans-serif">
+<rect width="400" height="240" fill="#1b1b1b"/>
+<text x="200" y="24" fill="#fafafa" font-size="16" text-anchor="middle">JK Flip-Flop — Truth Table Logic</text>
+<g font-size="12" text-anchor="middle">
+<rect x="120" y="50" width="160" height="120" rx="8" fill="#262626" stroke="#e5e5e5"/>
+<text x="140" y="80" fill="#9eb7ff">J ──▶</text>
+<text x="140" y="110" fill="#9eb7ff">K ──▶</text>
+<text x="140" y="140" fill="#ffa258">CLK ▲</text>
+<text x="250" y="95" fill="#9fe59b">◀── Q</text>
+<text x="250" y="125" fill="#f273aa">◀── Q̅</text>
+<text x="200" y="160" fill="#a3a3a3" font-size="11">JK</text>
+</g>
+<g fill="#fafafa" font-size="12" text-anchor="middle">
+<text x="80" y="205">J=0,K=0 → hold</text>
+<text x="200" y="205">J=1,K=1 → toggle</text>
+<text x="320" y="205">J≠K → set/reset</text>
+</g>
+</svg>

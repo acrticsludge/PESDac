@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.astro/
+
+
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Agent artifacts
+graphify-out/
+.reasonix/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project / future ignores
+# Backend
+chroma_db/
+embeddings/
+uploads/
+video_frames/
+transcripts/
+
+# Reference (do not forget)
+nox/
