@@ -36,14 +36,23 @@ muted zero-padding cards with subtle row dividers, icon-titled rows with
 a shared 192px control column, `SegmentedControl` for 2–3 named choices
 (depth, verbosity, citations, goal, difficulty), `isLabelHidden`
 controls (the row owns the label), panel heading + description,
-`useMediaQuery` narrow shell. Deliberate deviations: `TabList` strip
-instead of a custom tab row below 640px (system component); section
-filter instead of the setting-level combobox + keyboard traversal
-(kept small — promote if search proves inadequate); no container-query
-row stacking (no stylex in our source — rows hold two columns, narrow
-shell gives them full width); ghost-button rows not used — real
-`SideNavItem`s. All five sections, controls, copy, and storage behavior
-unchanged by the restyle.
+`useMediaQuery` narrow shell. Sections (user-added after approval):
+Shortcuts (real Ctrl+K / Esc / `/` with keycaps + working enable
+toggles gating the Pesdac keydown handler; no rebinding), Language &
+region (language/region/timezone selectors, stored-only, no week-start
+row per user direction). Scroll and zone sizing belong to Layout
+(`start` rail panel + scrollable `LayoutContent`) — an earlier revision
+with inline overflow styles failed to scroll and left a void under short
+panes; fixed by deleting all inline overflow/height and letting Layout
+own it. Legal documents use `CollapsibleGroup hasDividers` with no Card
+(the group draws its own row chrome; a Card around it doubled the chrome
+and spilled rows past the card edge). Deliberate deviations: `TabList`
+strip instead of a custom tab row below 640px (system component);
+section filter instead of the setting-level combobox + keyboard
+traversal; no container-query row stacking (no stylex in our source —
+rows hold two columns, narrow shell gives them full width); duplicate
+pane headings removed (dialog owns heading + description). All controls,
+copy, and storage behavior unchanged by the restyle.
 
 `AppLayout` always renders `Pesdac` and is `transition:persist`ed. Profile
 is a **`Dialog` modal over the chat** (settings without leaving the

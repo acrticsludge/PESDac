@@ -3,8 +3,9 @@
 import { useState, type ReactNode, type ComponentType, type SVGProps } from "react";
 
 import { VStack, HStack } from "@astryxdesign/core/Layout";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { Text } from "@astryxdesign/core/Text";
 import { Icon } from "@astryxdesign/core/Icon";
+import { Kbd } from "@astryxdesign/core/Kbd";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import {
@@ -16,6 +17,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Divider } from "@astryxdesign/core/Divider";
@@ -33,6 +35,11 @@ import {
   DocumentTextIcon,
   ArrowDownTrayIcon,
   TrashIcon,
+  PlusIcon,
+  XMarkIcon,
+  MagnifyingGlassIcon,
+  LanguageIcon,
+  GlobeAltIcon,
 } from "@heroicons/react/24/outline";
 import {
   clearAllChats,
@@ -45,6 +52,8 @@ export type ProfileTab =
   | "profile"
   | "study"
   | "assistant"
+  | "shortcuts"
+  | "language"
   | "privacy"
   | "legal";
 
@@ -52,6 +61,8 @@ export const TABS: { value: ProfileTab; label: string }[] = [
   { value: "profile", label: "Profile" },
   { value: "study", label: "Study" },
   { value: "assistant", label: "Assistant" },
+  { value: "shortcuts", label: "Shortcuts" },
+  { value: "language", label: "Language" },
   { value: "privacy", label: "Privacy" },
   { value: "legal", label: "Legal" },
 ];
@@ -488,6 +499,158 @@ export function AssistantSection() {
   );
 }
 
+const SHORTCUT_ROWS: {
+  key: "shortcutNewChat" | "shortcutCancel" | "shortcutFocus";
+  title: string;
+  description: string;
+  icon: IconComponent;
+  keys: string;
+}[] = [
+  {
+    key: "shortcutNewChat",
+    title: "New chat",
+    description: "Start a fresh chat from anywhere.",
+    icon: PlusIcon,
+    keys: "mod+k",
+  },
+  {
+    key: "shortcutCancel",
+    title: "Cancel and close",
+    description: "Stop answers, close menus and dialogs.",
+    icon: XMarkIcon,
+    keys: "escape",
+  },
+  {
+    key: "shortcutFocus",
+    title: "Focus composer",
+    description: "Jump to the message box.",
+    icon: MagnifyingGlassIcon,
+    keys: "/",
+  },
+];
+
+export function ShortcutsSection() {
+  useSessionVersion();
+  const profile = getProfile();
+  return (
+    <VStack gap={5}>
+      <SettingsCard title="Shortcuts">
+        <CardRows>
+          {SHORTCUT_ROWS.map((row) => (
+            <SettingsRow
+              key={row.key}
+              title={row.title}
+              description={row.description}
+              icon={row.icon}
+              control={
+                <HStack gap={2} vAlign="center">
+                  <Kbd keys={row.keys} />
+                  <Switch
+                    label={row.title}
+                    isLabelHidden
+                    value={profile[row.key]}
+                    onChange={(checked) =>
+                      updateProfile({ [row.key]: checked })
+                    }
+                  />
+                </HStack>
+              }
+            />
+          ))}
+        </CardRows>
+      </SettingsCard>
+      <Text type="supporting" color="secondary">
+        Switch a shortcut off and its keys do nothing. Rebinding comes
+        with the backend phase.
+      </Text>
+    </VStack>
+  );
+}
+
+const LANGUAGES = [
+  { value: "en-US", label: "English (US)" },
+  { value: "en-GB", label: "English (UK)" },
+  { value: "hi", label: "Hindi" },
+];
+
+const REGIONS = [
+  { value: "IN", label: "India" },
+  { value: "US", label: "United States" },
+  { value: "GB", label: "United Kingdom" },
+];
+
+const TIMEZONES = [
+  { value: "IST", label: "Indian (GMT+05:30)" },
+  { value: "UTC", label: "UTC (GMT+00:00)" },
+  { value: "PT", label: "Pacific (GMT-08:00)" },
+  { value: "ET", label: "Eastern (GMT-05:00)" },
+];
+
+export function LanguageSection() {
+  useSessionVersion();
+  const profile = getProfile();
+  return (
+    <VStack gap={5}>
+      <SettingsCard title="Language & region">
+        <CardRows>
+          <SettingsRow
+            title="Language"
+            description="Used across menus, buttons, and email."
+            icon={LanguageIcon}
+            control={
+              <Selector
+                label="Language"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                options={LANGUAGES}
+                value={profile.language}
+                onChange={(value) => updateProfile({ language: value })}
+              />
+            }
+          />
+          <SettingsRow
+            title="Region format"
+            description="Dates, numbers, and currency."
+            icon={GlobeAltIcon}
+            control={
+              <Selector
+                label="Region format"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                options={REGIONS}
+                value={profile.region}
+                onChange={(value) => updateProfile({ region: value })}
+              />
+            }
+          />
+          <SettingsRow
+            title="Time zone"
+            description="Used for scheduling and every timestamp you see."
+            icon={ClockIcon}
+            control={
+              <Selector
+                label="Time zone"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                options={TIMEZONES}
+                value={profile.timezone}
+                onChange={(value) => updateProfile({ timezone: value })}
+              />
+            }
+          />
+        </CardRows>
+      </SettingsCard>
+      <Text type="supporting" color="secondary">
+        Stored, not applied: the interface keeps its current language
+        until the backend phase binds these.
+      </Text>
+    </VStack>
+  );
+}
+
 const RETENTIONS = [
   { value: "forever", label: "Keep forever" },
   { value: "1 year", label: "Keep for 1 year" },
@@ -627,17 +790,21 @@ const LEGAL_DOCS = [
 export function LegalSection() {
   return (
     <VStack gap={5}>
-      <SettingsCard title="Documents">
-        <CardRows>
+      <VStack gap={1.5}>
+        <Text type="supporting" weight="semibold" color="secondary">
+          Documents
+        </Text>
+        {/* The group draws its own divided rows — no Card around it, or the
+            chrome doubles and rows spill past the card edge. */}
+        <CollapsibleGroup hasDividers>
           {LEGAL_DOCS.map((doc) => (
             <Collapsible
               key={doc.name}
+              value={doc.name}
               trigger={
-                <HStack gap={3} vAlign="center" width="100%">
+                <HStack gap={3} vAlign="center">
                   <Icon icon={DocumentTextIcon} size="sm" color="secondary" />
-                  <Text type="label" style={{ flex: 1 }}>
-                    {doc.name}
-                  </Text>
+                  <Text type="label">{doc.name}</Text>
                   <Badge label="Publishes at launch" />
                 </HStack>
               }
@@ -647,8 +814,8 @@ export function LegalSection() {
               </Text>
             </Collapsible>
           ))}
-        </CardRows>
-      </SettingsCard>
+        </CollapsibleGroup>
+      </VStack>
       <VStack gap={2}>
         <Text type="body">
           PESDac can make mistakes. Verify important answers against your

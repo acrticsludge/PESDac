@@ -417,6 +417,12 @@ export type Profile = {
   followUps: boolean;
   citations: string;
   retention: string;
+  language: string;
+  region: string;
+  timezone: string;
+  shortcutNewChat: boolean;
+  shortcutCancel: boolean;
+  shortcutFocus: boolean;
 };
 
 export const DEFAULT_PROFILE: Profile = {
@@ -435,6 +441,12 @@ export const DEFAULT_PROFILE: Profile = {
   followUps: true,
   citations: "on request",
   retention: "forever",
+  language: "en-US",
+  region: "IN",
+  timezone: "IST",
+  shortcutNewChat: true,
+  shortcutCancel: true,
+  shortcutFocus: true,
 };
 
 export function getProfile(): Profile {

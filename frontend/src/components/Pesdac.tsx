@@ -48,6 +48,7 @@ import {
   type ChatRef,
   readDraft,
   writeDraft,
+  getProfile,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../lib/session";
@@ -865,18 +866,22 @@ export default function ShellSideNav({
   // Global shortcuts: Ctrl/⌘+K new chat; Esc closes shell UI first, then
   // defers to the open thread (stop stream / cancel edit / close find);
   // "/" focuses whichever composer is visible. Never fires from editable
-  // targets (typing "/" or Ctrl+K in a field must not navigate).
+  // targets (typing "/" or Ctrl+K in a field must not navigate). Each
+  // shortcut obeys its profile toggle (Shortcuts section) — off means
+  // the keys do nothing here.
   useEffect(() => {
     const isEditable = (t: EventTarget | null) =>
       t instanceof HTMLElement &&
       t.closest('input, textarea, [contenteditable="true"]') != null;
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        if (!getProfile().shortcutNewChat) return;
         e.preventDefault();
         startNewChat();
         return;
       }
       if (e.key === "Escape") {
+        if (!getProfile().shortcutCancel) return;
         if (
           renameTarget != null ||
           deleteTarget != null ||
@@ -894,6 +899,7 @@ export default function ShellSideNav({
         return;
       }
       if (e.key === "/" && !isEditable(e.target)) {
+        if (!getProfile().shortcutFocus) return;
         e.preventDefault();
         window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT));
       }

@@ -2,20 +2,31 @@
 
 import { useEffect, useState, type ComponentType, type SVGProps } from "react";
 
-import { Layout, VStack, HStack } from "@astryxdesign/core/Layout";
+import {
+  Layout,
+  LayoutPanel,
+  LayoutContent,
+  VStack,
+} from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Icon } from "@astryxdesign/core/Icon";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { TabList, Tab } from "@astryxdesign/core/TabList";
 import { Dialog } from "@astryxdesign/core/Dialog";
 import { DialogHeader } from "@astryxdesign/core/Dialog";
-import { SideNav, SideNavSection, SideNavItem } from "@astryxdesign/core/SideNav";
+import {
+  SideNav,
+  SideNavSection,
+  SideNavItem,
+} from "@astryxdesign/core/SideNav";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import {
   MagnifyingGlassIcon,
   UserCircleIcon,
   BookOpenIcon,
   SparklesIcon,
+  CommandLineIcon,
+  LanguageIcon,
   ShieldCheckIcon,
   DocumentTextIcon,
 } from "@heroicons/react/24/outline";
@@ -24,6 +35,8 @@ import {
   IdentitySection,
   StudySection,
   AssistantSection,
+  ShortcutsSection,
+  LanguageSection,
   PrivacySection,
   LegalSection,
   type ProfileTab,
@@ -46,6 +59,8 @@ const NAV_GROUPS: {
     tabs: [
       { value: "study", label: "Study", icon: BookOpenIcon },
       { value: "assistant", label: "Assistant", icon: SparklesIcon },
+      { value: "shortcuts", label: "Shortcuts", icon: CommandLineIcon },
+      { value: "language", label: "Language", icon: LanguageIcon },
     ],
   },
   {
@@ -65,11 +80,19 @@ const PANEL_META: Record<ProfileTab, { heading: string; description: string }> =
     },
     study: {
       heading: "Study",
-      description: "Subjects, schedule, and quiz level.",
+      description: "Schedule and quiz level.",
     },
     assistant: {
       heading: "Assistant",
       description: "How answers behave by default.",
+    },
+    shortcuts: {
+      heading: "Keyboard shortcuts",
+      description: "Switch off any shortcut on this surface.",
+    },
+    language: {
+      heading: "Language & region",
+      description: "Language, formats, and time zone.",
     },
     privacy: {
       heading: "Privacy",
@@ -81,10 +104,31 @@ const PANEL_META: Record<ProfileTab, { heading: string; description: string }> =
     },
   };
 
+function ActivePane({ tab }: { tab: ProfileTab }) {
+  const meta = PANEL_META[tab];
+  return (
+    <VStack gap={4}>
+      <VStack gap={0.5}>
+        <Heading level={2}>{meta.heading}</Heading>
+        <Text type="supporting" color="secondary">
+          {meta.description}
+        </Text>
+      </VStack>
+      {tab === "profile" && <IdentitySection />}
+      {tab === "study" && <StudySection />}
+      {tab === "assistant" && <AssistantSection />}
+      {tab === "shortcuts" && <ShortcutsSection />}
+      {tab === "language" && <LanguageSection />}
+      {tab === "privacy" && <PrivacySection />}
+      {tab === "legal" && <LegalSection />}
+    </VStack>
+  );
+}
+
 // My Profile as a settings-dialog (modal over the chat — settings without
 // leaving the conversation): grouped icon rail + searchable sections on
-// desktop, search + tab strip below 640px. All controls are the same
-// storage-backed rows.
+// desktop, search + tab strip below 640px. Scroll and zone sizing belong
+// to Layout (start panel + scrollable content), never to inline styles.
 export default function ProfileDialog({
   isOpen,
   initialTab,
@@ -111,21 +155,21 @@ export default function ProfileDialog({
     tabs: g.tabs.filter((t) => matches(t.label)),
   })).filter((g) => g.tabs.length > 0);
   const visibleTabs = TABS.filter((t) => matches(t.label));
-  const meta = PANEL_META[tab];
-  const pane = (
-    <VStack gap={4} style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
-      <VStack gap={0.5}>
-        <Heading level={2}>{meta.heading}</Heading>
-        <Text type="supporting" color="secondary">
-          {meta.description}
-        </Text>
-      </VStack>
-      {tab === "profile" && <IdentitySection />}
-      {tab === "study" && <StudySection />}
-      {tab === "assistant" && <AssistantSection />}
-      {tab === "privacy" && <PrivacySection />}
-      {tab === "legal" && <LegalSection />}
-    </VStack>
+  const searchBox = (
+    <TextInput
+      label="Search settings"
+      isLabelHidden
+      placeholder="Search settings..."
+      startIcon={MagnifyingGlassIcon}
+      hasClear
+      value={query}
+      onChange={setQuery}
+    />
+  );
+  const noMatch = (
+    <Text type="supporting" color="secondary">
+      No sections match.
+    </Text>
   );
   return (
     <Dialog
@@ -142,80 +186,56 @@ export default function ProfileDialog({
             onOpenChange={onOpenChange}
           />
         }
-        content={
-          isNarrow ? (
-            <VStack gap={3}>
-              <TextInput
-                label="Search settings"
-                isLabelHidden
-                placeholder="Search settings..."
-                startIcon={MagnifyingGlassIcon}
-                hasClear
-                value={query}
-                onChange={setQuery}
-              />
-              <TabList
-                value={tab}
-                onChange={(value) => setTab(value as ProfileTab)}
-                hasDivider
+        start={
+          isNarrow ? undefined : (
+            <LayoutPanel width={248} role="navigation">
+              <SideNav
+                topContent={searchBox}
               >
-                {visibleTabs.map((t) => (
-                  <Tab key={t.value} value={t.value} label={t.label} />
+                {visibleGroups.map((group) => (
+                  <SideNavSection key={group.label} title={group.label}>
+                    {group.tabs.map((t) => (
+                      <SideNavItem
+                        key={t.value}
+                        label={t.label}
+                        icon={
+                          <Icon icon={t.icon} size="sm" color="primary" />
+                        }
+                        isSelected={t.value === tab}
+                        onClick={() => setTab(t.value)}
+                      />
+                    ))}
+                  </SideNavSection>
                 ))}
-              </TabList>
-              {visibleTabs.length === 0 ? (
-                <Text type="supporting" color="secondary">
-                  No sections match.
-                </Text>
-              ) : (
-                pane
-              )}
-            </VStack>
-          ) : (
-            <HStack gap={4} vAlign="start" width="100%">
-              <VStack style={{ width: 248, flexShrink: 0 }}>
-                <SideNav
-                  topContent={
-                    <TextInput
-                      label="Search settings"
-                      isLabelHidden
-                      placeholder="Search settings..."
-                      startIcon={MagnifyingGlassIcon}
-                      hasClear
-                      value={query}
-                      onChange={setQuery}
-                    />
-                  }
-                >
-                  {visibleGroups.map((group) => (
-                    <SideNavSection key={group.label} title={group.label}>
-                      {group.tabs.map((t) => (
-                        <SideNavItem
-                          key={t.value}
-                          label={t.label}
-                          icon={
-                            <Icon
-                              icon={t.icon}
-                              size="sm"
-                              color="primary"
-                            />
-                          }
-                          isSelected={t.value === tab}
-                          onClick={() => setTab(t.value)}
-                        />
-                      ))}
-                    </SideNavSection>
-                  ))}
-                  {visibleGroups.length === 0 && (
-                    <Text type="supporting" color="secondary">
-                      No sections match.
-                    </Text>
-                  )}
-                </SideNav>
-              </VStack>
-              {pane}
-            </HStack>
+                {visibleGroups.length === 0 && noMatch}
+              </SideNav>
+            </LayoutPanel>
           )
+        }
+        content={
+          <LayoutContent>
+            {isNarrow ? (
+              <VStack gap={3}>
+                {searchBox}
+                <TabList
+                  value={tab}
+                  onChange={(value) => setTab(value as ProfileTab)}
+                  hasDivider
+                >
+                  {visibleTabs.map((t) => (
+                    <Tab key={t.value} value={t.value} label={t.label} />
+                  ))}
+                </TabList>
+                {visibleTabs.length === 0 ? (
+                  noMatch
+                ) : (
+                  <ActivePane tab={tab} />
+                )}
+              </VStack>
+            ) : (
+              <ActivePane tab={tab} />
+            )}
+          </LayoutContent>
         }
       />
     </Dialog>
