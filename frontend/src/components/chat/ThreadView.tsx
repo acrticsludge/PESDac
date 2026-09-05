@@ -716,7 +716,7 @@ export default function ThreadView({
       );
       setEditingIndex(null);
     }
-    setComposerText("");
+    // Send clears the composer via ChatComposer's own onChange.
     // Day break: new messages on a later day than the last one get a
     // "Today · Subject" divider first (mockup label; backend sends real dates).
     let needsDayDivider = false;
@@ -829,9 +829,6 @@ export default function ThreadView({
       label,
       variant: "blue",
     });
-
-    // Controlled composer: pull the editor mutation back into state.
-    setComposerText(input.getValue() ?? "");
 
     document.activeElement?.dispatchEvent(
       new Event("input", {
@@ -1159,58 +1156,83 @@ export default function ThreadView({
         content={
           <LayoutContent padding={0}>
             <HStack height="100%">
-              <VStack style={{ flex: 1, minWidth: 0, height: "100%" }}>
+              <VStack
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  height: "100%",
+                  position: "relative",
+                }}
+              >
+                {/* Find floats over the message corner — never a layout row. */}
                 {findOpen && (
-                  <HStack
-                    gap={2}
-                    vAlign="center"
-                    style={{ paddingInline: 16, paddingTop: 8 }}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 16,
+                      zIndex: 20,
+                      width: 340,
+                      maxWidth: "calc(100% - 32px)",
+                    }}
                   >
-                    <TextInput
-                      label="Find in thread"
-                      isLabelHidden
-                      placeholder="Find in thread..."
-                      hasClear
-                      hasAutoFocus
-                      value={findQuery}
-                      onChange={(v) => {
-                        setFindQuery(v);
-                        setFindAt(0);
-                      }}
-                      onEnter={stepFind(1)}
-                    />
-                    <Text type="supporting" color="secondary">
-                      {findQuery.trim() === ""
-                        ? "Type to search"
-                        : findMatches.length === 0
-                          ? "No matches"
-                          : `${Math.min(findAt, findMatches.length - 1) + 1} of ${findMatches.length}`}
-                    </Text>
-                    <Button
-                      label="Previous match"
-                      variant="ghost"
-                      size="sm"
-                      isIconOnly
-                      icon={<Icon icon={ChevronUpIcon} size="md" />}
-                      onClick={stepFind(-1)}
-                    />
-                    <Button
-                      label="Next match"
-                      variant="ghost"
-                      size="sm"
-                      isIconOnly
-                      icon={<Icon icon={ChevronDownIcon} size="md" />}
-                      onClick={stepFind(1)}
-                    />
-                    <Button
-                      label="Close find"
-                      variant="ghost"
-                      size="sm"
-                      isIconOnly
-                      icon={<Icon icon={XMarkIcon} size="md" />}
-                      onClick={closeFind}
-                    />
-                  </HStack>
+                    <Card variant="muted" elevation="high" padding={2}>
+                      <VStack gap={1}>
+                        <HStack gap={1} vAlign="center">
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <TextInput
+                              label="Find in thread"
+                              isLabelHidden
+                              placeholder="Find in thread..."
+                              hasClear
+                              hasAutoFocus
+                              value={findQuery}
+                              onChange={(v) => {
+                                setFindQuery(v);
+                                setFindAt(0);
+                              }}
+                              onEnter={stepFind(1)}
+                            />
+                          </div>
+                          <Button
+                            label="Close find"
+                            variant="ghost"
+                            size="sm"
+                            isIconOnly
+                            icon={<Icon icon={XMarkIcon} size="md" />}
+                            onClick={closeFind}
+                          />
+                        </HStack>
+                        <HStack gap={1} vAlign="center">
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <Text type="supporting" color="secondary">
+                              {findQuery.trim() === ""
+                                ? "Type to search"
+                                : findMatches.length === 0
+                                  ? "No matches"
+                                  : `${Math.min(findAt, findMatches.length - 1) + 1} of ${findMatches.length}`}
+                            </Text>
+                          </div>
+                          <Button
+                            label="Previous match"
+                            variant="ghost"
+                            size="sm"
+                            isIconOnly
+                            icon={<Icon icon={ChevronUpIcon} size="md" />}
+                            onClick={stepFind(-1)}
+                          />
+                          <Button
+                            label="Next match"
+                            variant="ghost"
+                            size="sm"
+                            isIconOnly
+                            icon={<Icon icon={ChevronDownIcon} size="md" />}
+                            onClick={stepFind(1)}
+                          />
+                        </HStack>
+                      </VStack>
+                    </Card>
+                  </div>
                 )}
                 <ChatLayout
                   density="spacious"
@@ -1234,6 +1256,8 @@ export default function ThreadView({
                         </HStack>
                       )}
                       <ChatComposer
+                      value={composerText}
+                      onChange={setComposerText}
                       onSubmit={handleSend}
                       onStop={handleStop}
                       isStopShown={live != null}
@@ -1258,8 +1282,6 @@ export default function ThreadView({
                           handleRef={composerInputRef}
                           triggers={[threadReferenceTrigger]}
                           onFiles={stageIntoDrawer}
-                          value={composerText}
-                          onChange={setComposerText}
                         />
                       }
                       drawer={

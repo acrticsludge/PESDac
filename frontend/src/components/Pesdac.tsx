@@ -830,7 +830,7 @@ export default function ShellSideNav({
     const staged = attachments;
     setSelectedChat(null);
     setAttachments([]);
-    setWelcomeText("");
+    // Send clears the composer via ChatComposer's own onChange.
     revokeStaged(staged);
     setDraftCode(chat.code);
     setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
@@ -910,9 +910,6 @@ export default function ShellSideNav({
 
     input.insertText(prompt);
 
-    // Controlled composer: pull the editor mutation back into state.
-    setWelcomeText(input.getValue() ?? "");
-
     document.activeElement?.dispatchEvent(
       new Event("input", {
         bubbles: true,
@@ -938,9 +935,6 @@ export default function ShellSideNav({
       label: item.label,
       variant: "blue",
     });
-
-    // Controlled composer: pull the editor mutation back into state.
-    setWelcomeText(input.getValue() ?? "");
 
     document.activeElement?.dispatchEvent(
       new Event("input", {
@@ -1192,6 +1186,8 @@ export default function ShellSideNav({
                   {/* ======================================================== */}
 
                   <ChatComposer
+                    value={welcomeText}
+                    onChange={setWelcomeText}
                     onSubmit={handleWelcomeSend}
                     status={
                       !storageOk
@@ -1213,8 +1209,6 @@ export default function ShellSideNav({
                           triggers={[referenceTrigger]}
                           style={composerInput}
                           onFiles={stageIntoDrawer}
-                          value={welcomeText}
-                          onChange={setWelcomeText}
                         />
                       }
                     /* ------------------------------------------------------ */
