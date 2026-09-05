@@ -25,6 +25,7 @@ import {
 } from "../lib/attachments";
 import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
+import ProfileView from "./profile/ProfileView";
 import AttachButton from "./chat/AttachButton";
 import { getThread } from "../content/threads";
 import {
@@ -1160,25 +1161,8 @@ export default function ShellSideNav({
       >
         {(() => {
           // Profile view owns the content pane (sidebar untouched).
-          // Sections land in the next slice; this scaffold only proves
-          // the route + shell behavior.
           if (view === "profile") {
-            return (
-              <Layout
-                height="fill"
-                contentWidth={720}
-                content={
-                  <LayoutContent>
-                    <VStack gap={2} vAlign="center" style={pageStyle}>
-                      <Text type="supporting" color="secondary">
-                        My Profile opens here — sections land in the next
-                        slice.
-                      </Text>
-                    </VStack>
-                  </LayoutContent>
-                }
-              />
-            );
+            return <ProfileView key="profile" />;
           }
           const draftChat =
             draftCode != null
