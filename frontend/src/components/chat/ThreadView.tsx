@@ -271,7 +271,23 @@ export default function ThreadView({
   const handleSend = (value: string) => {
     const text = value.trim();
     if (!text || live) return;
+    // Day break: new messages on a later day than the last one get a
+    // "Today" divider first (mockup label; backend sends real dates).
+    let needsDayDivider = false;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b.from === "user" || b.from === "assistant") {
+        const t = new Date(b.time).getTime();
+        needsDayDivider =
+          Number.isNaN(t) ||
+          new Date(t).toDateString() !== new Date().toDateString();
+        break;
+      }
+    }
     appendBlocks(sessionKey, [
+      ...(needsDayDivider
+        ? [{ from: "system", text: "Today", variant: "divider" } as const]
+        : []),
       { from: "user", bubbles: [{ type: "text", text }], time: new Date().toISOString() },
     ]);
     const plan = planResponse(text, thread.subject, composerMode);
