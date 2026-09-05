@@ -630,12 +630,12 @@ export default function ThreadView({
                         sender="assistant"
                         avatar={<Avatar name="PESDac" size="md" />}
                       >
-                        <ChatToolCalls calls={live.tools} />
-                        <ChatMessageBubble variant="ghost">
-                          <Markdown density="compact">
-                            {live.text + "▍"}
-                          </Markdown>
-                        </ChatMessageBubble>
+                      <ChatMessageBubble variant="ghost">
+                        <Markdown density="compact">
+                          {live.text + "▍"}
+                        </Markdown>
+                      </ChatMessageBubble>
+                      <ChatToolCalls calls={live.tools} />
                       </ChatMessage>
                     )}
                   </ChatMessageList>
