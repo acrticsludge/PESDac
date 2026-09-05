@@ -143,8 +143,9 @@ delete-all clears and confirms, 360px + keyboard pass.
 ## Non-goals (v1)
 
 Auth, password/sessions, delete-account cascade, notifications, avatar
-upload, real legal documents, composer consuming stored prefs, mobile
-redesign of the shell, Playwright harness (tracked separately).
+upload, real legal documents, composer consuming stored prefs other than
+answer depth (see answer-depth spec), mobile redesign of the shell,
+Playwright harness (tracked separately).
 
 ## Success Criteria
 

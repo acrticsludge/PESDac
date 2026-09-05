@@ -392,8 +392,8 @@ function AssistantSection() {
         />
       </VStack>
       <Text type="supporting" color="secondary">
-        Stored, not wired: the composer keeps its current behavior until
-        the backend phase binds these.
+        Answer depth applies to new messages right away. Verbosity,
+        citations, and quiz difficulty bind in the backend phase.
       </Text>
     </VStack>
   );

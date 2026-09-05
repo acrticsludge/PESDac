@@ -96,6 +96,7 @@ import {
   useSessionVersion,
   useStorageHealth,
   useCorruptKeys,
+  getProfile,
   getOverlay,
   appendBlocks,
   removeLastOverlayBlock,
@@ -109,7 +110,7 @@ import {
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../../lib/session";
-import { planResponse } from "../../lib/responder";
+import { planResponse, type ResponseMode } from "../../lib/responder";
 
 /* -------------------------------------------------------------------------- */
 /*                     Thread artifact panel styling                           */
@@ -695,7 +696,15 @@ export default function ThreadView({
   sessionKey: string;
   autoSend?: string | { text: string; attachments?: Attachment[] };
 }) {
-  const [composerMode, setComposerMode] = useState<"ask" | "deep">(thread.mode);
+  // Answer depth (answer-depth spec): profile default wins over the seed
+  // voice; the toggle overrides per thread for the session. Seed
+  // thread.mode now describes authored content only.
+  const [composerMode, setComposerMode] = useState<ResponseMode>(() => {
+    const depth = getProfile().depth;
+    return depth === "ask" || depth === "deep" || depth === "auto"
+      ? depth
+      : "auto";
+  });
   const [isArtifactOpen, setIsArtifactOpen] = useState(thread.artifact != null);
   const [isArtifactDialogOpen, setIsArtifactDialogOpen] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
@@ -1542,9 +1551,9 @@ export default function ThreadView({
                               : undefined
                       }
                       placeholder={
-                        composerMode === "ask"
-                          ? thread.placeholder
-                          : "Ask for a deep, step-by-step explanation..."
+                        composerMode === "deep"
+                          ? "Ask for a deep, step-by-step explanation..."
+                          : thread.placeholder
                       }
                       input={
                         <ChatComposerInput
@@ -1635,7 +1644,11 @@ export default function ThreadView({
                         <DropdownMenu
                           button={{
                             label:
-                              composerMode === "ask" ? "Ask" : "Deep Study",
+                              composerMode === "ask"
+                                ? "Ask"
+                                : composerMode === "deep"
+                                  ? "Deep Study"
+                                  : "Auto",
                             variant: "ghost",
                             size: "sm",
                           }}
@@ -1643,6 +1656,10 @@ export default function ThreadView({
                             {
                               label: "Ask",
                               onClick: () => setComposerMode("ask"),
+                            },
+                            {
+                              label: "Auto",
+                              onClick: () => setComposerMode("auto"),
                             },
                             {
                               label: "Deep Study",
