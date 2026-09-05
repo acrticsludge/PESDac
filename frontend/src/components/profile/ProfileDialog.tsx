@@ -175,7 +175,9 @@ export default function ProfileDialog({
     <Dialog
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      width={920}
+      // Relative, like the template's 1120: room to fit on desktop,
+      // shrink-to-viewport on small screens — no viewport overflow.
+      width="min(1120px, calc(100vw - 2rem))"
       maxHeight="80dvh"
     >
       <Layout
@@ -188,11 +190,10 @@ export default function ProfileDialog({
         }
         start={
           isNarrow ? undefined : (
-            // 260px: SideNav's own natural width (it sets a starting width
-            // with no flex-shrink). Anything narrower clips the rail and
-            // buys a horizontal scrollbar — as seen. Template uses the
-            // same 260px rail.
-            <LayoutPanel width={260} role="navigation">
+            // 260px = SideNav's natural width, padding={0} because the
+            // panel is border-box: default 16px padding would leave a
+            // 228px content box and clip the rail with a scrollbar.
+            <LayoutPanel width={260} padding={0} role="navigation">
               <SideNav
                 topContent={searchBox}
               >
