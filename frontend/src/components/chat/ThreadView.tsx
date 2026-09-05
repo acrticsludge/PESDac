@@ -50,11 +50,13 @@ import { useResizable, ResizeHandle } from "@astryxdesign/core/Resizable";
 import {
   DocumentTextIcon,
   ClipboardDocumentIcon,
+  CheckIcon,
   ShareIcon,
   XMarkIcon,
   ChevronRightIcon,
   AtSymbolIcon,
   ArrowPathIcon,
+  EllipsisHorizontalIcon,
 } from "@heroicons/react/24/outline";
 
 import type {
@@ -151,7 +153,13 @@ function StudyNoteBody({ artifact }: { artifact: Artifact }) {
   );
 }
 
-function StudyNoteActions({ onClose }: { onClose?: () => void }) {
+function StudyNoteActions({
+  onCopy,
+  onClose,
+}: {
+  onCopy?: () => void;
+  onClose?: () => void;
+}) {
   return (
     <>
       <Button
@@ -160,6 +168,7 @@ function StudyNoteActions({ onClose }: { onClose?: () => void }) {
         size="sm"
         icon={<Icon icon={ClipboardDocumentIcon} size="sm" />}
         isIconOnly
+        onClick={onCopy}
       />
       <Button
         label="Share"
@@ -260,6 +269,122 @@ function lastUserText(blocks: Block[]): string {
   return "";
 }
 
+// Best-effort clipboard copy (falls back to execCommand where the async
+// API is unavailable); resolves false when nothing worked.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+// Ghost icon button with brief "copied" feedback.
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timer.current != null) window.clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  return (
+    <Button
+      label={copied ? "Copied" : label}
+      variant="ghost"
+      size="sm"
+      isIconOnly
+      icon={<Icon icon={copied ? CheckIcon : ClipboardDocumentIcon} size="sm" />}
+      onClick={() => {
+        void copyText(text).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          if (timer.current != null) window.clearTimeout(timer.current);
+          timer.current = window.setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    />
+  );
+}
+
+// Assistant turn as copyable markdown (code stays fenced, media degrades
+// to a labelled placeholder line).
+function assistantBlockText(block: AssistantBlock): string {
+  return block.bubbles
+    .map((b) => {
+      switch (b.type) {
+        case "markdown":
+        case "quiz":
+          return b.md;
+        case "text":
+          return b.text;
+        case "mention":
+          return b.text;
+        case "code":
+          return `\`\`\`${b.language}\n${b.code}\n\`\`\``;
+        case "image":
+          return `[image: ${b.alt}]`;
+        case "pdf":
+          return `[PDF: ${b.title}]`;
+        case "artifactCard":
+          return "";
+        default:
+          return "";
+      }
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+// Whole conversation as markdown (for the Copy transcript action).
+function buildTranscript(thread: Thread, blocks: Block[]): string {
+  const lines = [`# ${thread.label} (${thread.subject})`, ""];
+  for (const b of blocks) {
+    if (b.from === "system") {
+      lines.push(`--- ${b.text} ---`, "");
+    } else if (b.from === "user") {
+      const atts = (b.attachments ?? []).map((a) => a.name);
+      lines.push(`**You:** ${userBlockText(b)}`);
+      if (atts.length > 0) lines.push(`_Attached: ${atts.join(", ")}_`);
+      lines.push("");
+    } else {
+      const text = assistantBlockText(b);
+      if (text) lines.push(text);
+      if (b.toolCalls && b.toolCalls.length > 0) {
+        const sources = b.toolCalls
+          .map((t) => `${t.target}${t.duration ? ` (${t.duration})` : ""}`)
+          .join("; ");
+        lines.push(`_Sources: ${sources}_`);
+      }
+      if (b.error) {
+        lines.push(
+          b.error.kind === "empty"
+            ? "_PESDac returned an empty response._"
+            : "_Response interrupted before it finished._",
+        );
+      }
+      lines.push("");
+    }
+  }
+  return lines.join("\n").trim();
+}
+
 export default function ThreadView({
   thread,
   sessionKey,
@@ -288,6 +413,8 @@ export default function ThreadView({
   // Staged uploads (metadata persists with the sent message; File handles
   // and preview URLs stay in memory until send/remove).
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
+  // Copy-transcript menu feedback.
+  const [transcriptCopied, setTranscriptCopied] = useState(false);
 
   // Session overlay: blocks appended this session (persisted per code).
   useSessionVersion();
@@ -538,6 +665,15 @@ export default function ThreadView({
     );
   };
 
+  // Transcript export (markdown to clipboard; share links are backend's).
+  const copyTranscript = () => {
+    void copyText(buildTranscript(thread, blocks)).then((ok) => {
+      if (!ok) return;
+      setTranscriptCopied(true);
+      later(1500, () => setTranscriptCopied(false));
+    });
+  };
+
   const removeStaged = (id: string) => {
     const target = attachments.find((s) => s.att.id === id);
     if (target) revokeStaged([target]);
@@ -756,11 +892,17 @@ export default function ThreadView({
         <ChatMessageMetadata
           timestamp={<Timestamp value={block.time} format="time" />}
           footer={
-            block.footer ? (
-              <Text type="supporting" color="secondary">
-                {block.footer}
-              </Text>
-            ) : undefined
+            <HStack gap={1} vAlign="center">
+              {block.footer ? (
+                <Text type="supporting" color="secondary">
+                  {block.footer}
+                </Text>
+              ) : null}
+              <CopyButton
+                text={assistantBlockText(block)}
+                label="Copy response"
+              />
+            </HStack>
           }
         />
       </ChatMessage>
@@ -882,22 +1024,45 @@ export default function ThreadView({
                         ) : undefined
                       }
                       headerActions={
-                        <DropdownMenu
-                          button={{
-                            label: "Reference",
-                            variant: "ghost",
-                            size: "sm",
-                            icon: <Icon icon={AtSymbolIcon} size="sm" />,
-                            isIconOnly: true,
-                          }}
-                          hasChevron={false}
-                          menuWidth={240}
-                          items={thread.composerReferenceItems.map((item) => ({
-                            label: item.label,
-                            description: item.description,
-                            onClick: () => insertReference(item.label),
-                          }))}
-                        />
+                        <>
+                          <DropdownMenu
+                            button={{
+                              label: "Reference",
+                              variant: "ghost",
+                              size: "sm",
+                              icon: <Icon icon={AtSymbolIcon} size="sm" />,
+                              isIconOnly: true,
+                            }}
+                            hasChevron={false}
+                            menuWidth={240}
+                            items={thread.composerReferenceItems.map((item) => ({
+                              label: item.label,
+                              description: item.description,
+                              onClick: () => insertReference(item.label),
+                            }))}
+                          />
+                          <DropdownMenu
+                            button={{
+                              label: "Conversation actions",
+                              variant: "ghost",
+                              size: "sm",
+                              icon: (
+                                <Icon icon={EllipsisHorizontalIcon} size="sm" />
+                              ),
+                              isIconOnly: true,
+                            }}
+                            hasChevron={false}
+                            menuWidth={240}
+                            items={[
+                              {
+                                label: transcriptCopied
+                                  ? "Copied!"
+                                  : "Copy transcript",
+                                onClick: copyTranscript,
+                              },
+                            ]}
+                          />
+                        </>
                       }
                       footerActions={
                         <DropdownMenu
@@ -1004,6 +1169,10 @@ export default function ThreadView({
                       }
                       endContent={
                         <StudyNoteActions
+                          onCopy={() => {
+                            if (thread.artifact)
+                              void copyText(thread.artifact.markdown);
+                          }}
                           onClose={() => setIsArtifactOpen(false)}
                         />
                       }
