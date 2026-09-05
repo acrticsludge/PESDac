@@ -355,3 +355,20 @@ export function setFeedback(voteKey: string, vote: FeedbackVote | null) {
   writeJSON(FEEDBACK_KEY, all);
   emit();
 }
+
+// Unsent composer drafts (thread sessionKey, welcome uses "welcome").
+// Local component state reads/writes these; no emit, so another tab never
+// clobbers what you're typing.
+
+const DRAFTS_KEY = "pesdac-drafts-v1";
+
+export function readDraft(draftKey: string): string {
+  return readJSON<Record<string, string>>(DRAFTS_KEY, {})[draftKey] ?? "";
+}
+
+export function writeDraft(draftKey: string, text: string) {
+  const all = readJSON<Record<string, string>>(DRAFTS_KEY, {});
+  if (text) all[draftKey] = text;
+  else delete all[draftKey];
+  writeJSON(DRAFTS_KEY, all);
+}

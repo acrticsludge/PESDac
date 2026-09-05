@@ -92,6 +92,8 @@ import {
   appendBlocks,
   removeLastOverlayBlock,
   truncateOverlay,
+  readDraft,
+  writeDraft,
   getFeedback,
   setFeedback,
   feedbackKey,
@@ -577,7 +579,13 @@ export default function ThreadView({
   // the turn, Esc cancels. Session-added user turns only.
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   // Controlled composer text (draft persistence + edit prefill).
-  const [composerText, setComposerText] = useState("");
+  const [composerText, setComposerText] = useState(() => readDraft(sessionKey));
+
+  // Unsent text survives reloads (debounced; send clears it via handleSend).
+  useEffect(() => {
+    const t = window.setTimeout(() => writeDraft(sessionKey, composerText), 400);
+    return () => window.clearTimeout(t);
+  }, [composerText, sessionKey]);
   const timers = useRef<number[]>([]);
 
   useEffect(

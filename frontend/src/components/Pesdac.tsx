@@ -43,6 +43,8 @@ import {
   unarchiveChat,
   listArchived,
   type ChatRef,
+  readDraft,
+  writeDraft,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../lib/session";
@@ -649,6 +651,14 @@ export default function ShellSideNav({
 
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
 
+  // Unsent welcome text survives reloads (debounced; send clears it).
+  const [welcomeText, setWelcomeText] = useState(() => readDraft("welcome"));
+
+  useEffect(() => {
+    const t = window.setTimeout(() => writeDraft("welcome", welcomeText), 400);
+    return () => window.clearTimeout(t);
+  }, [welcomeText]);
+
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
 
   const composerInputRef = useRef<ChatComposerInputHandle>(null);
@@ -820,6 +830,7 @@ export default function ShellSideNav({
     const staged = attachments;
     setSelectedChat(null);
     setAttachments([]);
+    setWelcomeText("");
     revokeStaged(staged);
     setDraftCode(chat.code);
     setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
@@ -899,6 +910,9 @@ export default function ShellSideNav({
 
     input.insertText(prompt);
 
+    // Controlled composer: pull the editor mutation back into state.
+    setWelcomeText(input.getValue() ?? "");
+
     document.activeElement?.dispatchEvent(
       new Event("input", {
         bubbles: true,
@@ -924,6 +938,9 @@ export default function ShellSideNav({
       label: item.label,
       variant: "blue",
     });
+
+    // Controlled composer: pull the editor mutation back into state.
+    setWelcomeText(input.getValue() ?? "");
 
     document.activeElement?.dispatchEvent(
       new Event("input", {
@@ -1196,6 +1213,8 @@ export default function ShellSideNav({
                           triggers={[referenceTrigger]}
                           style={composerInput}
                           onFiles={stageIntoDrawer}
+                          value={welcomeText}
+                          onChange={setWelcomeText}
                         />
                       }
                     /* ------------------------------------------------------ */
