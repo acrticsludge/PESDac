@@ -20,7 +20,12 @@ and "Search conversations" is a dead nav item.
   anchor, and without isolation every menu click navigates away.
   (2026-09-04 fix: moved to the dedicated `actions` slot instead —
   `endContent` nests inside the anchor; `actions` renders as a sibling
-  per the Astryx contract. Hover-reveal behavior unchanged.)
+  per the Astryx contract. Hover-reveal behavior unchanged. Tracer
+  verified: menu opens, item clicks fire; demo items stay dead by design.)
+- Dev env note (2026-09-04): `@astrojs/react` pulled Vite 8 while Astro 6
+  needs Vite 7, breaking island transforms in dev. Pinned via
+  `"overrides": { "vite": "^7" }` in `frontend/package.json`. After any
+  dep change, restart dev fully (HMR alone may stay wedged).
 - Rename UI: `Dialog` + controlled `TextInput` (auto-focus, Enter saves,
   prefilled with current title) owned by `ShellSideNav`
   (`renaming: CustomChat | null`).

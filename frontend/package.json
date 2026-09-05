@@ -24,6 +24,9 @@
   "allowScripts": {
     "esbuild": true
   },
+  "overrides": {
+    "vite": "^7"
+  },
   "devDependencies": {
     "@astryxdesign/cli": "^0.5.2"
   }
