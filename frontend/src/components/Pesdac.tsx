@@ -784,6 +784,7 @@ export default function ShellSideNav({
     const subject = category ?? (mode && mode !== "auto" ? mode : "CN");
     const chat = createCustomChat(subject, text);
     setSelectedChat(null);
+    setAttachments([]);
     setDraftCode(chat.code);
     setDraftAutoSend(text);
   };

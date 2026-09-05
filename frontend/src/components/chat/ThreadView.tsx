@@ -258,7 +258,13 @@ export default function ThreadView({
         {
           from: "assistant",
           bubbles: [{ type: "markdown", md: trimmed }],
-          toolCalls: tools,
+          // A stop during the tool-running phase must not persist
+          // perpetually-"running" chips — settle them as complete.
+          toolCalls: tools.map((t) =>
+            t.status === "running"
+              ? { ...t, status: "complete" as const, duration: t.duration || "stopped" }
+              : t,
+          ),
           followUps,
           time: new Date().toISOString(),
           footer: `PESDac · ${thread.subject}`,
@@ -604,7 +610,7 @@ export default function ThreadView({
                     </VStack>
                   }
                 >
-                  <ChatMessageList>
+                  <ChatMessageList isStreaming={live != null}>
                     {blocks.map((block, i) => {
                       if (block.from === "system") {
                         return (
