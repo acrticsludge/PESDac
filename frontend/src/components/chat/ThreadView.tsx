@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import {
   Layout,
@@ -19,6 +19,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { Markdown } from "@astryxdesign/core/Markdown";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Button } from "@astryxdesign/core/Button";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { Avatar } from "@astryxdesign/core/Avatar";
@@ -61,6 +62,9 @@ import {
   PencilIcon,
   HandThumbUpIcon,
   HandThumbDownIcon,
+  MagnifyingGlassIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
 } from "@heroicons/react/24/outline";
 
 import type {
@@ -282,6 +286,20 @@ function lastUserText(blocks: Block[]): string {
   return "";
 }
 
+// Searchable text per block for in-thread find.
+function blockCorpusText(block: Block): string {
+  if (block.from === "user") return userBlockText(block);
+  if (block.from === "assistant") return assistantBlockText(block);
+  return block.text;
+}
+
+// Current find hit: accent outline on an otherwise unstyled wrapper.
+const FIND_HIT_STYLE: CSSProperties = {
+  outline: "2px solid var(--color-accent)",
+  outlineOffset: 2,
+  borderRadius: 8,
+};
+
 // Best-effort clipboard copy (falls back to execCommand where the async
 // API is unavailable); resolves false when nothing worked.
 async function copyText(text: string): Promise<boolean> {
@@ -498,6 +516,48 @@ export default function ThreadView({
     }
     return null;
   })();
+
+  // In-thread find: substring match over the block corpus, current hit
+  // scrolled into view with an accent outline.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findAt, setFindAt] = useState(0);
+  const findMatches =
+    findQuery.trim() === ""
+      ? []
+      : blocks
+          .map((b, i) => ({
+            i,
+            hit: blockCorpusText(b)
+              .toLowerCase()
+              .includes(findQuery.trim().toLowerCase()),
+          }))
+          .filter((m) => m.hit)
+          .map((m) => m.i);
+  const currentMatch =
+    findMatches.length === 0
+      ? -1
+      : findMatches[Math.min(findAt, findMatches.length - 1)];
+
+  useEffect(() => {
+    if (!findOpen || currentMatch < 0) return;
+    rootRef.current
+      ?.querySelector(`[data-block="${currentMatch}"]`)
+      ?.scrollIntoView({ block: "center" });
+  });
+
+  const stepFind = (dir: 1 | -1) => () => {
+    if (findMatches.length === 0) return;
+    setFindAt((a) => (a + dir + findMatches.length) % findMatches.length);
+  };
+
+  const openFind = () => {
+    setFindQuery("");
+    setFindAt(0);
+    setFindOpen(true);
+  };
+
+  const closeFind = () => setFindOpen(false);
 
   // Live turn: simulated assistant response (streaming state, not persisted
   // until complete — backend will replace planResponse with SSE).
@@ -801,6 +861,7 @@ export default function ThreadView({
     const onCancel = () => {
       if (live) handleStop();
       else if (editingIndex != null) cancelEdit();
+      else if (findOpen) closeFind();
     };
     const onFocus = () => composerInputRef.current?.focus();
     window.addEventListener(CANCEL_EVENT, onCancel);
@@ -921,6 +982,18 @@ export default function ThreadView({
       }
     }
   };
+
+  // Find wrapper: unstyled div carrying the scroll anchor; only the
+  // current hit gets the accent outline.
+  const findRow = (i: number, row: ReactNode) => (
+    <div
+      key={i}
+      data-block={i}
+      style={i === currentMatch ? FIND_HIT_STYLE : undefined}
+    >
+      {row}
+    </div>
+  );
 
   const renderUserBlock = (block: UserBlock, key: number) => (
     <ChatMessage key={key} sender="user">
@@ -1079,6 +1152,58 @@ export default function ThreadView({
           <LayoutContent padding={0}>
             <HStack height="100%">
               <VStack style={{ flex: 1, minWidth: 0, height: "100%" }}>
+                {findOpen && (
+                  <HStack
+                    gap={2}
+                    vAlign="center"
+                    style={{ paddingInline: 16, paddingTop: 8 }}
+                  >
+                    <TextInput
+                      label="Find in thread"
+                      isLabelHidden
+                      placeholder="Find in thread..."
+                      hasClear
+                      hasAutoFocus
+                      value={findQuery}
+                      onChange={(v) => {
+                        setFindQuery(v);
+                        setFindAt(0);
+                      }}
+                      onEnter={stepFind(1)}
+                    />
+                    <Text type="supporting" color="secondary">
+                      {findQuery.trim() === ""
+                        ? "Type to search"
+                        : findMatches.length === 0
+                          ? "No matches"
+                          : `${Math.min(findAt, findMatches.length - 1) + 1} of ${findMatches.length}`}
+                    </Text>
+                    <Button
+                      label="Previous match"
+                      variant="ghost"
+                      size="sm"
+                      isIconOnly
+                      icon={<Icon icon={ChevronUpIcon} size="md" />}
+                      onClick={stepFind(-1)}
+                    />
+                    <Button
+                      label="Next match"
+                      variant="ghost"
+                      size="sm"
+                      isIconOnly
+                      icon={<Icon icon={ChevronDownIcon} size="md" />}
+                      onClick={stepFind(1)}
+                    />
+                    <Button
+                      label="Close find"
+                      variant="ghost"
+                      size="sm"
+                      isIconOnly
+                      icon={<Icon icon={XMarkIcon} size="md" />}
+                      onClick={closeFind}
+                    />
+                  </HStack>
+                )}
                 <ChatLayout
                   density="spacious"
                   style={{ flex: 1, minHeight: 0 }}
@@ -1157,6 +1282,16 @@ export default function ThreadView({
                       }
                       headerActions={
                         <>
+                          <Button
+                            label="Find in thread"
+                            variant="ghost"
+                            size="sm"
+                            isIconOnly
+                            icon={
+                              <Icon icon={MagnifyingGlassIcon} size="sm" />
+                            }
+                            onClick={openFind}
+                          />
                           <AttachButton onFiles={stageIntoDrawer} />
                           <DropdownMenu
                             button={{
@@ -1227,7 +1362,8 @@ export default function ThreadView({
                   <ChatMessageList isStreaming={live != null}>
                     {blocks.map((block, i) => {
                       if (block.from === "system") {
-                        return (
+                        return findRow(
+                          i,
                           <ChatSystemMessage
                             key={i}
                             variant={
@@ -1237,16 +1373,19 @@ export default function ThreadView({
                             }
                           >
                             {block.text}
-                          </ChatSystemMessage>
+                          </ChatSystemMessage>,
                         );
                       }
                       if (block.from === "user") {
-                        return renderUserBlock(block, i);
+                        return findRow(i, renderUserBlock(block, i));
                       }
-                      return renderAssistantBlock(
-                        block,
+                      return findRow(
                         i,
-                        isLastSessionTurn(i),
+                        renderAssistantBlock(
+                          block,
+                          i,
+                          isLastSessionTurn(i),
+                        ),
                       );
                     })}
                     {live && (
