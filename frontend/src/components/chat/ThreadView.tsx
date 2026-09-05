@@ -128,6 +128,11 @@ const THREAD_CSS = `
     display: none;
   }
 }
+/* In-thread find: matching text lights up like a browser find. */
+::highlight(pesdac-find) {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
 `;
 
 function StudyNoteCard({
@@ -295,12 +300,8 @@ function blockCorpusText(block: Block): string {
   return block.text;
 }
 
-// Current find hit: accent outline on an otherwise unstyled wrapper.
-const FIND_HIT_STYLE: CSSProperties = {
-  outline: "2px solid var(--color-accent)",
-  outlineOffset: 2,
-  borderRadius: 8,
-};
+// Custom-highlight name for in-thread find matches.
+const FIND_HIGHLIGHT = "pesdac-find";
 
 // Best-effort clipboard copy (falls back to execCommand where the async
 // API is unavailable); resolves false when nothing worked.
@@ -343,9 +344,8 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       variant="ghost"
       size="sm"
       isIconOnly
-      // md icon: Heroicons outline is drawn on a 24px grid, so 20px renders
-      // markedly crisper than 16px (sm) for these small action buttons.
-      icon={<Icon icon={copied ? CheckIcon : ClipboardDocumentIcon} size="md" />}
+      // sm icon to match the supporting-size timestamp beside it.
+      icon={<Icon icon={copied ? CheckIcon : ClipboardDocumentIcon} size="sm" />}
       onClick={() => {
         void copyText(text).then((ok) => {
           if (!ok) return;
@@ -378,7 +378,7 @@ function VoteButtons({ voteKey }: { voteKey: string }) {
       icon={
         <Icon
           icon={icon}
-          size="md"
+          size="sm"
           color={vote === v ? "accent" : undefined}
         />
       }
@@ -430,8 +430,8 @@ function RegenerateButton({ onRegenerate }: { onRegenerate: () => void }) {
       variant="ghost"
       size="sm"
       isIconOnly
-      // md icon — see CopyButton note on Heroicons crispness.
-      icon={<Icon icon={ArrowPathIcon} size="md" />}
+      // sm icon to match the supporting-size timestamp beside it.
+      icon={<Icon icon={ArrowPathIcon} size="sm" />}
       onClick={onRegenerate}
     />
   );
@@ -541,11 +541,57 @@ export default function ThreadView({
       ? -1
       : findMatches[Math.min(findAt, findMatches.length - 1)];
 
+  // Matching text lights up via the CSS Custom Highlight API — no
+  // React-tree surgery inside Astryx Markdown. data-block anchors are
+  // scroll targets only. Unsupported browsers still scroll, unhighlighted.
   useEffect(() => {
-    if (!findOpen || currentMatch < 0) return;
-    rootRef.current
-      ?.querySelector(`[data-block="${currentMatch}"]`)
-      ?.scrollIntoView({ block: "center" });
+    const registry =
+      typeof CSS !== "undefined" && "highlights" in CSS
+        ? (
+            CSS as unknown as {
+              highlights: {
+                set(n: string, h: unknown): void;
+                delete(n: string): void;
+              };
+            }
+          ).highlights
+        : null;
+    const HighlightCtor = (
+      globalThis as unknown as {
+        Highlight?: new (...r: Range[]) => unknown;
+      }
+    ).Highlight;
+    registry?.delete(FIND_HIGHLIGHT);
+    if (!findOpen || currentMatch < 0 || !registry || !HighlightCtor)
+      return;
+    const el = rootRef.current?.querySelector(
+      `[data-block="${currentMatch}"]`,
+    );
+    el?.scrollIntoView({ block: "center" });
+    const q = findQuery.trim().toLowerCase();
+    if (!el || !q) return;
+    const ranges: Range[] = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const text = (node.textContent ?? "").toLowerCase();
+      let from = 0;
+      for (;;) {
+        const at = text.indexOf(q, from);
+        if (at < 0) break;
+        const r = document.createRange();
+        r.setStart(node, at);
+        r.setEnd(node, at + q.length);
+        ranges.push(r);
+        from = at + q.length;
+      }
+      node = walker.nextNode();
+    }
+    if (ranges.length > 0)
+      registry.set(FIND_HIGHLIGHT, new HighlightCtor(...ranges));
+    return () => {
+      registry.delete(FIND_HIGHLIGHT);
+    };
   });
 
   const stepFind = (dir: 1 | -1) => () => {
@@ -988,14 +1034,10 @@ export default function ThreadView({
     }
   };
 
-  // Find wrapper: unstyled div carrying the scroll anchor; only the
-  // current hit gets the accent outline.
+  // Find wrapper: unstyled div carrying the scroll anchor only. The
+  // matching *text* is highlighted by the effect below, not the row.
   const findRow = (i: number, row: ReactNode) => (
-    <div
-      key={i}
-      data-block={i}
-      style={i === currentMatch ? FIND_HIT_STYLE : undefined}
-    >
+    <div key={i} data-block={i}>
       {row}
     </div>
   );
@@ -1041,7 +1083,7 @@ export default function ThreadView({
                         variant="ghost"
                         size="sm"
                         isIconOnly
-                        icon={<Icon icon={PencilIcon} size="md" />}
+                        icon={<Icon icon={PencilIcon} size="sm" />}
                         onClick={() => startEdit(key)}
                       />
                     ) : undefined
@@ -1218,7 +1260,7 @@ export default function ThreadView({
                             variant="ghost"
                             size="sm"
                             isIconOnly
-                            icon={<Icon icon={ChevronUpIcon} size="md" />}
+                            icon={<Icon icon={ChevronUpIcon} size="sm" />}
                             onClick={stepFind(-1)}
                           />
                           <Button
@@ -1226,7 +1268,7 @@ export default function ThreadView({
                             variant="ghost"
                             size="sm"
                             isIconOnly
-                            icon={<Icon icon={ChevronDownIcon} size="md" />}
+                            icon={<Icon icon={ChevronDownIcon} size="sm" />}
                             onClick={stepFind(1)}
                           />
                         </HStack>
@@ -1250,7 +1292,7 @@ export default function ThreadView({
                             variant="ghost"
                             size="sm"
                             isIconOnly
-                            icon={<Icon icon={XMarkIcon} size="md" />}
+                            icon={<Icon icon={XMarkIcon} size="sm" />}
                             onClick={cancelEdit}
                           />
                         </HStack>
