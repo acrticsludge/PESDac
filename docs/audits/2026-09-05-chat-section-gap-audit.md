@@ -129,7 +129,9 @@ failure branch, `finalizeTurn` always succeeds, no `status` is ever set.
     paint and on every chat switch/refresh — strictly worse than the
     theoretical hydration warning. Direct reads stay; React patches the
     SSR mismatch invisibly, and no hydration issue has ever been observed
-    (only the benign #418 autofill warning).
+    (only the benign #418 autofill warning). Update: chat swaps no longer
+    remount at all — the shell island is `transition:persist`ed behind
+    `<ClientRouter />` and only re-syncs route state from new props.
 3. **Multi-tab divergence.** Store listeners are in-memory only; no
    `storage` event handling. Two tabs silently fork. Cheap fix, low
    priority.

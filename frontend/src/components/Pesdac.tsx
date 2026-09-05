@@ -1,6 +1,8 @@
 "use client";
 
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+
+import { navigate } from "astro:transitions/client";
 
 import { Theme } from "@astryxdesign/core/theme";
 import { PESDacMockupTheme } from "../theme/PESDacMockupTheme";
@@ -621,6 +623,28 @@ export default function ShellSideNav({
 
   const [category, setCategory] = useState<string | null>(initialSubjectValue);
 
+  // Persisted shell (transition:persist): chat swaps arrive as new props,
+  // not remounts, so the sidebar (pins, customs, archives, scroll) stays
+  // exactly as-is. Only route-derived state re-syncs; ThreadView remounts
+  // via its key below, which cancels any in-flight stream on its own.
+  useEffect(() => {
+    const chat =
+      initialCode != null ? getChatByCode(initialCode) : null;
+    const subject =
+      chat?.subject ?? (isSubject(initialSubject) ? initialSubject : null);
+    setSelectedChat(chat?.label ?? null);
+    setDraftCode(null);
+    setDraftAutoSend(null);
+    setCategory(subject);
+    setMode(subject ?? "auto");
+    setAttachments([]);
+    setRenameTarget(null);
+    setDeleteTarget(null);
+    setIsSearchOpen(false);
+    setSearchQuery("");
+    setIsModeMenuOpen(false);
+  }, [initialSubject, initialCode]);
+
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
 
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
@@ -662,7 +686,9 @@ export default function ShellSideNav({
     } else if (deleteTarget) {
       archiveChat({ kind: "demo", id: deleteTarget.id });
       if (selectedChat === deleteTarget.id) {
-        window.location.href = "/new";
+        // Client-side transition: the persisted shell re-syncs from the
+        // new page's props, so the sidebar never rebuilds.
+        navigate("/new");
       }
     }
     setDeleteTarget(null);
@@ -698,7 +724,7 @@ export default function ShellSideNav({
       setDraftAutoSend(null);
     }
     if (ref.kind === "demo" && selectedChat === ref.id) {
-      window.location.href = "/new";
+      navigate("/new");
     }
   };
 
@@ -765,7 +791,7 @@ export default function ShellSideNav({
     setDraftCode(null);
     const subject = getChatSubject(label);
     const chatCode = getChatCode(label);
-    window.location.href = buildChatPath(subject, chatCode);
+    navigate(buildChatPath(subject, chatCode));
   };
 
   const startNewChat = () => {
@@ -777,7 +803,7 @@ export default function ShellSideNav({
       window.location.pathname !== "/new" &&
       window.location.pathname !== "/"
     ) {
-      window.location.href = "/new";
+      navigate("/new");
     }
   };
 
@@ -1063,6 +1089,9 @@ export default function ShellSideNav({
             (selectedChat != null ? getChatCode(selectedChat) : "home");
           return thread ? (
             <ThreadView
+              // Thread swaps remount the view (fresh scroll, cancelled
+              // streams) while the persisted sidebar stays untouched.
+              key={key}
               thread={thread}
               sessionKey={key}
               autoSend={draftThread ? (draftAutoSend ?? undefined) : undefined}
