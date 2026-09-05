@@ -22,6 +22,15 @@ function emit() {
   listeners.forEach((fn) => fn());
 }
 
+// Multi-tab sync: `storage` fires only in *other* tabs — exactly the fork
+// case. Any pesdac-* write re-renders this tab's subscribers, which re-read
+// from localStorage. Module scope: app lifetime, no cleanup.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key != null && e.key.startsWith("pesdac-")) emit();
+  });
+}
+
 // Global shortcut bus (see chat-power spec §3): Pesdac owns the keydown
 // listener; ThreadView and the welcome composer subscribe.
 export const CANCEL_EVENT = "pesdac:cancel";
