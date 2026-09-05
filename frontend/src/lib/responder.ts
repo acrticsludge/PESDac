@@ -56,6 +56,34 @@ export function planResponse(
     };
   }
 
+  if (/\bsimulate (a )?tool error\b/i.test(question)) {
+    return {
+      toolCalls: [
+        {
+          name: "retrieve",
+          target: primary,
+          status: "complete",
+          duration: "36ms",
+        },
+        {
+          name: "search",
+          target: `${subject} textbook`,
+          status: "error",
+          duration: "",
+          errorMessage: "Search timed out after 8s",
+        },
+      ],
+      answer: `**Short answer:** ${short} comes down to the core ${subject} definition in your slides — nail that first, then apply it directly.
+
+**Note:** the textbook search failed this time, so this is answered from ${primary} only. Retry the question if you want both sources checked.`,
+      followUps: [
+        "Walk me through it step by step",
+        "Give me a worked example",
+        "Quiz me on this",
+      ],
+    };
+  }
+
   if (/\bsimulate (an )?error\b/i.test(question)) {
     return {
       toolCalls: [

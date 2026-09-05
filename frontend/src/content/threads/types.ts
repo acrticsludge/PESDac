@@ -6,8 +6,10 @@ export type ToolCallName = "retrieve" | "search" | "generate";
 export type ToolCall = {
   name: ToolCallName;
   target: string;
-  status: "running" | "complete";
+  // "error" renders Astryx's failed row (tooltip + icon) natively.
+  status: "running" | "complete" | "error";
   duration: string;
+  errorMessage?: string;
 };
 
 export type Attachment = {
