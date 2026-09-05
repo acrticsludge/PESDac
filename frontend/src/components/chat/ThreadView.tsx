@@ -14,6 +14,7 @@ import { Token } from "@astryxdesign/core/Token";
 import { Thumbnail } from "@astryxdesign/core/Thumbnail";
 import { Lightbox } from "@astryxdesign/core/Lightbox";
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Card } from "@astryxdesign/core/Card";
 import { Section } from "@astryxdesign/core/Section";
 import { Markdown } from "@astryxdesign/core/Markdown";
@@ -174,15 +175,21 @@ function StudyNoteCard({
 
 // Interactive multiple-choice quiz (answers live in content, so checking
 // is client-side). Wrong picks can be retried by tapping another option.
+const MCQ_LETTERS = ["A", "B", "C", "D", "E", "F"];
 function McqCard({ bubble }: { bubble: McqBubble }) {
   const [picked, setPicked] = useState<number | null>(null);
   const correct = picked != null && picked === bubble.answerIndex;
   return (
-    <Card variant="muted" padding={3} width="100%" maxWidth={560}>
-      <VStack gap={3}>
-        <Text type="label" weight="semibold">
-          {bubble.question}
-        </Text>
+    <Card variant="muted" padding={5} width="100%" maxWidth={560}>
+      <VStack gap={4}>
+        <VStack gap={1}>
+          <Text type="supporting" color="secondary">
+            Quiz — choose the best answer
+          </Text>
+          <Text type="body" size="lg" weight="semibold">
+            {bubble.question}
+          </Text>
+        </VStack>
         <VStack gap={2}>
           {bubble.options.map((option, i) => {
             const isAnswer = i === bubble.answerIndex;
@@ -190,7 +197,7 @@ function McqCard({ bubble }: { bubble: McqBubble }) {
             return (
               <Button
                 key={i}
-                label={`Option ${i + 1}: ${option.label}`}
+                label={`Option ${MCQ_LETTERS[i] ?? i + 1}: ${option.label}`}
                 variant={
                   picked == null
                     ? "secondary"
@@ -200,19 +207,29 @@ function McqCard({ bubble }: { bubble: McqBubble }) {
                         ? "destructive"
                         : "secondary"
                 }
+                size="lg"
                 width="100%"
                 onClick={() => setPicked(i)}
               >
-                {option.detail
-                  ? `${option.label} — ${option.detail}`
-                  : option.label}
+                <HStack gap={2} vAlign="center" width="100%">
+                  <Avatar
+                    name={MCQ_LETTERS[i] ?? String(i + 1)}
+                    size="sm"
+                    shape="circle"
+                  />
+                  <span style={{ textAlign: "start", flex: 1 }}>
+                    {option.detail
+                      ? `${option.label} — ${option.detail}`
+                      : option.label}
+                  </span>
+                </HStack>
               </Button>
             );
           })}
         </VStack>
         {picked != null && (
           <Text
-            type="supporting"
+            type="body"
             weight="semibold"
             color={correct ? "accent" : "secondary"}
           >
@@ -232,27 +249,49 @@ function StepsCard({ bubble }: { bubble: StepsBubble }) {
   const [expanded, setExpanded] = useState(false);
   const step = bubble.steps[at];
   return (
-    <Card variant="muted" padding={3} width="100%" maxWidth={560}>
-      <VStack gap={3}>
+    <Card variant="muted" padding={5} width="100%" maxWidth={560}>
+      <VStack gap={4}>
         <VStack gap={1}>
-          <Text type="label" weight="semibold">
+          <Text type="supporting" color="secondary">
+            Step-by-step
+          </Text>
+          <Text type="body" size="lg" weight="semibold">
             {bubble.title}
           </Text>
           {bubble.intro && (
-            <Text type="supporting" color="secondary">
+            <Text type="body" color="secondary">
               {bubble.intro}
             </Text>
           )}
         </VStack>
+        <Divider />
         {!expanded && (
-          <VStack gap={1}>
+          <VStack gap={2}>
             <Text type="supporting" color="secondary">
               Step {at + 1} of {bubble.steps.length}
             </Text>
-            <Text type="body" weight="semibold">
+            <Text type="body" size="lg" weight="semibold">
               {step.heading}
             </Text>
             <Text type="body">{step.body}</Text>
+          </VStack>
+        )}
+        {expanded && (
+          <VStack gap={3}>
+            {bubble.steps.map((s, i) => (
+              <VStack key={i} gap={1}>
+                <Text
+                  type="body"
+                  weight="semibold"
+                  color={i === at ? "accent" : undefined}
+                >
+                  Step {i + 1} — {s.heading}
+                </Text>
+                <Text type="body" color="secondary">
+                  {s.body}
+                </Text>
+              </VStack>
+            ))}
           </VStack>
         )}
         <HStack gap={1} vAlign="center">
@@ -271,48 +310,28 @@ function StepsCard({ bubble }: { bubble: StepsBubble }) {
               {i + 1}
             </Button>
           ))}
-          <Button
-            label={expanded ? "Hide all steps" : "View all steps"}
-            variant="ghost"
-            size="sm"
-            onClick={() => setExpanded((v) => !v)}
-          >
-            {expanded ? "Hide steps" : "View all steps"}
-          </Button>
         </HStack>
-        {expanded && (
-          <VStack gap={2}>
-            {bubble.steps.map((s, i) => (
-              <VStack key={i} gap={0}>
-                <Text
-                  type="supporting"
-                  weight="semibold"
-                  color={i === at ? "accent" : undefined}
-                >
-                  Step {i + 1} — {s.heading}
-                </Text>
-                <Text type="supporting" color="secondary">
-                  {s.body}
-                </Text>
-              </VStack>
-            ))}
-          </VStack>
-        )}
-        <HStack gap={2}>
+        <HStack gap={2} vAlign="center" width="100%">
           <Button
             label="Previous step"
             variant="ghost"
-            size="sm"
             isDisabled={at === 0}
             onClick={() => setAt((v) => Math.max(0, v - 1))}
           >
             Back
           </Button>
           <Button
+            label={expanded ? "Hide all steps" : "View all steps"}
+            variant="ghost"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "Hide steps" : "View all steps"}
+          </Button>
+          <Button
             label="Next step"
             variant="primary"
-            size="sm"
             isDisabled={at === bubble.steps.length - 1}
+            style={{ marginLeft: "auto" }}
             onClick={() =>
               setAt((v) => Math.min(bubble.steps.length - 1, v + 1))
             }
