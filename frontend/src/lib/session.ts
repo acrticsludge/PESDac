@@ -117,6 +117,53 @@ export function deleteCustomChat(code: string) {
   emit();
 }
 
+// Demo-thread overrides (mockup stage): static registry stays canonical
+// (routes + content untouched); renames/hides live in session only.
+
+type DemoOverrides = {
+  renamed: Record<string, string>;
+  hidden: string[];
+};
+
+const DEMO_KEY = "pesdac-demo-overrides-v1";
+
+function readDemoOverrides(): DemoOverrides {
+  const raw = readJSON<Partial<DemoOverrides>>(DEMO_KEY, {});
+  return {
+    renamed: raw.renamed ?? {},
+    hidden: raw.hidden ?? [],
+  };
+}
+
+export function demoDisplayLabel(label: string): string {
+  return readDemoOverrides().renamed[label] ?? label;
+}
+
+export function isDemoHidden(label: string): boolean {
+  return readDemoOverrides().hidden.includes(label);
+}
+
+export function renameDemoChat(label: string, title: string) {
+  const clean = title.trim().slice(0, 34);
+  if (!clean) return;
+  const overrides = readDemoOverrides();
+  writeJSON(DEMO_KEY, {
+    ...overrides,
+    renamed: { ...overrides.renamed, [label]: clean },
+  });
+  emit();
+}
+
+export function hideDemoChat(label: string) {
+  const overrides = readDemoOverrides();
+  if (overrides.hidden.includes(label)) return;
+  writeJSON(DEMO_KEY, {
+    ...overrides,
+    hidden: [...overrides.hidden, label],
+  });
+  emit();
+}
+
 const DEFAULT_REFERENCES = [
   { label: "Course Slides", description: "PESDac course material" },
   { label: "Textbook", description: "PESDac knowledge source" },

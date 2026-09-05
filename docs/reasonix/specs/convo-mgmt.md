@@ -7,7 +7,14 @@ Custom chats accumulate with no rename, delete, or search — sidebar rots.
 The hover `MoreMenu` on items has dead Pin/Rename/Archive/Delete slots
 and "Search conversations" is a dead nav item.
 
-## Scope (custom chats only; demo threads untouched)
+## Scope
+- Custom chats: full rename/delete as below.
+- Demo threads (2026-09-05 addition): static registry stays canonical
+  (routes + content untouched); session-only overrides in
+  `pesdac-demo-overrides-v1`: rename changes the sidebar display label,
+  delete hides from the sidebar ("Hide" confirm; page stays linkable;
+  deleting the open demo thread routes to `/new`). Search matches
+  display labels.
 - Store (`lib/session.ts`): `renameCustomChat(code, title)` (trim,
   34-char slice, ignore empty), `deleteCustomChat(code)` (removes chat +
   its overlay). Both `emit()`.

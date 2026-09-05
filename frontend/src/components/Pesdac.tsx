@@ -19,6 +19,10 @@ import {
   createCustomChat,
   renameCustomChat,
   deleteCustomChat,
+  renameDemoChat,
+  hideDemoChat,
+  demoDisplayLabel,
+  isDemoHidden,
   makeDraftThread,
 } from "../lib/session";
 
@@ -586,11 +590,15 @@ export default function ShellSideNav({
   const [draftCode, setDraftCode] = useState<string | null>(null);
   // Draft auto-send: first message typed on welcome, sent on thread mount.
   const [draftAutoSend, setDraftAutoSend] = useState<string | null>(null);
-  // Rename dialog for custom chats (mockup: demo threads not renamable).
-  const [renamingCode, setRenamingCode] = useState<string | null>(null);
+  // Rename dialog (custom chats + demo display-label overrides).
+  const [renameTarget, setRenameTarget] = useState<
+    { kind: "custom"; code: string } | { kind: "demo"; label: string } | null
+  >(null);
   const [renameValue, setRenameValue] = useState("");
-  // Delete confirmation for custom chats.
-  const [deletingCode, setDeletingCode] = useState<string | null>(null);
+  // Delete confirmation (custom chats delete; demos hide from sidebar).
+  const [deleteTarget, setDeleteTarget] = useState<
+    { kind: "custom" | "demo"; id: string; title: string } | null
+  >(null);
   // Sidebar conversation search (filters demo + custom labels).
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -617,30 +625,37 @@ export default function ShellSideNav({
 
   const suggestions = category ? CATEGORY_SUGGESTIONS[category] : null;
 
-  const renamingChat =
-    renamingCode != null
-      ? (listCustomChats().find((c) => c.code === renamingCode) ?? null)
-      : null;
+  const renamePlaceholder =
+    renameTarget?.kind === "custom"
+      ? (listCustomChats().find((c) => c.code === renameTarget.code)?.title ??
+        "")
+      : renameTarget
+        ? demoDisplayLabel(renameTarget.label)
+        : "";
 
   const saveRename = () => {
-    if (renamingChat) renameCustomChat(renamingChat.code, renameValue);
-    setRenamingCode(null);
+    if (renameTarget?.kind === "custom") {
+      renameCustomChat(renameTarget.code, renameValue);
+    } else if (renameTarget) {
+      renameDemoChat(renameTarget.label, renameValue);
+    }
+    setRenameTarget(null);
   };
 
-  const deletingChat =
-    deletingCode != null
-      ? (listCustomChats().find((c) => c.code === deletingCode) ?? null)
-      : null;
-
   const confirmDelete = () => {
-    if (deletingChat) {
-      deleteCustomChat(deletingChat.code);
-      if (draftCode === deletingChat.code) {
+    if (deleteTarget?.kind === "custom") {
+      deleteCustomChat(deleteTarget.id);
+      if (draftCode === deleteTarget.id) {
         setDraftCode(null);
         setDraftAutoSend(null);
       }
+    } else if (deleteTarget) {
+      hideDemoChat(deleteTarget.id);
+      if (selectedChat === deleteTarget.id) {
+        window.location.href = "/new";
+      }
     }
-    setDeletingCode(null);
+    setDeleteTarget(null);
   };
 
   const query = searchQuery.trim().toLowerCase();
@@ -813,8 +828,10 @@ export default function ShellSideNav({
 
             <SideNavSection title="Subjects" isHeaderHidden>
               {WORKSPACES.map((workspace) => {
-                const demoChats = workspace.chats.filter((chat) =>
-                  matchesQuery(chat.label),
+                const demoChats = workspace.chats.filter(
+                  (chat) =>
+                    !isDemoHidden(chat.label) &&
+                    matchesQuery(demoDisplayLabel(chat.label)),
                 );
                 const customs = listCustomChats().filter(
                   (c) =>
@@ -837,14 +854,31 @@ export default function ShellSideNav({
                     }}
                   >
                     <VStack gap={0.5}>
-                      {demoChats.map((chat) => (
-                        <ConversationItem
-                          key={chat.label}
-                          label={chat.label}
-                          isSelected={chat.label === selectedChat}
-                          onClick={() => openConversation(chat.label)}
-                        />
-                      ))}
+                      {demoChats.map((chat) => {
+                        const display = demoDisplayLabel(chat.label);
+                        return (
+                          <ConversationItem
+                            key={chat.label}
+                            label={display}
+                            isSelected={chat.label === selectedChat}
+                            onClick={() => openConversation(chat.label)}
+                            onRename={() => {
+                              setRenameValue(display);
+                              setRenameTarget({
+                                kind: "demo",
+                                label: chat.label,
+                              });
+                            }}
+                            onDelete={() =>
+                              setDeleteTarget({
+                                kind: "demo",
+                                id: chat.label,
+                                title: display,
+                              })
+                            }
+                          />
+                        );
+                      })}
                       {customs.map((c) => (
                         <ConversationItem
                           key={c.code}
@@ -857,11 +891,15 @@ export default function ShellSideNav({
                           }}
                           onRename={() => {
                             setRenameValue(c.title);
-                            setRenamingCode(c.code);
+                            setRenameTarget({ kind: "custom", code: c.code });
                           }}
-                          onDelete={() => {
-                            setDeletingCode(c.code);
-                          }}
+                          onDelete={() =>
+                            setDeleteTarget({
+                              kind: "custom",
+                              id: c.code,
+                              title: c.title,
+                            })
+                          }
                         />
                       ))}
                     </VStack>
@@ -1141,9 +1179,9 @@ export default function ShellSideNav({
         })()}
 
         <Dialog
-          isOpen={renamingChat != null}
+          isOpen={renameTarget != null}
           onOpenChange={(open) => {
-            if (!open) setRenamingCode(null);
+            if (!open) setRenameTarget(null);
           }}
           purpose="form"
         >
@@ -1153,7 +1191,7 @@ export default function ShellSideNav({
                 title="Rename chat"
                 hasDivider
                 onOpenChange={(open) => {
-                  if (!open) setRenamingCode(null);
+                  if (!open) setRenameTarget(null);
                 }}
               />
             }
@@ -1165,7 +1203,7 @@ export default function ShellSideNav({
                   onChange={setRenameValue}
                   onEnter={saveRename}
                   hasAutoFocus
-                  placeholder={renamingChat?.title}
+                  placeholder={renamePlaceholder}
                 />
               </LayoutContent>
             }
@@ -1175,7 +1213,7 @@ export default function ShellSideNav({
                   <Button
                     label="Cancel"
                     variant="ghost"
-                    onClick={() => setRenamingCode(null)}
+                    onClick={() => setRenameTarget(null)}
                   />
                   <Button label="Save" variant="primary" onClick={saveRename} />
                 </HStack>
@@ -1185,17 +1223,21 @@ export default function ShellSideNav({
         </Dialog>
 
         <AlertDialog
-          isOpen={deletingChat != null}
+          isOpen={deleteTarget != null}
           onOpenChange={(open) => {
-            if (!open) setDeletingCode(null);
+            if (!open) setDeleteTarget(null);
           }}
-          title="Delete chat?"
-          description={
-            deletingChat
-              ? `“${deletingChat.title}” and its messages will be permanently removed. This cannot be undone.`
-              : "This chat and its messages will be permanently removed."
+          title={
+            deleteTarget?.kind === "demo" ? "Hide chat?" : "Delete chat?"
           }
-          actionLabel="Delete"
+          description={
+            deleteTarget == null
+              ? "This chat will be removed from your sidebar."
+              : deleteTarget.kind === "demo"
+                ? `“${deleteTarget.title}” will be hidden from your sidebar. Its page stays available via link.`
+                : `“${deleteTarget.title}” and its messages will be permanently removed. This cannot be undone.`
+          }
+          actionLabel={deleteTarget?.kind === "demo" ? "Hide" : "Delete"}
           onAction={confirmDelete}
         />
       </AppShell>
