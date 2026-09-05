@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Theme } from "@astryxdesign/core/theme";
 import { PESDacMockupTheme } from "../theme/PESDacMockupTheme";
@@ -107,6 +107,7 @@ import {
   PlusIcon,
   MagnifyingGlassIcon,
   BookOpenIcon,
+  BookmarkIcon,
   Cog6ToothIcon,
   UserCircleIcon,
   ComputerDesktopIcon,
@@ -525,11 +526,13 @@ function ConversationItem({
   isSelected,
   onClick,
   menu,
+  icon,
 }: {
   label: string;
   isSelected?: boolean;
   onClick?: () => void;
   menu: ChatMenuItem[];
+  icon?: ReactNode | IconType;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -545,6 +548,7 @@ function ConversationItem({
         label={label}
         href="#"
         isSelected={isSelected}
+        icon={icon}
         onClick={(event) => {
           event.preventDefault();
           onClick?.();
@@ -596,11 +600,11 @@ export default function ShellSideNav({
     { kind: "custom"; code: string } | { kind: "demo"; label: string } | null
   >(null);
   const [renameValue, setRenameValue] = useState("");
-  // Delete confirmation (custom chats only; demos archive instead).
-  const [deleteTarget, setDeleteTarget] = useState<{
-    id: string;
-    title: string;
-  } | null>(null);
+  // Delete confirmation: customs delete permanently; demos archive
+  // (Archive is instant, Delete asks first — same shelf).
+  const [deleteTarget, setDeleteTarget] = useState<
+    { kind: "custom" | "demo"; id: string; title: string } | null
+  >(null);
   // Sidebar conversation search (filters demo + custom labels).
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -645,11 +649,16 @@ export default function ShellSideNav({
   };
 
   const confirmDelete = () => {
-    if (deleteTarget) {
+    if (deleteTarget?.kind === "custom") {
       deleteCustomChat(deleteTarget.id);
       if (draftCode === deleteTarget.id) {
         setDraftCode(null);
         setDraftAutoSend(null);
+      }
+    } else if (deleteTarget) {
+      archiveChat({ kind: "demo", id: deleteTarget.id });
+      if (selectedChat === deleteTarget.id) {
+        window.location.href = "/new";
       }
     }
     setDeleteTarget(null);
@@ -698,7 +707,8 @@ export default function ShellSideNav({
     );
   };
 
-  // Listed chats: full menu (demos skip Delete — Archive covers hiding).
+  // Listed chats: full menu. Demo Delete archives via confirm
+  // (Archive is instant; Delete asks first).
   const listedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => [
     {
       label: isPinned(ref) ? "Unpin" : "Pin",
@@ -706,14 +716,15 @@ export default function ShellSideNav({
     },
     { label: "Rename", onClick: () => startRename(ref, display) },
     { label: "Archive", onClick: () => archiveAndExit(ref) },
-    ...(ref.kind === "custom"
-      ? [
-          {
-            label: "Delete",
-            onClick: () => setDeleteTarget({ id: ref.id, title: display }),
-          },
-        ]
-      : []),
+    {
+      label: "Delete",
+      onClick: () =>
+        setDeleteTarget(
+          ref.kind === "custom"
+            ? { kind: "custom", id: ref.id, title: display }
+            : { kind: "demo", id: ref.id, title: display },
+        ),
+    },
   ];
 
   const archivedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => [
@@ -722,7 +733,8 @@ export default function ShellSideNav({
       ? [
           {
             label: "Delete",
-            onClick: () => setDeleteTarget({ id: ref.id, title: display }),
+            onClick: () =>
+              setDeleteTarget({ kind: "custom", id: ref.id, title: display }),
           },
         ]
       : []),
@@ -911,6 +923,7 @@ export default function ShellSideNav({
                     <ConversationItem
                       key={`${ref.kind}:${ref.id}`}
                       label={title}
+                      icon={BookmarkIcon}
                       isSelected={isRefOpen(ref)}
                       onClick={() => openRef(ref)}
                       menu={listedMenu(ref, title)}
@@ -1328,13 +1341,17 @@ export default function ShellSideNav({
           onOpenChange={(open) => {
             if (!open) setDeleteTarget(null);
           }}
-          title="Delete chat?"
-          description={
-            deleteTarget
-              ? `“${deleteTarget.title}” and its messages will be permanently removed. This cannot be undone.`
-              : "This chat and its messages will be permanently removed."
+          title={
+            deleteTarget?.kind === "demo" ? "Hide chat?" : "Delete chat?"
           }
-          actionLabel="Delete"
+          description={
+            deleteTarget == null
+              ? "This chat will be removed from your sidebar."
+              : deleteTarget.kind === "demo"
+                ? `“${deleteTarget.title}” will be moved to your Archived chats. You can restore it anytime.`
+                : `“${deleteTarget.title}” and its messages will be permanently removed. This cannot be undone.`
+          }
+          actionLabel={deleteTarget?.kind === "demo" ? "Hide" : "Delete"}
           onAction={confirmDelete}
         />
       </AppShell>
