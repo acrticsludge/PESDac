@@ -36,7 +36,11 @@ muted zero-padding cards with subtle row dividers, icon-titled rows with
 a shared 192px control column, `SegmentedControl` for 2–3 named choices
 (depth, verbosity, citations, goal, difficulty), `isLabelHidden`
 controls (the row owns the label), panel heading + description,
-`useMediaQuery` narrow shell. Sections (user-added after approval):
+`useMediaQuery` narrow shell. Dialog width is relative
+(`min(1120px, calc(100vw - 2rem))`); the rail panel is `width={260}
+padding={0}` — border-box panel padding would shrink the content box
+below SideNav's natural 260 and clip the rail with a scrollbar (seen
+twice, fixed 2026-09-06). Sections (user-added after approval):
 Shortcuts (real Ctrl+K / Esc / `/` with keycaps + working enable
 toggles gating the Pesdac keydown handler; no rebinding), Language &
 region (language/region/timezone selectors, stored-only, no week-start
