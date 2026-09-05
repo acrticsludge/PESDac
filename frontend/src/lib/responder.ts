@@ -9,7 +9,7 @@ import {
   sourceTarget,
 } from "./references";
 
-export type ResponseMode = "ask" | "deep";
+export type ResponseMode = "ask" | "deep" | "auto";
 
 export type PlannedTurn = {
   toolCalls: ToolCall[];
@@ -24,7 +24,7 @@ export type PlannedTurn = {
 export function planResponse(
   question: string,
   subject: string,
-  mode: ResponseMode = "ask",
+  mode: ResponseMode = "auto",
 ): PlannedTurn {
   // @ mentions scope retrieval: "@textbook ..." searches the textbook
   // first. Tokens are stripped so they never leak into echoes/titles.
@@ -129,7 +129,15 @@ compare step by step.`,
     };
   }
 
-  if (mode === "deep") {
+  // Auto depth (answer-depth spec): depth-cue phrasing resolves to the
+  // chapter shape, everything else to the short shape. Runs after the
+  // simulate-* and quiz branches, so those intents always win.
+  const DEEP_RE =
+    /\bstep by step\b|\bwalk me through\b|\bin detail\b|\bmore detail\b|\bin[-\s]?depth\b|\bfull chapter\b|\bwhole chapter\b|\bthis chapter\b|\bchapter analysis\b|\banalys\w*\b|\belaborate\b|\bderivation\b|\bderive\b|\bteach me\b|\bcompare and contrast\b/i;
+  const depth: "ask" | "deep" =
+    mode === "auto" ? (DEEP_RE.test(clean) ? "deep" : "ask") : mode;
+
+  if (depth === "deep") {
     return {
       toolCalls: [
         {
@@ -145,20 +153,17 @@ compare step by step.`,
           duration: `${51 + (seed % 53)}ms`,
         },
       ],
-      answer: `### Working through it
+      answer: `### ${short} — chapter view
 
-**Your question:** ${short}
+**Definitions first.** Everything below rests on the exact ${subject} slide definitions — quote them before reasoning. Examiners award the first marks here, not at the final answer.
 
-Here is how I would attack this in ${subject}:
+**Full walkthrough.** Work it end to end, one step at a time, checking each step against those definitions instead of jumping ahead. When a step feels shaky, slow down: that is where the marks hide.
 
-1. **Recall** — pull the definitions this question depends on, exactly as
-   your slides state them. Quote them before reasoning further.
-2. **Apply** — work the question step by step, checking each step against
-   those definitions instead of jumping to the answer.
-3. **Check** — verify units, edge cases, and the "what would break this?"
-   test. If a step feels shaky, that is where the marks hide.
+**Worked check.** Apply the chain to one concrete case from your slides, then flip one condition and state what breaks. If you cannot, re-read the definition.
 
-Ask a follow-up on any step, or say **"quiz me"** and I will test you on it.`,
+**Don't lose marks.** Skipped definitions, jumped steps, and unflipped edge cases cause most lost marks on this topic.
+
+Say **"quiz me"** and I will test you on it.`,
       followUps: [
         "Explain step 1 in more detail",
         "Give me a worked example",
@@ -176,11 +181,9 @@ Ask a follow-up on any step, or say **"quiz me"** and I will test you on it.`,
         duration: `${32 + (seed % 37)}ms`,
       },
     ],
-    answer: `**Short answer:** ${short} comes down to the core ${subject} definition in your slides — nail that first, then apply it directly.
+    answer: `**${short}** — one line: the exact ${subject} definition from your slides, applied directly. Quote it first and the mark is yours.
 
-**Why:** most marks are lost jumping to steps before quoting the definition. State it, then work forward from it.
-
-Want the full walkthrough? Switch to **Deep Study**, or say **"quiz me"**.`,
+Say **"walk me through it"** for the chapter version, or **"quiz me"** to test it.`,
     followUps: [
       "Walk me through it step by step",
       "Give me a worked example",
