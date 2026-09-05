@@ -11,10 +11,15 @@ and "Search conversations" is a dead nav item.
 - Custom chats: full rename/delete as below.
 - Demo threads (2026-09-05 addition): static registry stays canonical
   (routes + content untouched); session-only overrides in
-  `pesdac-demo-overrides-v1`: rename changes the sidebar display label,
-  delete hides from the sidebar ("Hide" confirm; page stays linkable;
-  deleting the open demo thread routes to `/new`). Search matches
-  display labels.
+  `pesdac-demo-overrides-v1`: rename changes the sidebar display label.
+- Pin (2026-09-05): `pesdac-pins-v1`, customs by code + demos by label;
+  Pinned section above Subjects; pinned rows move out of workspace
+  lists; Pin label toggles to Unpin.
+- Archive (2026-09-05): `pesdac-archived-v1`; archiving unpins;
+  Archived section at sidebar bottom with Unarchive; archiving the open
+  chat routes home (`/new`). Demo Delete removed (Archive covers
+  hiding); custom Delete stays permanent with confirm. Search matches
+  display labels and hides empty sections.
 - Store (`lib/session.ts`): `renameCustomChat(code, title)` (trim,
   34-char slice, ignore empty), `deleteCustomChat(code)` (removes chat +
   its overlay). Both `emit()`.

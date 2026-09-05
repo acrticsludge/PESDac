@@ -20,10 +20,16 @@ import {
   renameCustomChat,
   deleteCustomChat,
   renameDemoChat,
-  hideDemoChat,
   demoDisplayLabel,
-  isDemoHidden,
   makeDraftThread,
+  isPinned,
+  togglePin,
+  listPinned,
+  isArchived,
+  archiveChat,
+  unarchiveChat,
+  listArchived,
+  type ChatRef,
 } from "../lib/session";
 
 import { AppShell } from "@astryxdesign/core/AppShell";
@@ -512,18 +518,18 @@ const referenceTrigger: ChatComposerTrigger = {
 /*                         Conversation Item                                  */
 /* -------------------------------------------------------------------------- */
 
+export type ChatMenuItem = { label: string; onClick: () => void };
+
 function ConversationItem({
   label,
   isSelected,
   onClick,
-  onRename,
-  onDelete,
+  menu,
 }: {
   label: string;
   isSelected?: boolean;
   onClick?: () => void;
-  onRename?: () => void;
-  onDelete?: () => void;
+  menu: ChatMenuItem[];
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -549,12 +555,7 @@ function ConversationItem({
               size="sm"
               label="Conversation options"
               onOpenChange={setIsMenuOpen}
-              items={[
-                { label: "Pin", onClick: () => {} },
-                { label: "Rename", onClick: onRename ?? (() => {}) },
-                { label: "Archive", onClick: () => {} },
-                { label: "Delete", onClick: onDelete ?? (() => {}) },
-              ]}
+              items={menu}
             />
           ) : null
         }
@@ -595,10 +596,11 @@ export default function ShellSideNav({
     { kind: "custom"; code: string } | { kind: "demo"; label: string } | null
   >(null);
   const [renameValue, setRenameValue] = useState("");
-  // Delete confirmation (custom chats delete; demos hide from sidebar).
-  const [deleteTarget, setDeleteTarget] = useState<
-    { kind: "custom" | "demo"; id: string; title: string } | null
-  >(null);
+  // Delete confirmation (custom chats only; demos archive instead).
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   // Sidebar conversation search (filters demo + custom labels).
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -643,16 +645,11 @@ export default function ShellSideNav({
   };
 
   const confirmDelete = () => {
-    if (deleteTarget?.kind === "custom") {
+    if (deleteTarget) {
       deleteCustomChat(deleteTarget.id);
       if (draftCode === deleteTarget.id) {
         setDraftCode(null);
         setDraftAutoSend(null);
-      }
-    } else if (deleteTarget) {
-      hideDemoChat(deleteTarget.id);
-      if (selectedChat === deleteTarget.id) {
-        window.location.href = "/new";
       }
     }
     setDeleteTarget(null);
@@ -661,6 +658,87 @@ export default function ShellSideNav({
   const query = searchQuery.trim().toLowerCase();
   const matchesQuery = (label: string) =>
     query === "" || label.toLowerCase().includes(query);
+
+  // Pinned + archived rows (customs by code, demos by label).
+  const refTitle = (ref: ChatRef): string | null =>
+    ref.kind === "custom"
+      ? (listCustomChats().find((c) => c.code === ref.id)?.title ?? null)
+      : demoDisplayLabel(ref.id);
+
+  const openRef = (ref: ChatRef) => {
+    if (ref.kind === "custom") {
+      setDraftCode(ref.id);
+      setDraftAutoSend(null);
+      setSelectedChat(null);
+    } else {
+      openConversation(ref.id);
+    }
+  };
+
+  const isRefOpen = (ref: ChatRef) =>
+    ref.kind === "custom" ? draftCode === ref.id : selectedChat === ref.id;
+
+  const archiveAndExit = (ref: ChatRef) => {
+    archiveChat(ref);
+    if (ref.kind === "custom" && draftCode === ref.id) {
+      setDraftCode(null);
+      setDraftAutoSend(null);
+    }
+    if (ref.kind === "demo" && selectedChat === ref.id) {
+      window.location.href = "/new";
+    }
+  };
+
+  const startRename = (ref: ChatRef, display: string) => {
+    setRenameValue(display);
+    setRenameTarget(
+      ref.kind === "custom"
+        ? { kind: "custom", code: ref.id }
+        : { kind: "demo", label: ref.id },
+    );
+  };
+
+  // Listed chats: full menu (demos skip Delete — Archive covers hiding).
+  const listedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => [
+    {
+      label: isPinned(ref) ? "Unpin" : "Pin",
+      onClick: () => togglePin(ref),
+    },
+    { label: "Rename", onClick: () => startRename(ref, display) },
+    { label: "Archive", onClick: () => archiveAndExit(ref) },
+    ...(ref.kind === "custom"
+      ? [
+          {
+            label: "Delete",
+            onClick: () => setDeleteTarget({ id: ref.id, title: display }),
+          },
+        ]
+      : []),
+  ];
+
+  const archivedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => [
+    { label: "Unarchive", onClick: () => unarchiveChat(ref) },
+    ...(ref.kind === "custom"
+      ? [
+          {
+            label: "Delete",
+            onClick: () => setDeleteTarget({ id: ref.id, title: display }),
+          },
+        ]
+      : []),
+  ];
+
+  const collectRows = (refs: ChatRef[], includeArchived: boolean) =>
+    refs
+      .filter((ref) => includeArchived || !isArchived(ref))
+      .map((ref) => ({ ref, title: refTitle(ref) }))
+      .filter(
+        (r): r is { ref: ChatRef; title: string } =>
+          r.title != null && matchesQuery(r.title),
+      );
+
+  const pinnedRows = collectRows(listPinned(), false);
+  const archivedRows = collectRows(listArchived(), true);
 
   // Chat navigation: shareable URL is /subject/[subject]/[code].
   // For now the fully implemented conversation is CN → TCP vs UDP;
@@ -826,16 +904,36 @@ export default function ShellSideNav({
 
             {/* Subjects */}
 
+            {pinnedRows.length > 0 && (
+              <SideNavSection title="Pinned">
+                <VStack gap={0.5}>
+                  {pinnedRows.map(({ ref, title }) => (
+                    <ConversationItem
+                      key={`${ref.kind}:${ref.id}`}
+                      label={title}
+                      isSelected={isRefOpen(ref)}
+                      onClick={() => openRef(ref)}
+                      menu={listedMenu(ref, title)}
+                    />
+                  ))}
+                </VStack>
+              </SideNavSection>
+            )}
+
             <SideNavSection title="Subjects" isHeaderHidden>
               {WORKSPACES.map((workspace) => {
                 const demoChats = workspace.chats.filter(
                   (chat) =>
-                    !isDemoHidden(chat.label) &&
+                    !isArchived({ kind: "demo", id: chat.label }) &&
+                    !isPinned({ kind: "demo", id: chat.label }) &&
                     matchesQuery(demoDisplayLabel(chat.label)),
                 );
                 const customs = listCustomChats().filter(
                   (c) =>
-                    c.subject === workspace.name && matchesQuery(c.title),
+                    c.subject === workspace.name &&
+                    !isArchived({ kind: "custom", id: c.code }) &&
+                    !isPinned({ kind: "custom", id: c.code }) &&
+                    matchesQuery(c.title),
                 );
                 if (
                   query !== "" &&
@@ -856,57 +954,60 @@ export default function ShellSideNav({
                     <VStack gap={0.5}>
                       {demoChats.map((chat) => {
                         const display = demoDisplayLabel(chat.label);
+                        const ref: ChatRef = {
+                          kind: "demo",
+                          id: chat.label,
+                        };
                         return (
                           <ConversationItem
                             key={chat.label}
                             label={display}
                             isSelected={chat.label === selectedChat}
                             onClick={() => openConversation(chat.label)}
-                            onRename={() => {
-                              setRenameValue(display);
-                              setRenameTarget({
-                                kind: "demo",
-                                label: chat.label,
-                              });
-                            }}
-                            onDelete={() =>
-                              setDeleteTarget({
-                                kind: "demo",
-                                id: chat.label,
-                                title: display,
-                              })
-                            }
+                            menu={listedMenu(ref, display)}
                           />
                         );
                       })}
-                      {customs.map((c) => (
-                        <ConversationItem
-                          key={c.code}
-                          label={c.title}
-                          isSelected={c.code === draftCode}
-                          onClick={() => {
-                            setDraftCode(c.code);
-                            setDraftAutoSend(null);
-                            setSelectedChat(null);
-                          }}
-                          onRename={() => {
-                            setRenameValue(c.title);
-                            setRenameTarget({ kind: "custom", code: c.code });
-                          }}
-                          onDelete={() =>
-                            setDeleteTarget({
-                              kind: "custom",
-                              id: c.code,
-                              title: c.title,
-                            })
-                          }
-                        />
-                      ))}
+                      {customs.map((c) => {
+                        const ref: ChatRef = {
+                          kind: "custom",
+                          id: c.code,
+                        };
+                        return (
+                          <ConversationItem
+                            key={c.code}
+                            label={c.title}
+                            isSelected={c.code === draftCode}
+                            onClick={() => {
+                              setDraftCode(c.code);
+                              setDraftAutoSend(null);
+                              setSelectedChat(null);
+                            }}
+                            menu={listedMenu(ref, c.title)}
+                          />
+                        );
+                      })}
                     </VStack>
                   </SideNavItem>
                 );
               })}
             </SideNavSection>
+
+            {archivedRows.length > 0 && (
+              <SideNavSection title="Archived">
+                <VStack gap={0.5}>
+                  {archivedRows.map(({ ref, title }) => (
+                    <ConversationItem
+                      key={`${ref.kind}:${ref.id}`}
+                      label={title}
+                      isSelected={isRefOpen(ref)}
+                      onClick={() => openRef(ref)}
+                      menu={archivedMenu(ref, title)}
+                    />
+                  ))}
+                </VStack>
+              </SideNavSection>
+            )}
           </SideNav>
         }
 
@@ -1227,17 +1328,13 @@ export default function ShellSideNav({
           onOpenChange={(open) => {
             if (!open) setDeleteTarget(null);
           }}
-          title={
-            deleteTarget?.kind === "demo" ? "Hide chat?" : "Delete chat?"
-          }
+          title="Delete chat?"
           description={
-            deleteTarget == null
-              ? "This chat will be removed from your sidebar."
-              : deleteTarget.kind === "demo"
-                ? `“${deleteTarget.title}” will be hidden from your sidebar. Its page stays available via link.`
-                : `“${deleteTarget.title}” and its messages will be permanently removed. This cannot be undone.`
+            deleteTarget
+              ? `“${deleteTarget.title}” and its messages will be permanently removed. This cannot be undone.`
+              : "This chat and its messages will be permanently removed."
           }
-          actionLabel={deleteTarget?.kind === "demo" ? "Hide" : "Delete"}
+          actionLabel="Delete"
           onAction={confirmDelete}
         />
       </AppShell>

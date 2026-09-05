@@ -114,6 +114,16 @@ export function deleteCustomChat(code: string) {
   const all = readJSON<Record<string, Block[]>>(OVERLAY_KEY, {});
   delete all[code];
   writeJSON(OVERLAY_KEY, all);
+  // Purge stale pin/archive refs.
+  const key = `c:${code}`;
+  writeJSON(
+    PINS_KEY,
+    readKeys(PINS_KEY).filter((k) => k !== key),
+  );
+  writeJSON(
+    ARCHIVE_KEY,
+    readKeys(ARCHIVE_KEY).filter((k) => k !== key),
+  );
   emit();
 }
 
@@ -154,14 +164,77 @@ export function renameDemoChat(label: string, title: string) {
   emit();
 }
 
-export function hideDemoChat(label: string) {
-  const overrides = readDemoOverrides();
-  if (overrides.hidden.includes(label)) return;
-  writeJSON(DEMO_KEY, {
-    ...overrides,
-    hidden: [...overrides.hidden, label],
-  });
+// Pins + archive (custom chats by code, demo threads by label).
+
+export type ChatRef = { kind: "custom" | "demo"; id: string };
+
+const refKey = (ref: ChatRef) =>
+  `${ref.kind === "custom" ? "c" : "d"}:${ref.id}`;
+
+function parseRefKey(key: string): ChatRef | null {
+  if (key.startsWith("c:")) return { kind: "custom", id: key.slice(2) };
+  if (key.startsWith("d:")) return { kind: "demo", id: key.slice(2) };
+  return null;
+}
+
+const PINS_KEY = "pesdac-pins-v1";
+const ARCHIVE_KEY = "pesdac-archived-v1";
+
+function readKeys(key: string): string[] {
+  return readJSON<string[]>(key, []);
+}
+
+export function isPinned(ref: ChatRef): boolean {
+  return readKeys(PINS_KEY).includes(refKey(ref));
+}
+
+export function togglePin(ref: ChatRef) {
+  const key = refKey(ref);
+  const keys = readKeys(PINS_KEY);
+  writeJSON(
+    PINS_KEY,
+    keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key],
+  );
   emit();
+}
+
+export function listPinned(): ChatRef[] {
+  return readKeys(PINS_KEY)
+    .map(parseRefKey)
+    .filter((r): r is ChatRef => r != null);
+}
+
+export function isArchived(ref: ChatRef): boolean {
+  return readKeys(ARCHIVE_KEY).includes(refKey(ref));
+}
+
+export function archiveChat(ref: ChatRef) {
+  const key = refKey(ref);
+  const archived = readKeys(ARCHIVE_KEY);
+  if (!archived.includes(key)) {
+    writeJSON(ARCHIVE_KEY, [...archived, key]);
+  }
+  // Archiving unpins (a chat lives in one place).
+  writeJSON(
+    PINS_KEY,
+    readKeys(PINS_KEY).filter((k) => k !== key),
+  );
+  emit();
+}
+
+export function unarchiveChat(ref: ChatRef) {
+  const key = refKey(ref);
+  writeJSON(
+    ARCHIVE_KEY,
+    readKeys(ARCHIVE_KEY).filter((k) => k !== key),
+  );
+  emit();
+}
+
+export function listArchived(): ChatRef[] {
+  return readKeys(ARCHIVE_KEY)
+    .map(parseRefKey)
+    .filter((r): r is ChatRef => r != null);
 }
 
 const DEFAULT_REFERENCES = [
