@@ -314,7 +314,9 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       variant="ghost"
       size="sm"
       isIconOnly
-      icon={<Icon icon={copied ? CheckIcon : ClipboardDocumentIcon} size="sm" />}
+      // md icon: Heroicons outline is drawn on a 24px grid, so 20px renders
+      // markedly crisper than 16px (sm) for these small action buttons.
+      icon={<Icon icon={copied ? CheckIcon : ClipboardDocumentIcon} size="md" />}
       onClick={() => {
         void copyText(text).then((ok) => {
           if (!ok) return;
@@ -364,7 +366,8 @@ function RegenerateButton({ onRegenerate }: { onRegenerate: () => void }) {
       variant="ghost"
       size="sm"
       isIconOnly
-      icon={<Icon icon={ArrowPathIcon} size="sm" />}
+      // md icon — see CopyButton note on Heroicons crispness.
+      icon={<Icon icon={ArrowPathIcon} size="md" />}
       onClick={onRegenerate}
     />
   );
@@ -633,11 +636,11 @@ export default function ThreadView({
     startTurn(text, { forceOk: true });
   };
 
-  // Regenerate lives beside each message's copy action, not above the
-  // composer: re-run the last turn. Session-added assistant turn → pop it
-  // and replay the prompt; trailing session-added user message (stopped or
-  // failed before an answer) → answer it directly. Static demo tails are
-  // immutable, so no regenerate there.
+  // Regenerate lives beside the assistant message's copy action, never on
+  // the user's own message: re-run the last turn. Session-added assistant
+  // turn → pop it and replay the prompt. Static demo tails are immutable,
+  // so no regenerate there. (The trailing-user branch below is a fallback
+  // for stopped-before-answer turns; it has no button of its own.)
   const isLastSessionTurn = (index: number) =>
     index === blocks.length - 1 && blocks.length > thread.blocks.length;
   const canRegenerateNow = live == null && sendError == null;
@@ -827,11 +830,7 @@ export default function ThreadView({
     }
   };
 
-  const renderUserBlock = (
-    block: UserBlock,
-    key: number,
-    showRegenerate: boolean,
-  ) => (
+  const renderUserBlock = (block: UserBlock, key: number) => (
     <ChatMessage key={key} sender="user">
       {block.attachments && block.attachments.length > 0 && (
         <HStack gap={1} wrap="wrap">
@@ -860,11 +859,6 @@ export default function ThreadView({
                 <ChatMessageMetadata
                   timestamp={
                     <Timestamp value={block.time} format="time" />
-                  }
-                  footer={
-                    showRegenerate && canRegenerateNow ? (
-                      <RegenerateButton onRegenerate={handleRegenerate} />
-                    ) : undefined
                   }
                 />
               ) : undefined
@@ -1143,11 +1137,7 @@ export default function ThreadView({
                         );
                       }
                       if (block.from === "user") {
-                        return renderUserBlock(
-                          block,
-                          i,
-                          isLastSessionTurn(i),
-                        );
+                        return renderUserBlock(block, i);
                       }
                       return renderAssistantBlock(
                         block,
