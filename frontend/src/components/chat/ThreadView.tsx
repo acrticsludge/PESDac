@@ -92,6 +92,7 @@ import {
 import {
   useSessionVersion,
   useStorageHealth,
+  useCorruptKeys,
   getOverlay,
   appendBlocks,
   removeLastOverlayBlock,
@@ -533,6 +534,7 @@ export default function ThreadView({
   // on first paint instead of jumping in after mount.
   useSessionVersion();
   const storageOk = useStorageHealth();
+  const corruptKeys = useCorruptKeys();
   const overlay = getOverlay(sessionKey);
   const blocks = [...thread.blocks, ...overlay];
 
@@ -1339,7 +1341,13 @@ export default function ThreadView({
                                 message:
                                   "History isn't saving in this browser — new messages will be lost on reload.",
                               }
-                            : undefined
+                            : corruptKeys.length > 0
+                              ? {
+                                  type: "warning",
+                                  message:
+                                    "Saved data looked damaged, so this chat started fresh — history may be incomplete.",
+                                }
+                              : undefined
                       }
                       placeholder={
                         composerMode === "ask"

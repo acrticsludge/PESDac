@@ -30,6 +30,7 @@ import { getThread } from "../content/threads";
 import {
   useSessionVersion,
   useStorageHealth,
+  useCorruptKeys,
   listCustomChats,
   createCustomChat,
   renameCustomChat,
@@ -620,6 +621,7 @@ export default function ShellSideNav({
   const isArchivedHere = (ref: ChatRef) =>
     archivedKeys.has(`${ref.kind}:${ref.id}`);
   const storageOk = useStorageHealth();
+  const corruptKeys = useCorruptKeys();
 
   const [mode, setMode] = useState<string | null>(
     initialSubjectValue ?? "auto",
@@ -1196,7 +1198,13 @@ export default function ShellSideNav({
                             message:
                               "History isn't saving in this browser — new chats will be lost on reload.",
                           }
-                        : undefined
+                        : corruptKeys.length > 0
+                          ? {
+                              type: "warning",
+                              message:
+                                "Saved data looked damaged, so chats may be incomplete — new messages still save normally.",
+                            }
+                          : undefined
                     }
                     placeholder={
                       category
