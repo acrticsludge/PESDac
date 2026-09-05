@@ -45,6 +45,7 @@ import {
   createStaticSource,
   TypeaheadItem,
 } from "@astryxdesign/core/Typeahead";
+import AttachButton from "./AttachButton";
 import { useResizable, ResizeHandle } from "@astryxdesign/core/Resizable";
 
 import {
@@ -685,6 +686,12 @@ export default function ThreadView({
     setAttachments((prev) => prev.filter((s) => s.att.id !== id));
   };
 
+  // Files from picker, drop, or paste all land in the drawer.
+  const stageIntoDrawer = (files: File[]) => {
+    if (files.length === 0) return;
+    setAttachments((prev) => [...prev, ...stageFiles(files)]);
+  };
+
   // First message typed on welcome: run it once the thread mounts.
   const autoSendRef = useRef<typeof autoSend>(autoSend);
   useEffect(() => {
@@ -1000,12 +1007,7 @@ export default function ThreadView({
                         <ChatComposerInput
                           handleRef={composerInputRef}
                           triggers={[threadReferenceTrigger]}
-                          onFiles={(files) =>
-                            setAttachments((prev) => [
-                              ...prev,
-                              ...stageFiles(files),
-                            ])
-                          }
+                          onFiles={stageIntoDrawer}
                         />
                       }
                       drawer={
@@ -1036,6 +1038,7 @@ export default function ThreadView({
                       }
                       headerActions={
                         <>
+                          <AttachButton onFiles={stageIntoDrawer} />
                           <DropdownMenu
                             button={{
                               label: "Reference",

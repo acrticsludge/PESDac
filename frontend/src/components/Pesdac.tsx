@@ -23,6 +23,7 @@ import {
 } from "../lib/attachments";
 import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
+import AttachButton from "./chat/AttachButton";
 import { getThread } from "../content/threads";
 import {
   useSessionVersion,
@@ -805,6 +806,12 @@ export default function ShellSideNav({
     setAttachments((prev) => prev.filter((s) => s.att.id !== id));
   };
 
+  // Files from picker, drop, or paste all land in the drawer.
+  const stageIntoDrawer = (files: File[]) => {
+    if (files.length === 0) return;
+    setAttachments((prev) => [...prev, ...stageFiles(files)]);
+  };
+
   /* ---------------------------------------------------------------------- */
   /* Suggestion → Composer                                                 */
   /* ---------------------------------------------------------------------- */
@@ -1108,19 +1115,14 @@ export default function ShellSideNav({
                         ? `Ask something about ${category}...`
                         : "Ask anything about your course..."
                     }
-                    input={
-                      <ChatComposerInput
-                        handleRef={composerInputRef}
-                        triggers={[referenceTrigger]}
-                        style={composerInput}
-                        onFiles={(files) =>
-                          setAttachments((prev) => [
-                            ...prev,
-                            ...stageFiles(files),
-                          ])
-                        }
-                      />
-                    }
+                      input={
+                        <ChatComposerInput
+                          handleRef={composerInputRef}
+                          triggers={[referenceTrigger]}
+                          style={composerInput}
+                          onFiles={stageIntoDrawer}
+                        />
+                      }
                     /* ------------------------------------------------------ */
                     /* Attached files                                         */
                     /* ------------------------------------------------------ */
@@ -1156,17 +1158,19 @@ export default function ShellSideNav({
                     /* ------------------------------------------------------ */
 
                     headerActions={
-                      <DropdownMenu
-                        button={{
-                          label: "Reference",
-                          variant: "ghost",
-                          size: "sm",
-                          icon: <Icon icon={AtSymbolIcon} size="sm" />,
-                          isIconOnly: true,
-                        }}
-                        hasChevron={false}
-                        menuWidth={240}
-                      >
+                      <>
+                        <AttachButton onFiles={stageIntoDrawer} />
+                        <DropdownMenu
+                          button={{
+                            label: "Reference",
+                            variant: "ghost",
+                            size: "sm",
+                            icon: <Icon icon={AtSymbolIcon} size="sm" />,
+                            isIconOnly: true,
+                          }}
+                          hasChevron={false}
+                          menuWidth={240}
+                        >
                         {REFERENCE_ITEMS.map((item) => (
                           <DropdownMenuItem
                             key={item.id}
@@ -1176,6 +1180,7 @@ export default function ShellSideNav({
                           />
                         ))}
                       </DropdownMenu>
+                      </>
                     }
                     /* ------------------------------------------------------ */
                     /* Mode + Settings                                        */
