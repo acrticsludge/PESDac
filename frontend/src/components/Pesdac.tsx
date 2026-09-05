@@ -25,7 +25,8 @@ import {
 } from "../lib/attachments";
 import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
-import ProfileView from "./profile/ProfileView";
+import ProfileDialog, { type ProfileTab } from "./profile/ProfileDialog";
+import { tabFromHash } from "./profile/sections";
 import AttachButton from "./chat/AttachButton";
 import { getThread } from "../content/threads";
 import {
@@ -584,11 +585,15 @@ export default function ShellSideNav({
     initialChat?.subject ??
     (isSubject(initialSubject) ? initialSubject : null);
 
-  // My Profile renders as a content-pane view inside the persisted shell
-  // (see my-profile spec): same sidebar, no rebuild. Optimistic setters on
-  // every navigation handler avoid a one-frame flash before the route-sync
-  // effect below corrects from props.
-  const [view, setView] = useState<"chat" | "profile">(initialView ?? "chat");
+  // My Profile is a settings-dialog (modal over the chat — settings
+  // without leaving the conversation). No route view, no shell churn:
+  // the dialog opens over whatever is underneath.
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileTab, setProfileTab] = useState<ProfileTab>("profile");
+  const openProfile = (tab: ProfileTab) => {
+    setProfileTab(tab);
+    setIsProfileOpen(true);
+  };
   // Added interaction state; the existing welcome/composer state remains intact.
   const [selectedChat, setSelectedChat] = useState<string | null>(
     initialChat?.label ?? null,
@@ -646,7 +651,11 @@ export default function ShellSideNav({
       initialCode != null ? getChatByCode(initialCode) : null;
     const subject =
       chat?.subject ?? (isSubject(initialSubject) ? initialSubject : null);
-    setView(initialView ?? "chat");
+    // Direct /profile load (or deep link like /profile#study): open the
+    // dialog over the welcome view. In-app opens go through openProfile.
+    if (initialView === "profile") {
+      openProfile(tabFromHash());
+    }
     setSelectedChat(chat?.label ?? null);
     setDraftCode(null);
     setDraftAutoSend(null);
@@ -728,9 +737,6 @@ export default function ShellSideNav({
       : demoDisplayLabel(ref.id);
 
   const openRef = (ref: ChatRef) => {
-    // In-place open (no navigation), so the view must switch explicitly —
-    // no new props arrive to correct it via the route-sync effect.
-    setView("chat");
     if (ref.kind === "custom") {
       setDraftCode(ref.id);
       setDraftAutoSend(null);
@@ -813,7 +819,6 @@ export default function ShellSideNav({
   // every other code deep-links to the same welcome shell with the
   // correct subject + selection until its thread is built.
   const openConversation = (label: string) => {
-    setView("chat");
     setSelectedChat(label);
     setDraftCode(null);
     const subject = getChatSubject(label);
@@ -822,7 +827,6 @@ export default function ShellSideNav({
   };
 
   const startNewChat = () => {
-    setView("chat");
     setSelectedChat(null);
     setDraftCode(null);
     setDraftAutoSend(null);
@@ -990,13 +994,9 @@ export default function ShellSideNav({
                   label="My Profile"
                   icon={UserCircleIcon}
                   href="#"
-                  isSelected={view === "profile"}
                   onClick={(event) => {
                     event.preventDefault();
-                    setView("profile");
-                    if (window.location.pathname !== "/profile") {
-                      navigate("/profile");
-                    }
+                    openProfile("profile");
                   }}
                 />
               </SideNavSection>
@@ -1009,7 +1009,7 @@ export default function ShellSideNav({
                 label="New chat"
                 icon={PlusIcon}
                 href="#"
-                isSelected={selectedChat === null && view === "chat"}
+                isSelected={selectedChat === null}
                 onClick={(event) => {
                   event.preventDefault();
                   startNewChat();
@@ -1160,10 +1160,6 @@ export default function ShellSideNav({
         /* ================================================================== */
       >
         {(() => {
-          // Profile view owns the content pane (sidebar untouched).
-          if (view === "profile") {
-            return <ProfileView key="profile" />;
-          }
           const draftChat =
             draftCode != null
               ? (customs.find((c) => c.code === draftCode) ?? null)
@@ -1354,9 +1350,8 @@ export default function ShellSideNav({
                               label: "Study preferences",
                               onClick: () => {
                                 // Shortcut to the full surface: Profile's
-                                // Study tab (my-profile spec §2).
-                                setView("profile");
-                                navigate("/profile#study");
+                                // Study tab, opened over the chat.
+                                openProfile("study");
                               },
                             },
                             {
@@ -1463,6 +1458,14 @@ export default function ShellSideNav({
           />
           );
         })()}
+
+        <ProfileDialog
+          isOpen={isProfileOpen}
+          initialTab={profileTab}
+          onOpenChange={(open) => {
+            if (!open) setIsProfileOpen(false);
+          }}
+        />
 
         <Dialog
           isOpen={renameTarget != null}

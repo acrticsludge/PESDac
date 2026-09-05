@@ -1,15 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import {
-  Layout,
-  LayoutContent,
-  VStack,
-  HStack,
-} from "@astryxdesign/core/Layout";
+import { VStack, HStack } from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
-import { TabList, Tab } from "@astryxdesign/core/TabList";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
@@ -28,9 +22,14 @@ import {
 } from "../../lib/session";
 import { SUBJECTS } from "../../lib/chat";
 
-export type ProfileTab = "profile" | "study" | "assistant" | "privacy" | "legal";
+export type ProfileTab =
+  | "profile"
+  | "study"
+  | "assistant"
+  | "privacy"
+  | "legal";
 
-const TABS: { value: ProfileTab; label: string }[] = [
+export const TABS: { value: ProfileTab; label: string }[] = [
   { value: "profile", label: "Profile" },
   { value: "study", label: "Study" },
   { value: "assistant", label: "Assistant" },
@@ -39,9 +38,8 @@ const TABS: { value: ProfileTab; label: string }[] = [
 ];
 
 // Deep-linkable tabs: /profile#study etc. Unknown hashes fall back.
-// SSR-safe (no window): server renders the default tab, client corrects
-// on mount — the same benign patch as session reads.
-function tabFromHash(): ProfileTab {
+// SSR-safe (no window): server renders the default tab.
+export function tabFromHash(): ProfileTab {
   if (typeof window === "undefined") return "profile";
   const hash = window.location.hash.replace(/^#/, "");
   return TABS.some((t) => t.value === hash) ? (hash as ProfileTab) : "profile";
@@ -57,7 +55,7 @@ const BRANCHES = ["CSE", "ECE", "EEE", "ME", "CE", "BT", "Other"].map((b) => ({
   label: b,
 }));
 
-function IdentitySection() {
+export function IdentitySection() {
   useSessionVersion();
   const profile = getProfile();
   return (
@@ -118,6 +116,137 @@ function IdentitySection() {
   );
 }
 
+const WEEKLY_GOALS = ["3 days", "5 days", "7 days"].map((g) => ({
+  value: g,
+  label: `${g} / week`,
+}));
+
+const DIFFICULTIES = [
+  { value: "easy", label: "Easy — recall and definitions" },
+  { value: "medium", label: "Medium — application and worked examples" },
+  { value: "hard", label: "Hard — exam-style and edge cases" },
+];
+
+export function StudySection() {
+  useSessionVersion();
+  const profile = getProfile();
+  const toggleSubject = (subject: string) => {
+    const has = profile.subjects.includes(subject);
+    updateProfile({
+      subjects: has
+        ? profile.subjects.filter((s) => s !== subject)
+        : [...profile.subjects, subject],
+    });
+  };
+  return (
+    <VStack gap={4}>
+      <Heading level={3}>Study preferences</Heading>
+      <VStack gap={2}>
+        <Text type="body" weight="semibold">
+          Enrolled subjects
+        </Text>
+        {SUBJECTS.map((subject) => (
+          <Switch
+            key={subject}
+            label={subject}
+            description={`Include ${subject} in study suggestions`}
+            value={profile.subjects.includes(subject)}
+            onChange={(checked) => toggleSubject(subject)}
+          />
+        ))}
+      </VStack>
+      <Divider />
+      <VStack gap={3}>
+        <TextInput
+          label="Semester exams"
+          placeholder="e.g. December 2026"
+          value={profile.examMonth}
+          onChange={(value) => updateProfile({ examMonth: value })}
+        />
+        <Selector
+          label="Weekly study goal"
+          options={WEEKLY_GOALS}
+          value={profile.weeklyGoal}
+          onChange={(value) => updateProfile({ weeklyGoal: value })}
+        />
+        <Selector
+          label="Quiz difficulty"
+          description="Shapes future quiz questions; nothing changes in chat yet"
+          options={DIFFICULTIES}
+          value={profile.difficulty}
+          onChange={(value) => updateProfile({ difficulty: value })}
+        />
+      </VStack>
+    </VStack>
+  );
+}
+
+const DEPTHS = [
+  { value: "auto", label: "Auto — match the question" },
+  { value: "ask", label: "Ask — short answers first" },
+  { value: "deep", label: "Deep — step-by-step by default" },
+];
+
+const VERBOSITIES = [
+  { value: "concise", label: "Concise" },
+  { value: "balanced", label: "Balanced" },
+  { value: "thorough", label: "Thorough" },
+];
+
+const CITATIONS = [
+  { value: "always", label: "Always show sources" },
+  { value: "on request", label: "Only on request" },
+];
+
+export function AssistantSection() {
+  useSessionVersion();
+  const profile = getProfile();
+  return (
+    <VStack gap={4}>
+      <Heading level={3}>Assistant behavior</Heading>
+      <VStack gap={3}>
+        <Selector
+          label="Default answer depth"
+          options={DEPTHS}
+          value={profile.depth}
+          onChange={(value) => updateProfile({ depth: value })}
+        />
+        <Selector
+          label="Explanation verbosity"
+          options={VERBOSITIES}
+          value={profile.verbosity}
+          onChange={(value) => updateProfile({ verbosity: value })}
+        />
+        <Selector
+          label="Source citations"
+          options={CITATIONS}
+          value={profile.citations}
+          onChange={(value) => updateProfile({ citations: value })}
+        />
+      </VStack>
+      <Divider />
+      <VStack gap={2}>
+        <Switch
+          label="Proactive quizzes"
+          description="Offer a quiz after finishing an explanation"
+          value={profile.proactiveQuiz}
+          onChange={(checked) => updateProfile({ proactiveQuiz: checked })}
+        />
+        <Switch
+          label="Follow-up suggestions"
+          description="Show suggestion pills under each answer"
+          value={profile.followUps}
+          onChange={(checked) => updateProfile({ followUps: checked })}
+        />
+      </VStack>
+      <Text type="supporting" color="secondary">
+        Answer depth applies to new messages right away. Verbosity,
+        citations, and quiz difficulty bind in the backend phase.
+      </Text>
+    </VStack>
+  );
+}
+
 const RETENTIONS = [
   { value: "forever", label: "Keep forever" },
   { value: "1 year", label: "Keep for 1 year" },
@@ -152,12 +281,13 @@ function exportAllData() {
   URL.revokeObjectURL(url);
 }
 
-function PrivacySection() {
+export function PrivacySection() {
   useSessionVersion();
   const profile = getProfile();
   const [confirmingClear, setConfirmingClear] = useState(false);
   return (
     <VStack gap={4}>
+      <Heading level={3}>Privacy &amp; data</Heading>
       <Selector
         label="Chat history retention"
         description="Enforced after the backend phase; stored as your preference today"
@@ -220,7 +350,8 @@ function PrivacySection() {
 const LEGAL_DOCS = [
   {
     name: "Terms of Use",
-    summary: "The rules for using PESDac: acceptable use, accounts, and liability.",
+    summary:
+      "The rules for using PESDac: acceptable use, accounts, and liability.",
   },
   {
     name: "Privacy Policy",
@@ -229,13 +360,15 @@ const LEGAL_DOCS = [
   },
   {
     name: "Cookie Notice",
-    summary: "Which cookies and local storage PESDac uses and what each one does.",
+    summary:
+      "Which cookies and local storage PESDac uses and what each one does.",
   },
 ];
 
-function LegalSection() {
+export function LegalSection() {
   return (
     <VStack gap={4}>
+      <Heading level={3}>Legal</Heading>
       <VStack gap={2}>
         {LEGAL_DOCS.map((doc) => (
           <Collapsible
@@ -267,178 +400,5 @@ function LegalSection() {
         </Text>
       </VStack>
     </VStack>
-  );
-}
-
-const WEEKLY_GOALS = ["3 days", "5 days", "7 days"].map((g) => ({
-  value: g,
-  label: `${g} / week`,
-}));
-
-const DIFFICULTIES = [
-  { value: "easy", label: "Easy — recall and definitions" },
-  { value: "medium", label: "Medium — application and worked examples" },
-  { value: "hard", label: "Hard — exam-style and edge cases" },
-];
-
-function StudySection() {
-  useSessionVersion();
-  const profile = getProfile();
-  const toggleSubject = (subject: string) => {
-    const has = profile.subjects.includes(subject);
-    updateProfile({
-      subjects: has
-        ? profile.subjects.filter((s) => s !== subject)
-        : [...profile.subjects, subject],
-    });
-  };
-  return (
-    <VStack gap={4}>
-      <VStack gap={2}>
-        <Text type="body" weight="semibold">
-          Enrolled subjects
-        </Text>
-        {SUBJECTS.map((subject) => (
-          <Switch
-            key={subject}
-            label={subject}
-            description={`Include ${subject} in study suggestions`}
-            value={profile.subjects.includes(subject)}
-            onChange={(checked) => toggleSubject(subject)}
-          />
-        ))}
-      </VStack>
-      <Divider />
-      <VStack gap={3}>
-        <TextInput
-          label="Semester exams"
-          placeholder="e.g. December 2026"
-          value={profile.examMonth}
-          onChange={(value) => updateProfile({ examMonth: value })}
-        />
-        <Selector
-          label="Weekly study goal"
-          options={WEEKLY_GOALS}
-          value={profile.weeklyGoal}
-          onChange={(value) => updateProfile({ weeklyGoal: value })}
-        />
-        <Selector
-          label="Quiz difficulty"
-          description="Shapes future quiz questions; nothing changes in chat yet"
-          options={DIFFICULTIES}
-          value={profile.difficulty}
-          onChange={(value) => updateProfile({ difficulty: value })}
-        />
-      </VStack>
-    </VStack>
-  );
-}
-
-const DEPTHS = [
-  { value: "auto", label: "Auto — match the question" },
-  { value: "ask", label: "Ask — short answers first" },
-  { value: "deep", label: "Deep — step-by-step by default" },
-];
-
-const VERBOSITIES = [
-  { value: "concise", label: "Concise" },
-  { value: "balanced", label: "Balanced" },
-  { value: "thorough", label: "Thorough" },
-];
-
-const CITATIONS = [
-  { value: "always", label: "Always show sources" },
-  { value: "on request", label: "Only on request" },
-];
-
-function AssistantSection() {
-  useSessionVersion();
-  const profile = getProfile();
-  return (
-    <VStack gap={4}>
-      <VStack gap={3}>
-        <Selector
-          label="Default answer depth"
-          options={DEPTHS}
-          value={profile.depth}
-          onChange={(value) => updateProfile({ depth: value })}
-        />
-        <Selector
-          label="Explanation verbosity"
-          options={VERBOSITIES}
-          value={profile.verbosity}
-          onChange={(value) => updateProfile({ verbosity: value })}
-        />
-        <Selector
-          label="Source citations"
-          options={CITATIONS}
-          value={profile.citations}
-          onChange={(value) => updateProfile({ citations: value })}
-        />
-      </VStack>
-      <Divider />
-      <VStack gap={2}>
-        <Switch
-          label="Proactive quizzes"
-          description="Offer a quiz after finishing an explanation"
-          value={profile.proactiveQuiz}
-          onChange={(checked) => updateProfile({ proactiveQuiz: checked })}
-        />
-        <Switch
-          label="Follow-up suggestions"
-          description="Show suggestion pills under each answer"
-          value={profile.followUps}
-          onChange={(checked) => updateProfile({ followUps: checked })}
-        />
-      </VStack>
-      <Text type="supporting" color="secondary">
-        Answer depth applies to new messages right away. Verbosity,
-        citations, and quiz difficulty bind in the backend phase.
-      </Text>
-    </VStack>
-  );
-}
-
-export default function ProfileView() {
-  const [tab, setTab] = useState<ProfileTab>(tabFromHash);
-  // Same-page hash jumps (e.g. composer Settings → #study) don't remount
-  // the persisted shell, so the tab follows the hash while in view.
-  useEffect(() => {
-    const onHash = () => setTab(tabFromHash());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-  return (
-    <Layout
-      height="fill"
-      contentWidth={720}
-      content={
-        <LayoutContent>
-          <VStack gap={4}>
-            <VStack gap={1}>
-              <Heading level={1}>My Profile</Heading>
-              <Text type="supporting" color="secondary">
-                Identity, study preferences, and how PESDac handles your
-                data.
-              </Text>
-            </VStack>
-            <TabList
-              value={tab}
-              onChange={(value) => setTab(value as ProfileTab)}
-              hasDivider
-            >
-              {TABS.map((t) => (
-                <Tab key={t.value} value={t.value} label={t.label} />
-              ))}
-            </TabList>
-            {tab === "profile" && <IdentitySection />}
-            {tab === "study" && <StudySection />}
-            {tab === "assistant" && <AssistantSection />}
-            {tab === "privacy" && <PrivacySection />}
-            {tab === "legal" && <LegalSection />}
-          </VStack>
-        </LayoutContent>
-      }
-    />
   );
 }

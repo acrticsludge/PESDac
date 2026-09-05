@@ -1,6 +1,6 @@
-# Spec: My Profile page (settings-sidebar)
+# Spec: My Profile page (settings-dialog)
 
-## Status: Implemented 2026-09-06 — view-swap route, wired dropdown, launch-badge legal rows, blank identity seeds.
+## Status: Implemented 2026-09-06 as a settings-dialog (modal over chat) — supersedes the approved view-swap; sidebar item, dropdown shortcut, hash deep-links, and blank identity seeds unchanged.
 
 ## Objective
 
@@ -26,24 +26,24 @@ Build:     & "C:\Program Files\nodejs\npm.cmd" run build                        
 Dev:       & "C:\Program Files\nodejs\npm.cmd" run dev
 ```
 
-## Architecture (route decision — see Open Questions)
+## Architecture (settings-dialog — user direction 2026-09-06)
 
-`AppLayout` always renders `Pesdac` and is `transition:persist`ed, so a
-separate full page would rebuild the shell. Profile therefore renders as
-a **content-pane view inside the persisted shell**, same pattern as the
-in-place draft thread:
+`AppLayout` always renders `Pesdac` and is `transition:persist`ed. Profile
+is a **`Dialog` modal over the chat** (settings without leaving the
+conversation), following the `settings-dialog` composition (header +
+searchable section nav + content pane) hand-built from verified 0.5.2
+primitives — its `SettingsSideNav`/`SettingsContentPane` composites don't
+exist in this version:
 
-- New `src/pages/profile.astro` (chrome copied from `new.astro`:
-  global.css, `<ClientRouter />`, inline theme style) rendering
-  `<AppLayout initialView="profile" />`; `AppLayout` gains the optional
-  prop and passes it through.
-- `Pesdac` gains `view: "chat" | "profile"` state, initialized from the
-  prop and re-synced in the existing route-sync `useEffect`. "My Profile"
-  sidebar item → `navigate("/profile")` + `setView("profile")`; "New
-  chat" and conversation clicks set `view` back to `"chat"`.
-- Direct load / refresh of `/profile` works via the prop; in-app switches
-  never leave the persisted shell (no sidebar flicker, per the
-  ClientRouter discipline).
+- `components/profile/sections.tsx`: the five storage-backed sections.
+- `components/profile/ProfileDialog.tsx`: wide `Dialog` (920px,
+  80dvh) with search-filtered section list + active pane.
+- `Pesdac` holds `isProfileOpen` + `profileTab`; sidebar My Profile and
+  the composer Settings → Study preferences shortcut call
+  `openProfile(tab)` in place — no navigation, no shell churn.
+- `/profile` (`profile.astro` + `AppLayout initialView`) still exists for
+  direct loads and deep links (`/profile#study`): the route-sync effect
+  auto-opens the dialog over the welcome view with the hashed tab.
 
 ## Sections (content contract)
 
@@ -105,7 +105,7 @@ integrity policy applies to submitted work."
 
 ```text
 frontend/src/pages/profile.astro        → route chrome (copy of new.astro pattern)
-frontend/src/components/profile/        → adapted template (ProfileView.tsx + section rows)
+frontend/src/components/profile/        → ProfileDialog.tsx (modal shell) + sections.tsx (five sections)
 frontend/src/lib/session.ts             → pesdac-profile-v1 accessors (getProfile/updateProfile)
 docs/reasonix/specs/my-profile.md       → this spec
 ```
@@ -149,8 +149,10 @@ Playwright harness (tracked separately).
 
 ## Success Criteria
 
-1. `/profile` loads directly (typed URL, refresh) with sidebar intact.
-2. Sidebar My Profile ↔ New chat switches views with no shell rebuild.
+1. `/profile` loads directly (typed URL, refresh) with the dialog open
+   over the sidebar-intact shell.
+2. Sidebar My Profile and the composer shortcut open the dialog in place
+   with no shell rebuild and no navigation.
 3. All five sections render from the adapted template; every editable
    control persists across reload.
 4. Export downloads JSON containing all `pesdac-*` state; Delete-all
