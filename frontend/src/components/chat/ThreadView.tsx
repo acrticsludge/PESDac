@@ -972,32 +972,6 @@ export default function ThreadView({
                   density="spacious"
                   style={{ flex: 1, minHeight: 0 }}
                   composer={
-                    <VStack gap={2}>
-                      {live == null && (followUps || sendError) && (
-                          <HStack gap={2} wrap="wrap" vAlign="center">
-                            {sendError ? (
-                              <Button
-                                label="Retry"
-                                variant="ghost"
-                                size="sm"
-                                icon={
-                                  <Icon icon={ArrowPathIcon} size="sm" />
-                                }
-                                onClick={handleRetry}
-                              />
-                            ) : (
-                              followUps?.map((suggestion) => (
-                                <Button
-                                  key={suggestion}
-                                  label={suggestion}
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleSend(suggestion)}
-                                />
-                              ))
-                            )}
-                          </HStack>
-                        )}
                       <ChatComposer
                       onSubmit={handleSend}
                       onStop={handleStop}
@@ -1117,7 +1091,6 @@ export default function ThreadView({
                         <ChatDictationButton dictation={dictation} />
                       }
                       />
-                    </VStack>
                   }
                 >
                   <ChatMessageList isStreaming={live != null}>
@@ -1156,6 +1129,41 @@ export default function ThreadView({
                         </Markdown>
                       </ChatMessageBubble>
                       <ChatToolCalls calls={live.tools} />
+                      </ChatMessage>
+                    )}
+                    {/* Follow-ups anchor to the last message in flow — never
+                        in the sticky dock, so scrolled content can't slide
+                        under them. */}
+                    {live == null && (followUps || sendError) && (
+                      <ChatMessage
+                        sender="assistant"
+                        avatar={<Avatar name="PESDac" size="md" />}
+                      >
+                        <ChatMessageBubble variant="ghost">
+                          <HStack gap={2} wrap="wrap" vAlign="center">
+                            {sendError ? (
+                              <Button
+                                label="Retry"
+                                variant="ghost"
+                                size="sm"
+                                icon={
+                                  <Icon icon={ArrowPathIcon} size="sm" />
+                                }
+                                onClick={handleRetry}
+                              />
+                            ) : (
+                              followUps?.map((suggestion) => (
+                                <Button
+                                  key={suggestion}
+                                  label={suggestion}
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleSend(suggestion)}
+                                />
+                              ))
+                            )}
+                          </HStack>
+                        </ChatMessageBubble>
                       </ChatMessage>
                     )}
                   </ChatMessageList>
