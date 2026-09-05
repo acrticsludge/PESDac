@@ -2,20 +2,17 @@
 
 // Login-split layout for /login and /signup (spec §B + D5).
 // Astryx chrome around <AuthView>: brand row on the left, a muted
-// image panel on the right (D5: muted, not marketing copy), a single
+// cover on the right (D5: muted, not marketing copy), a single
 // footer swap-link between login and signup, and no legal line (D4).
 // The auth form itself is Neon's <AuthView>.
 //
-// The page is a standalone island (never AppLayout), so this
-// component wraps the whole surface in a Center that fills the
-// viewport. The shell uses the same primitives the Playground
-// reference uses: VStack/HStack, Grid, Center, Card, Section, Text,
-// Icon, EmptyState.
+// Structure mirrors the Playground login-split reference 1:1:
+// Center > VStack > Card(padding:0) > Grid(columns:fit, gap:8) >
+// [Section(form) | div.login-split-image > Card(transparent) > img]
 //
-// Container query: collapses to one column below 512px and reorders
-// the image to the top with a 160px stacked strip. The min column
-// width (240) plus the 2x inset (32) plus the 2x page padding (48)
-// sums to 320 — the narrowest phone — so the form never clips.
+// Container query reorders the cover to the top below 512px and
+// tightens the padding at that point, keyed to the grid (not the
+// window) so it never desyncs.
 
 import { useEffect, type CSSProperties } from "react";
 import { VStack, HStack, StackItem } from "@astryxdesign/core/Layout";
@@ -34,14 +31,13 @@ import { authClient } from "../../lib/neon-auth";
 
 const COLUMN_MIN_WIDTH = 240;
 
-// D5: the COVER slot is muted (not a marketing illustration, no
-// copy) but the surface must read as a real cover so the two-column
-// layout is obvious. We use a low-contrast on-brand illustration
-// (rounded square + chart line) — the same shape the Playground
-// reference ships, retuned to the dark surface tokens so it
-// disappears into the panel without going invisible.
-const COVER_IMAGE_URL =
-  "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20800%20600%22%20preserveAspectRatio%3D%22xMidYMid%20slice%22%3E%3Crect%20width%3D%22800%22%20height%3D%22600%22%20fill%3D%22%231b1b1b%22%2F%3E%3Cg%20transform%3D%22translate%28400%20300%29%22%20fill%3D%22none%22%20stroke%3D%22%233a3a3a%22%20stroke-width%3D%228%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%22-90%22%20y%3D%22-90%22%20width%3D%22180%22%20height%3D%22180%22%20rx%3D%2232%22%2F%3E%3Ccircle%20cx%3D%2236%22%20cy%3D%22-36%22%20r%3D%225%22%20fill%3D%22%233a3a3a%22%20stroke%3D%22none%22%2F%3E%3Cpath%20d%3D%22M-68%2060%20L-16%200%20L20%2036%20L40%2016%20L68%2048%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E";
+// D5: the COVER slot is a muted, photographic-feeling image. We
+// ship a high-quality SVG illustration (rich vertical composition
+// with overlapping shapes) at /public/template-assets/... so it
+// reads as a real cover without depending on a network fetch. Drop
+// a vertical photo at the same path later if/when one is sourced
+// — the wrapper is already set up to object-fit:cover.
+const COVER_IMAGE_URL = "/template-assets/light-working-vertical-1.svg";
 
 const pageStyle: CSSProperties = {
   minHeight: "100%",
@@ -68,7 +64,7 @@ const LOGIN_SPLIT_CSS = `
 .login-split-image {
   width: 100%;
   order: 0;
-  min-height: 480px;
+  min-height: 520px;
 }
 @container login-split (max-width: 511px) {
   .login-split-grid {
@@ -95,8 +91,7 @@ export type AuthLayoutProps = {
 };
 
 export default function AuthLayout(props: AuthLayoutProps) {
-  // F1.1 / spec §B: logged-in users bounce to /new on mount. We
-  // wait one tick so the SDK has the session, then navigate.
+  // F1.1 / spec §B: logged-in users bounce to /new on mount.
   useEffect(() => {
     let cancelled = false;
     void authClient.getSession().then((res) => {
@@ -149,13 +144,8 @@ export default function AuthLayout(props: AuthLayoutProps) {
                         >
                           <AuthView
                             pathname={props.pathname}
-                            // The SDK renders its own swap link at the
-                            // bottom of the card ("Already have an
-                            // account? Sign in"). We surface exactly
-                            // one swap link (below the card) and hide
-                            // the SDK's via the classNames slot — the
-                            // SDK ignores cardFooter={null} but honors
-                            // classNames.footer.
+                            // Hide the SDK's swap link; ours lives below
+                            // the card and is the only one.
                             classNames={{ footer: "hidden" }}
                           />
                         </NeonAuthUIProvider>

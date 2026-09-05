@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1200" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1b1b1b"/>
+      <stop offset="100%" stop-color="#0d0d0d"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="0.7" cy="0.2" r="0.6">
+      <stop offset="0%" stop-color="#3a3a3a" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#3a3a3a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.2" cy="0.85" r="0.55">
+      <stop offset="0%" stop-color="#2a2a2a" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#2a2a2a" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0 L0 0 0 40" fill="none" stroke="#262626" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="800" height="1200" fill="url(#bg)"/>
+  <rect width="800" height="1200" fill="url(#grid)"/>
+  <rect width="800" height="1200" fill="url(#glow1)"/>
+  <rect width="800" height="1200" fill="url(#glow2)"/>
+  <g transform="translate(400 380)" fill="none" stroke="#3a3a3a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.85">
+    <rect x="-180" y="-180" width="360" height="360" rx="56"/>
+    <circle cx="80" cy="-80" r="10" fill="#3a3a3a" stroke="none"/>
+    <path d="M-140 140 L-40 0 L40 80 L80 40 L140 100"/>
+  </g>
+  <g transform="translate(400 880)" fill="none" stroke="#2e2e2e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.6">
+    <rect x="-120" y="-40" width="240" height="80" rx="12"/>
+    <path d="M-120 0 L-80 0"/>
+    <path d="M120 0 L80 0"/>
+  </g>
+</svg>
