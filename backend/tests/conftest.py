@@ -1,11 +1,17 @@
-"""SQLite-backed TestClient. Fresh schema per test; rate-limit buckets reset."""
+"""SQLite-backed TestClient. Fresh schema per test; rate-limit buckets reset.
+
+v6 (Neon Auth): env defaults include NEON_AUTH_JWKS_URL placeholder so
+the app factory can boot with validate=False. Real JWKS is monkeypatched
+in individual tests via `app.auth.neon._set_loader` / `_add_to_cache`.
+"""
 
 from __future__ import annotations
 
 import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
-os.environ.setdefault("JWT_SECRET", "test-secret-32-bytes-long-abcdef")
+os.environ.setdefault("NEON_AUTH_BASE_URL", "https://test.invalid/auth")
+os.environ.setdefault("NEON_AUTH_JWKS_URL", "https://test.invalid/jwks")
 os.environ.setdefault("FRONTEND_ORIGINS", "http://testserver")
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("ENV", "test")
@@ -63,12 +69,78 @@ def dbsession():
         db.close()
 
 
-def signup(client: TestClient, email: str = "you@example.com", password: str = "correct-horse-12345", name: str = ""):
-    r = client.post("/api/v1/auth/signup", json={"email": email, "password": password, "displayName": name})
-    assert r.status_code == 201, r.text
-    return r.json()["user"]
+# ---------- v6: Neon JWT helpers (TDD seam) ----------
+
+import time as _time
+import uuid as _uuid
+from base64 import urlsafe_b64encode as _b64u
+from typing import Any as _Any
+
+import jwt as _pyjwt
+from cryptography.hazmat.primitives import serialization as _ser
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey as _EdPriv,
+    Ed25519PublicKey as _EdPub,
+)
+
+from app import config as _config
+from app.auth import neon as _neon
 
 
-def auth_client(client: TestClient, email: str = "you@example.com") -> TestClient:
-    signup(client, email=email)
-    return client
+@pytest.fixture(scope="session")
+def _ed_keypair():
+    priv = _EdPriv.generate()
+    pub_der = priv.public_key().public_bytes(
+        encoding=_ser.Encoding.DER,
+        format=_ser.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return priv, pub_der
+
+
+def _jwk_for_ed25519(pub_der: bytes, kid: str = "test-kid") -> dict:
+    pub = _ser.load_der_public_key(pub_der)
+    assert isinstance(pub, _EdPub)
+    raw = pub.public_bytes(
+        encoding=_ser.Encoding.Raw, format=_ser.PublicFormat.Raw
+    )
+    return {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "kid": kid,
+        "alg": "EdDSA",
+        "x": _b64u(raw).rstrip(b"=").decode(),
+    }
+
+
+@pytest.fixture()
+def jwks_seeded(_ed_keypair, monkeypatch):
+    priv, pub_der = _ed_keypair
+    jwk = _jwk_for_ed25519(pub_der, kid="test-kid")
+    monkeypatch.setattr(_config, "NEON_AUTH_JWKS_URL", "https://test.invalid/jwks", raising=False)
+    _neon.reset_cache()
+    _neon._add_to_cache({"test-kid": jwk})
+    _neon._set_loader(lambda url: {"test-kid": jwk})
+    yield priv
+    _neon.reset_cache()
+
+
+def make_jwt(priv, *, sub: str | None = None, email: str = "user@example.com",
+             name: str = "User", kid: str = "test-kid") -> str:
+    return _pyjwt.encode(
+        {
+            "sub": sub or ("neon-sub-" + _uuid.uuid4().hex[:8]),
+            "email": email,
+            "name": name,
+            "iat": int(_time.time()),
+            "exp": int(_time.time()) + 3600,
+        },
+        priv, algorithm="EdDSA", headers={"kid": kid},
+    )
+
+
+@pytest.fixture()
+def auth_header(jwks_seeded):
+    """Returns a function: (sub=..., email=...) -> {'Authorization': 'Bearer ...'}."""
+    def _make(sub: str | None = None, email: str = "user@example.com", name: str = "User") -> dict[str, str]:
+        return {"Authorization": f"Bearer {make_jwt(jwks_seeded, sub=sub, email=email, name=name)}"}
+    return _make

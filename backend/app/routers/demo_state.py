@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import check_mutation_origin, get_current_user
+from app.deps import check_mutation_origin, get_current_user_from_neon
 from app.models.chats import DEMO_LABELS, DemoState
 from app.schemas.chats import DemoOut, DemoPut
 from app.schemas.common import error_body
@@ -25,7 +25,7 @@ def _out(row: DemoState) -> dict:
 
 
 @router.get("")
-def list_demo(result=Depends(get_current_user), db: Session = Depends(get_db)):
+def list_demo(    result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
     if isinstance(result, JSONResponse):
         return result
     rows = db.scalars(select(DemoState).where(DemoState.user_id == result.id)).all()
@@ -33,7 +33,7 @@ def list_demo(result=Depends(get_current_user), db: Session = Depends(get_db)):
 
 
 @router.put("/{label}")
-def put_demo(label: str, body: DemoPut, request: Request, result=Depends(get_current_user), db: Session = Depends(get_db)):
+def put_demo(label: str, body: DemoPut, request: Request,     result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
     if isinstance(result, JSONResponse):
         return result
     if denied := check_mutation_origin(request):

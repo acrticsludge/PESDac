@@ -39,6 +39,8 @@ class ProfileOut(BaseModel):
     retention: str = "forever"
     language: str = "en-US"
     region: str = "IN"
+    campus: str = ""
+    onboardingDone: bool = False
     timezone: str = "IST"
     shortcutNewChat: bool = True
     shortcutCancel: bool = True
@@ -65,6 +67,8 @@ class ProfilePatch(BaseModel):
     retention: str | None = None
     language: str | None = None
     region: str | None = None
+    campus: str | None = None
+    onboardingDone: bool | None = None
     timezone: str | None = None
     shortcutNewChat: bool | None = None
     shortcutCancel: bool | None = None
@@ -164,6 +168,13 @@ class ProfilePatch(BaseModel):
             raise ValueError("Unknown region.")
         return v
 
+    @field_validator("campus")
+    @classmethod
+    def _campus(cls, v: str | None) -> str | None:
+        if v is not None and v not in _p.CAMPUSES:
+            raise ValueError("Campus must be RR, EC, or blank.")
+        return v
+
     @field_validator("timezone")
     @classmethod
     def _tz(cls, v: str | None) -> str | None:
@@ -191,6 +202,8 @@ PROFILE_FIELDS: tuple[tuple[str, str], ...] = (
     ("retention", "retention"),
     ("language", "language"),
     ("region", "region"),
+    ("campus", "campus"),
+    ("onboarding_done", "onboardingDone"),
     ("timezone", "timezone"),
     ("shortcut_new_chat", "shortcutNewChat"),
     ("shortcut_cancel", "shortcutCancel"),

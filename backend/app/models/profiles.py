@@ -23,6 +23,7 @@ CITATIONS = ("always", "on request")
 RETENTIONS = ("forever", "1 year", "30 days", "session")
 SEMESTERS = ("", "1", "2", "3", "4", "5", "6", "7", "8")
 BRANCHES = ("", "CSE", "ECE", "EEE", "ME", "CE", "BT", "Other")
+CAMPUSES = ("", "RR", "EC")
 LANGUAGES = (
     "en-US", "en-GB", "hi", "kn", "ta", "te", "ml", "mr", "bn",
     "es", "fr", "de", "ja", "zh-CN", "pt", "ru", "ar", "ko",
@@ -61,6 +62,8 @@ class Profile(Base):
     retention: Mapped[str] = mapped_column(String(16), default="forever", nullable=False)
     language: Mapped[str] = mapped_column(String(16), default="en-US", nullable=False)
     region: Mapped[str] = mapped_column(String(16), default="IN", nullable=False)
+    campus: Mapped[str] = mapped_column(String(8), default="", nullable=False)
+    onboarding_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     timezone: Mapped[str] = mapped_column(String(16), default="IST", nullable=False)
     shortcut_new_chat: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     shortcut_cancel: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

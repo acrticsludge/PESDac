@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import check_mutation_origin, get_current_user
+from app.deps import check_mutation_origin, get_current_user_from_neon
 from app.models.profiles import Profile
 from app.schemas.profiles import PROFILE_FIELDS, ProfilePatch, profile_to_out
 
@@ -25,7 +25,7 @@ def _get_or_create(db: Session, user) -> Profile:
 
 
 @router.get("/me")
-def get_me(result=Depends(get_current_user), db: Session = Depends(get_db)):
+def get_me(    result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
     if isinstance(result, JSONResponse):
         return result
     profile = _get_or_create(db, result)
@@ -33,7 +33,7 @@ def get_me(result=Depends(get_current_user), db: Session = Depends(get_db)):
 
 
 @router.patch("/me")
-def patch_me(body: ProfilePatch, request: Request, result=Depends(get_current_user), db: Session = Depends(get_db)):
+def patch_me(body: ProfilePatch, request: Request,     result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
     if isinstance(result, JSONResponse):
         return result
     if denied := check_mutation_origin(request):

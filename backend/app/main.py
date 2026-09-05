@@ -70,7 +70,7 @@ app = None
 try:
     # Import-time creation is skipped when env is absent (tests build their own
     # app via create_app(validate=False) with an SQLite override).
-    if config.DATABASE_URL and config.JWT_SECRET and config.FRONTEND_ORIGINS:
+    if config.DATABASE_URL and config.NEON_AUTH_JWKS_URL and config.FRONTEND_ORIGINS:
         app = create_app(validate=True)
     else:
         app = create_app(validate=False)

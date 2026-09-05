@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app import security
 from app.db import get_db
-from app.deps import check_mutation_origin, get_current_user
+from app.deps import check_mutation_origin, get_current_user_from_neon
 from app.models.chats import Chat
 from app.schemas.chats import ChatCreate, ChatOut, ChatPatch
 from app.schemas.common import error_body
@@ -40,7 +40,7 @@ def _get_owned(db: Session, user_id, code: str) -> Chat | None:
 
 @router.get("")
 def list_chats(
-    result=Depends(get_current_user),
+    result=Depends(get_current_user_from_neon),
     db: Session = Depends(get_db),
     archived: bool = False,
     subject: str | None = None,
@@ -63,7 +63,7 @@ def list_chats(
 
 
 @router.post("", status_code=201)
-def create_chat(body: ChatCreate, request: Request, result=Depends(get_current_user), db: Session = Depends(get_db)):
+def create_chat(body: ChatCreate, request: Request, result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
     if isinstance(result, JSONResponse):
         return result
     if denied := check_mutation_origin(request):
@@ -84,7 +84,7 @@ def create_chat(body: ChatCreate, request: Request, result=Depends(get_current_u
 
 
 @router.patch("/{code}")
-def patch_chat(code: str, body: ChatPatch, request: Request, result=Depends(get_current_user), db: Session = Depends(get_db)):
+def patch_chat(code: str, body: ChatPatch, request: Request, result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
     if isinstance(result, JSONResponse):
         return result
     if denied := check_mutation_origin(request):
@@ -108,7 +108,7 @@ def patch_chat(code: str, body: ChatPatch, request: Request, result=Depends(get_
 
 
 @router.delete("/{code}", status_code=204)
-def delete_chat(code: str, request: Request, result=Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_chat(code: str, request: Request, result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
     if isinstance(result, JSONResponse):
         return result
     if denied := check_mutation_origin(request):
@@ -122,7 +122,7 @@ def delete_chat(code: str, request: Request, result=Depends(get_current_user), d
 
 
 @router.delete("", status_code=200)
-def clear_chats(request: Request, result=Depends(get_current_user), db: Session = Depends(get_db)):
+def clear_chats(request: Request, result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
     """Delete-all (mirrors clearAllChats): chats only, profile/demo kept."""
     if isinstance(result, JSONResponse):
         return result

@@ -1,7 +1,7 @@
-"""Fail-fast environment configuration (arch doc §6).
+"""Fail-fast environment configuration (v6 — Neon Auth).
 
-Only these vars are read. Missing/invalid required values raise at import so
-the process never boots half-configured. No secrets are logged.
+Only these vars are read. Missing/invalid required values raise at
+import so the process never boots half-configured. No secrets are logged.
 """
 
 from __future__ import annotations
@@ -18,16 +18,6 @@ def _get(name: str, default: str | None = None) -> str | None:
     return value
 
 
-def _get_int(name: str, default: int) -> int:
-    raw = _get(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise RuntimeError(f"Invalid integer for {name}: {raw!r}") from exc
-
-
 def _get_bool(name: str, default: bool) -> bool:
     raw = _get(name)
     if raw is None:
@@ -38,9 +28,12 @@ def _get_bool(name: str, default: bool) -> bool:
 ENV: str = _get("ENV", "dev") or "dev"
 
 DATABASE_URL: str | None = _get("DATABASE_URL")
-JWT_SECRET: str | None = _get("JWT_SECRET")
-ACCESS_TTL_MIN: int = _get_int("ACCESS_TTL_MIN", 15)
-REFRESH_TTL_DAYS: int = _get_int("REFRESH_TTL_DAYS", 30)
+
+# Neon Auth (Managed Better Auth in our Neon project). v6 backend is
+# stateless about identity: we verify the access_token JWT against JWKS
+# on every protected request.
+NEON_AUTH_BASE_URL: str | None = _get("NEON_AUTH_BASE_URL")
+NEON_AUTH_JWKS_URL: str | None = _get("NEON_AUTH_JWKS_URL")
 
 _raw_origins: str | None = _get("FRONTEND_ORIGINS")
 FRONTEND_ORIGINS: list[str] = (
@@ -51,23 +44,12 @@ FRONTEND_ORIGINS: list[str] = (
 
 COOKIE_SECURE: bool = _get_bool("COOKIE_SECURE", True)
 
-GOOGLE_CLIENT_ID: str | None = _get("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET: str | None = _get("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI: str | None = _get("GOOGLE_REDIRECT_URI")
-
-RESEND_API_KEY: str | None = _get("RESEND_API_KEY")
-RESET_MAIL_FROM: str | None = _get("RESET_MAIL_FROM")
-
-RATE_LIMIT_LOGIN: int = _get_int("RATE_LIMIT_LOGIN", 10)
-RATE_LIMIT_SIGNUP: int = _get_int("RATE_LIMIT_SIGNUP", 5)
-
-ACCESS_COOKIE = "pesdac_at"
-REFRESH_COOKIE = "pesdac_rt"
-OAUTH_STATE_COOKIE = "pesdac_oauth_state"
-
-
-def google_configured() -> bool:
-    return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI)
+# Legacy defaults kept so any consumer that still references them
+# doesn't crash. Auth-class rate limiting is now Neon-owned; the
+# remaining values are reserved for future per-IP abuse protection on
+# our chat/profile routes.
+RATE_LIMIT_LOGIN: int = 10
+RATE_LIMIT_SIGNUP: int = 5
 
 
 def validate_startup(require_db: bool = True) -> None:
@@ -75,10 +57,10 @@ def validate_startup(require_db: bool = True) -> None:
     errors: list[str] = []
     if require_db and not DATABASE_URL:
         errors.append("DATABASE_URL is required")
-    if not JWT_SECRET:
-        errors.append("JWT_SECRET is required")
-    elif len(JWT_SECRET) < 32:
-        errors.append("JWT_SECRET must be at least 32 characters")
+    if not NEON_AUTH_BASE_URL:
+        errors.append("NEON_AUTH_BASE_URL is required")
+    if not NEON_AUTH_JWKS_URL:
+        errors.append("NEON_AUTH_JWKS_URL is required")
     if not FRONTEND_ORIGINS:
         errors.append("FRONTEND_ORIGINS must list at least one origin")
     if not COOKIE_SECURE and any(

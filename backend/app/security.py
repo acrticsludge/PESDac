@@ -1,17 +1,17 @@
-"""Auth primitives: password hashing, JWT access tokens, opaque refresh tokens,
-chat-code generation. Argon2id required in prod; pbkdf2 fallback for dev/test
-only when argon2-cffi is absent (never in prod — enforced at startup).
+"""Security primitives (v6 — Neon Auth).
+
+- No password hashing (Neon owns passwords).
+- No JWT minting (we only verify the Neon JWT).
+- No opaque refresh tokens (Neon owns sessions).
+- Kept here: chat-code generation, title cleaning, and the
+  email normalization/validation used by the profile PATCH.
 """
 
 from __future__ import annotations
 
-import hashlib
 import re
 import secrets
 import string
-from datetime import datetime, timedelta, timezone
-
-from app import config
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CHAT_CODE_RE = re.compile(r"^[a-z0-9]{6}$")
@@ -25,61 +25,6 @@ RESERVED_CODES = frozenset({
     "p4y8a5", "q6z1b7", "r8a3c9", "s1b5d2", "t3c7e4", "u5d9f6",
 })
 
-try:  # argon2-cffi (prod path)
-    from argon2 import PasswordHasher as _Argon2Hasher
-    from argon2.exceptions import VerifyMismatchError as _Mismatch
-
-    _argon2 = _Argon2Hasher()
-    _HAS_ARGON2 = True
-except Exception:  # ImportError etc. — dev/test fallback only
-    _argon2 = None
-    _Mismatch = Exception  # type: ignore[assignment,misc]
-    _HAS_ARGON2 = False
-
-
-def argon2_available() -> bool:
-    return _HAS_ARGON2
-
-
-def _pbkdf2_hash(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 210_000)
-    return f"pbkdf2$210000${salt.hex()}${dk.hex()}"
-
-
-def _pbkdf2_verify(password: str, stored: str) -> bool:
-    try:
-        _, iters, salt_hex, dk_hex = stored.split("$")
-        dk = hashlib.pbkdf2_hmac(
-            "sha256", password.encode(), bytes.fromhex(salt_hex), int(iters)
-        )
-        return secrets.compare_digest(dk.hex(), dk_hex)
-    except Exception:
-        return False
-
-
-def hash_password(password: str) -> str:
-    if _HAS_ARGON2:
-        assert _argon2 is not None
-        return _argon2.hash(password)
-    if config.ENV == "prod":
-        raise RuntimeError("argon2-cffi is required in prod")
-    return _pbkdf2_hash(password)
-
-
-def verify_password(password: str, stored: str) -> bool:
-    if stored.startswith("pbkdf2$"):
-        return _pbkdf2_verify(password, stored)
-    if not _HAS_ARGON2:
-        return False
-    assert _argon2 is not None
-    try:
-        return _argon2.verify(stored, password)
-    except _Mismatch:
-        return False
-    except Exception:
-        return False
-
 
 def normalize_email(email: str) -> str:
     return email.strip().lower()
@@ -87,49 +32,6 @@ def normalize_email(email: str) -> str:
 
 def valid_email(email: str) -> bool:
     return len(email) <= 254 and EMAIL_RE.match(email) is not None
-
-
-def _jwt() -> object:
-    try:
-        import jwt as pyjwt  # type: ignore[import-not-found]
-
-        return pyjwt
-    except Exception as exc:
-        raise RuntimeError("pyjwt is required") from exc
-
-
-def create_access_token(user_id: str) -> str:
-    pyjwt = _jwt()
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": user_id,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=config.ACCESS_TTL_MIN)).timestamp()),
-    }
-    assert config.JWT_SECRET is not None
-    return pyjwt.encode(payload, config.JWT_SECRET, algorithm="HS256")  # type: ignore[union-attr]
-
-
-def decode_access_token(token: str) -> str | None:
-    pyjwt = _jwt()
-    assert config.JWT_SECRET is not None
-    try:
-        payload = pyjwt.decode(token, config.JWT_SECRET, algorithms=["HS256"])  # type: ignore[union-attr]
-        sub = payload.get("sub")
-        return str(sub) if sub else None
-    except Exception:
-        return None
-
-
-def new_refresh_token() -> tuple[str, str]:
-    """Return (opaque_token, sha256_hex) — only the hash is stored."""
-    token = secrets.token_urlsafe(32)
-    digest = hashlib.sha256(token.encode()).hexdigest()
-    return token, digest
-
-
-def hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def gen_chat_code() -> str:

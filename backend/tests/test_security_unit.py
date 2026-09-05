@@ -1,6 +1,4 @@
-"""Unit contract: codegen, titles, email, passwords, JWT, refresh hashing."""
-
-from __future__ import annotations
+"""Unit contract (v6): codegen, titles, email. Passwords + JWT removed (Neon-owned)."""
 
 import re
 
@@ -30,22 +28,3 @@ def test_email_normalize_and_validate():
     assert security.valid_email("you@example.com")
     assert not security.valid_email("not-an-email")
     assert not security.valid_email("a@b")
-
-
-def test_password_roundtrip_and_wrong_reject():
-    stored = security.hash_password("correct-horse-12345")
-    assert security.verify_password("correct-horse-12345", stored)
-    assert not security.verify_password("wrong-password-00000", stored)
-
-
-def test_jwt_roundtrip_and_tamper():
-    token = security.create_access_token("user-123")
-    assert security.decode_access_token(token) == "user-123"
-    assert security.decode_access_token(token + "tampered") is None
-    assert security.decode_access_token("") is None
-
-
-def test_refresh_token_hash_is_stable():
-    token, digest = security.new_refresh_token()
-    assert security.hash_token(token) == digest
-    assert len(digest) == 64
