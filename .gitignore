@@ -32,5 +32,12 @@ uploads/
 video_frames/
 transcripts/
 
+# Backend (Python)
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+backend/.env
+
 # Reference (do not forget)
 nox/
