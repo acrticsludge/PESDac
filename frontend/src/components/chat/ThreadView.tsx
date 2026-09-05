@@ -71,6 +71,7 @@ import type {
   UserBlock,
 } from "../../content/threads/types";
 import { REFERENCE_ITEMS, referenceIdForLabel } from "../../lib/references";
+import { dayDividerLabel } from "../../lib/chat";
 import {
   stageFiles,
   revokeStaged,
@@ -355,6 +356,20 @@ function assistantBlockText(block: AssistantBlock): string {
     .join("\n\n");
 }
 
+// Ghost icon button shared by both message footers.
+function RegenerateButton({ onRegenerate }: { onRegenerate: () => void }) {
+  return (
+    <Button
+      label="Regenerate response"
+      variant="ghost"
+      size="sm"
+      isIconOnly
+      icon={<Icon icon={ArrowPathIcon} size="sm" />}
+      onClick={onRegenerate}
+    />
+  );
+}
+
 // Whole conversation as markdown (for the Copy transcript action).
 function buildTranscript(thread: Thread, blocks: Block[]): string {
   const lines = [`# ${thread.label} (${thread.subject})`, ""];
@@ -573,7 +588,7 @@ export default function ThreadView({
     if (!text || live) return;
     setSendError(null);
     // Day break: new messages on a later day than the last one get a
-    // "Today" divider first (mockup label; backend sends real dates).
+    // "Today · Subject" divider first (mockup label; backend sends real dates).
     let needsDayDivider = false;
     for (let i = blocks.length - 1; i >= 0; i--) {
       const b = blocks[i];
@@ -587,7 +602,13 @@ export default function ThreadView({
     }
     appendBlocks(sessionKey, [
       ...(needsDayDivider
-        ? [{ from: "system", text: "Today", variant: "divider" } as const]
+        ? [
+            {
+              from: "system",
+              text: dayDividerLabel("Today", thread.subject),
+              variant: "divider",
+            } as const,
+          ]
         : []),
       {
         from: "user",
@@ -612,19 +633,18 @@ export default function ThreadView({
     startTurn(text, { forceOk: true });
   };
 
-  // Regenerate: re-run the last turn. Session-added assistant turn → pop it
+  // Regenerate lives beside each message's copy action, not above the
+  // composer: re-run the last turn. Session-added assistant turn → pop it
   // and replay the prompt; trailing session-added user message (stopped or
   // failed before an answer) → answer it directly. Static demo tails are
   // immutable, so no regenerate there.
-  const canRegenerate =
-    live == null &&
-    sendError == null &&
-    blocks.length > thread.blocks.length &&
-    (blocks[blocks.length - 1].from === "assistant" ||
-      blocks[blocks.length - 1].from === "user");
+  const isLastSessionTurn = (index: number) =>
+    index === blocks.length - 1 && blocks.length > thread.blocks.length;
+  const canRegenerateNow = live == null && sendError == null;
 
   const handleRegenerate = () => {
-    if (!canRegenerate || live) return;
+    if (!canRegenerateNow || live) return;
+    if (blocks.length <= thread.blocks.length) return;
     const last = blocks[blocks.length - 1];
     if (last.from === "assistant") {
       const text =
@@ -807,7 +827,11 @@ export default function ThreadView({
     }
   };
 
-  const renderUserBlock = (block: UserBlock, key: number) => (
+  const renderUserBlock = (
+    block: UserBlock,
+    key: number,
+    showRegenerate: boolean,
+  ) => (
     <ChatMessage key={key} sender="user">
       {block.attachments && block.attachments.length > 0 && (
         <HStack gap={1} wrap="wrap">
@@ -837,6 +861,11 @@ export default function ThreadView({
                   timestamp={
                     <Timestamp value={block.time} format="time" />
                   }
+                  footer={
+                    showRegenerate && canRegenerateNow ? (
+                      <RegenerateButton onRegenerate={handleRegenerate} />
+                    ) : undefined
+                  }
                 />
               ) : undefined
             }
@@ -848,7 +877,11 @@ export default function ThreadView({
     </ChatMessage>
   );
 
-  const renderAssistantBlock = (block: AssistantBlock, key: number) => {
+  const renderAssistantBlock = (
+    block: AssistantBlock,
+    key: number,
+    showRegenerate: boolean,
+  ) => {
     const after = block.toolCallsAfter ?? block.bubbles.length - 1;
     const error = block.error;
     const toolCalls =
@@ -914,6 +947,9 @@ export default function ThreadView({
                 text={assistantBlockText(block)}
                 label="Copy response"
               />
+              {showRegenerate && canRegenerateNow && (
+                <RegenerateButton onRegenerate={handleRegenerate} />
+              )}
             </HStack>
           }
         />
@@ -943,8 +979,7 @@ export default function ThreadView({
                   style={{ flex: 1, minHeight: 0 }}
                   composer={
                     <VStack gap={2}>
-                      {live == null &&
-                        (followUps || sendError || canRegenerate) && (
+                      {live == null && (followUps || sendError) && (
                           <HStack gap={2} wrap="wrap" vAlign="center">
                             {sendError ? (
                               <Button
@@ -957,29 +992,15 @@ export default function ThreadView({
                                 onClick={handleRetry}
                               />
                             ) : (
-                              <>
-                                {followUps?.map((suggestion) => (
-                                  <Button
-                                    key={suggestion}
-                                    label={suggestion}
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleSend(suggestion)}
-                                  />
-                                ))}
-                                {canRegenerate && (
-                                  <Button
-                                    label="Regenerate response"
-                                    variant="ghost"
-                                    size="sm"
-                                    isIconOnly
-                                    icon={
-                                      <Icon icon={ArrowPathIcon} size="sm" />
-                                    }
-                                    onClick={handleRegenerate}
-                                  />
-                                )}
-                              </>
+                              followUps?.map((suggestion) => (
+                                <Button
+                                  key={suggestion}
+                                  label={suggestion}
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleSend(suggestion)}
+                                />
+                              ))
                             )}
                           </HStack>
                         )}
@@ -1122,9 +1143,17 @@ export default function ThreadView({
                         );
                       }
                       if (block.from === "user") {
-                        return renderUserBlock(block, i);
+                        return renderUserBlock(
+                          block,
+                          i,
+                          isLastSessionTurn(i),
+                        );
                       }
-                      return renderAssistantBlock(block, i);
+                      return renderAssistantBlock(
+                        block,
+                        i,
+                        isLastSessionTurn(i),
+                      );
                     })}
                     {live && (
                       <ChatMessage

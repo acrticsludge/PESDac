@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 import type { Block, Thread } from "../content/threads/types";
-import { CHAT_CODES } from "./chat";
+import { CHAT_CODES, dayDividerLabel } from "./chat";
 
 export type CustomChat = {
   code: string;
@@ -297,13 +297,14 @@ const DEFAULT_REFERENCES = [
 
 /** Ephemeral thread shell for a custom chat; all turns live in its overlay. */
 export function makeDraftThread(chat: CustomChat): Thread {
+  const divider = dayDividerLabel("Today", chat.subject);
   return {
     label: chat.title,
     subject: chat.subject,
     mode: "ask",
     placeholder: `Ask anything about ${chat.subject}...`,
     composerReferenceItems: DEFAULT_REFERENCES,
-    divider: "Today",
-    blocks: [{ from: "system", text: "Today", variant: "divider" }],
+    divider,
+    blocks: [{ from: "system", text: divider, variant: "divider" }],
   };
 }

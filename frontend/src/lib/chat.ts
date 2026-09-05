@@ -10,6 +10,28 @@ export function isSubject(value: string | undefined): value is Subject {
   return (SUBJECTS as readonly string[]).includes(value ?? "");
 }
 
+// Display names (match the demo-thread divider/placeholder wording).
+export const SUBJECT_NAMES: Record<Subject, string> = {
+  CN: "Computer Networks",
+  OS: "Operating Systems",
+  DLCD: "Digital Logic",
+  DSA: "Data Structures",
+  Math: "Mathematics",
+};
+
+/** Display name for a subject code (unknown codes pass through). */
+export function subjectDisplayName(subject: string): string {
+  return (
+    (SUBJECT_NAMES as Record<string, string>)[subject] ?? subject
+  );
+}
+
+// Day-divider label: "----- [Day] · [Subject] -----" (divider chrome comes
+// from Astryx ChatSystemMessage variant="divider"; this is the text).
+export function dayDividerLabel(day: string, subject: string): string {
+  return `${day} · ${subjectDisplayName(subject)}`;
+}
+
 // Stable 6-char shareable codes, one per demo conversation.
 // Do NOT regenerate at runtime — deep links depend on stability.
 export const CHAT_CODES: Record<string, string> = {
