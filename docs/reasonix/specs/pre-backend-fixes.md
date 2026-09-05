@@ -72,20 +72,19 @@ phase work once islands diverge).
 - Verification build chunk (2026-09-06): `AppLayout.<hash>.js` = 630 kB
   (Astryx + React + app, single island); `client.<hash>.js` = 178 kB.
 
-## 6. Dead controls — cut list (audit §3 decisions)
+## 6. Dead controls — restored, do not touch (user direction 2026-09-06)
 
-Cut (silent no-ops, no backend owner yet — backend re-adds each with a
-real handler when its capability lands):
+These were cut, then restored on the user's instruction not to remove any
+items unprompted. They stay exactly as they are until the user says
+otherwise — several are silent no-ops, tracked here, not fixed:
 
-- Sidebar "Study Library" item (`Pesdac.tsx:1007`).
-- Sidebar Account footer: "Settings" + "My Profile" (`Pesdac.tsx:969-979`,
-  whole `SideNavSection`).
-- Welcome composer "Settings" `DropdownMenu` (`Pesdac.tsx:1309-1332`;
-  all three items are `onClick: () => {}`).
-- Study-note Share button (`ThreadView.tsx:197-203`; no handler —
-  contract inventory row 7 stays "no UI stub" until share links land).
+- Sidebar "Study Library" item (`Pesdac.tsx`).
+- Sidebar Account footer: "Settings" + "My Profile" (`href="#"`).
+- Welcome composer "Settings" `DropdownMenu` (all three items are
+  `onClick: () => {}`).
+- Study-note Share button (no handler — share links stay backend-gated).
 
-Keep (functional despite `href="#"` + `preventDefault`): conversation
-items, New chat, Search conversations (all real `onClick` navigation);
-`SideNavHeading headingHref` (branding, not a control). Read-aloud: no
-matches in `src` — already absent, nothing to do.
+Kept throughout (functional despite `href="#"` + `preventDefault`):
+conversation items, New chat, Search conversations (all real `onClick`
+navigation); `SideNavHeading headingHref` (branding, not a control).
+Read-aloud: no matches in `src` — absent, nothing to do.

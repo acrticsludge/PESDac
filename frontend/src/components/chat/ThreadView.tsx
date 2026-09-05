@@ -54,6 +54,7 @@ import {
   DocumentTextIcon,
   ClipboardDocumentIcon,
   CheckIcon,
+  ShareIcon,
   XMarkIcon,
   ChevronRightIcon,
   AtSymbolIcon,
@@ -371,8 +372,13 @@ function StudyNoteActions({
         isIconOnly
         onClick={onCopy}
       />
-      {/* Share cut with the dead controls (pre-backend fixes spec §6):
-          share links are backend-gated and return with a real handler. */}
+      <Button
+        label="Share"
+        variant="ghost"
+        size="sm"
+        icon={<Icon icon={ShareIcon} size="sm" />}
+        isIconOnly
+      />
       {onClose && (
         <Button
           label="Close study note"

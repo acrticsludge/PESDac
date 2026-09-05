@@ -126,7 +126,10 @@ import {
   SparklesIcon,
   PlusIcon,
   MagnifyingGlassIcon,
+  BookOpenIcon,
   BookmarkIcon,
+  Cog6ToothIcon,
+  UserCircleIcon,
   ComputerDesktopIcon,
   GlobeAltIcon,
   CpuChipIcon,
@@ -965,10 +968,19 @@ export default function ShellSideNav({
                 headingHref="#"
               />
             }
+            footer={
+              <SideNavSection title="Account" isHeaderHidden>
+                <SideNavItem label="Settings" icon={Cog6ToothIcon} href="#" />
+
+                <SideNavItem
+                  label="My Profile"
+                  icon={UserCircleIcon}
+                  href="#"
+                />
+              </SideNavSection>
+            }
           >
-            {/* Main navigation. No Account footer: Settings/Profile were
-                dead links and were cut (pre-backend fixes spec §6) — they
-                return with backend auth, not as silent no-ops. */}
+            {/* Main navigation */}
 
             <SideNavSection title="Menu" isHeaderHidden>
               <SideNavItem
@@ -994,9 +1006,7 @@ export default function ShellSideNav({
                 }}
               />
 
-              {/* Study Library cut with the dead controls (pre-backend
-                  fixes spec §6): it had no route or content. Returns as a
-                  real library with the backend. */}
+              <SideNavItem label="Study Library" icon={BookOpenIcon} href="#" />
             </SideNavSection>
 
             {isSearchOpen && (
@@ -1269,7 +1279,7 @@ export default function ShellSideNav({
                       </>
                     }
                     /* ------------------------------------------------------ */
-                    /* Mode (Settings cut: dead menu, see spec §6)            */
+                    /* Mode + Settings                                        */
                     /* ------------------------------------------------------ */
 
                     footerActions={
@@ -1302,6 +1312,31 @@ export default function ShellSideNav({
                               }
                             },
                           }))}
+                        />
+
+                        <DropdownMenu
+                          button={{
+                            label: "Settings",
+                            variant: "ghost",
+                            size: "md",
+                            icon: <Icon icon={Cog6ToothIcon} size="sm" />,
+                            children: "Settings",
+                          }}
+                          menuWidth={200}
+                          items={[
+                            {
+                              label: "Study preferences",
+                              onClick: () => {},
+                            },
+                            {
+                              label: "Knowledge sources",
+                              onClick: () => {},
+                            },
+                            {
+                              label: "About PESDac",
+                              onClick: () => {},
+                            },
+                          ]}
                         />
                       </>
                     }
