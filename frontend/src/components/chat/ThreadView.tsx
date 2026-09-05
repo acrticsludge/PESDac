@@ -77,7 +77,11 @@ import type {
   ToolCall,
   UserBlock,
 } from "../../content/threads/types";
-import { REFERENCE_ITEMS, referenceIdForLabel } from "../../lib/references";
+import {
+  REFERENCE_ITEMS,
+  referenceIdForLabel,
+  parseReferenceIds,
+} from "../../lib/references";
 import { dayDividerLabel } from "../../lib/chat";
 import {
   stageFiles,
@@ -291,6 +295,29 @@ function lastUserText(blocks: Block[]): string {
     if (b.from === "user") return userBlockText(b);
   }
   return "";
+}
+
+// Sent text with @-tokens shown as badges (same shape as stored `mention`
+// bubbles). Render-only: raw text stays the source of truth for retry,
+// regenerate, and find. Unknown @words stay plain text.
+function renderUserText(text: string, key: number) {
+  const ids = parseReferenceIds(text).filter((id) =>
+    REFERENCE_ITEMS.some((item) => String(item.id) === id.toLowerCase()),
+  );
+  if (ids.length === 0) return <Text key={key}>{text}</Text>;
+  return (
+    <ChatTokenizedText
+      key={key}
+      tokens={ids.map((id) => {
+        const item = REFERENCE_ITEMS.find(
+          (i) => String(i.id) === id.toLowerCase(),
+        )!;
+        return { value: `@${id}`, label: item.label, variant: "blue" as const };
+      })}
+    >
+      {text}
+    </ChatTokenizedText>
+  );
 }
 
 // Searchable text per block for in-thread find.
@@ -953,7 +980,7 @@ export default function ThreadView({
   const renderBubble = (bubble: Bubble, key: number) => {
     switch (bubble.type) {
       case "text":
-        return <Text key={key}>{bubble.text}</Text>;
+        return renderUserText(bubble.text, key);
       case "markdown":
         return (
           <Markdown key={key} density="compact">
