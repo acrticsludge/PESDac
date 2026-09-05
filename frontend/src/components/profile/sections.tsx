@@ -25,11 +25,6 @@ import {
   AcademicCapIcon,
   CalendarDaysIcon,
   Squares2X2Icon,
-  GlobeAltIcon,
-  ComputerDesktopIcon,
-  CpuChipIcon,
-  CircleStackIcon,
-  CalculatorIcon,
   ClockIcon,
   CheckCircleIcon,
   SparklesIcon,
@@ -38,7 +33,6 @@ import {
   DocumentTextIcon,
   ArrowDownTrayIcon,
   TrashIcon,
-  BookOpenIcon,
 } from "@heroicons/react/24/outline";
 import {
   clearAllChats,
@@ -46,7 +40,6 @@ import {
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
-import { SUBJECTS } from "../../lib/chat";
 
 export type ProfileTab =
   | "profile"
@@ -285,14 +278,6 @@ export function IdentitySection() {
   );
 }
 
-const SUBJECT_ICONS: Record<string, IconComponent> = {
-  CN: GlobeAltIcon,
-  OS: ComputerDesktopIcon,
-  DLCD: CpuChipIcon,
-  DSA: CircleStackIcon,
-  Math: CalculatorIcon,
-};
-
 const WEEKLY_GOALS = [
   { value: "3 days", label: "3 days" },
   { value: "5 days", label: "5 days" },
@@ -308,36 +293,8 @@ const DIFFICULTIES = [
 export function StudySection() {
   useSessionVersion();
   const profile = getProfile();
-  const toggleSubject = (subject: string) => {
-    const has = profile.subjects.includes(subject);
-    updateProfile({
-      subjects: has
-        ? profile.subjects.filter((s) => s !== subject)
-        : [...profile.subjects, subject],
-    });
-  };
   return (
     <VStack gap={5}>
-      <SettingsCard title="Enrolled subjects">
-        <CardRows>
-          {SUBJECTS.map((subject) => (
-            <SettingsRow
-              key={subject}
-              title={subject}
-              description={`Include ${subject} in study suggestions`}
-              icon={SUBJECT_ICONS[subject] ?? BookOpenIcon}
-              control={
-                <Switch
-                  label={subject}
-                  isLabelHidden
-                  value={profile.subjects.includes(subject)}
-                  onChange={() => toggleSubject(subject)}
-                />
-              }
-            />
-          ))}
-        </CardRows>
-      </SettingsCard>
       <SettingsCard title="Schedule & level">
         <CardRows>
           <SettingsRow
