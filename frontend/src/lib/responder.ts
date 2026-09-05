@@ -119,7 +119,8 @@ export function planResponse(
 3. Explain the idea in two sentences, as if to a friend who missed
    the lecture.
 
-Reply with your answers and I will check them step by step.`,
+Reply with your answers, then pick **Show me the answers** below to
+compare step by step.`,
       followUps: [
         "Show me the answers",
         "Ask harder questions",
