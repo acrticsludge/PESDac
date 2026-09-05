@@ -301,7 +301,6 @@ function StepsCard({ bubble }: { bubble: StepsBubble }) {
               label={`Go to step ${i + 1}: ${s.heading}`}
               variant={i === at ? "secondary" : "ghost"}
               size="sm"
-              isIconOnly
               onClick={() => {
                 setAt(i);
                 setExpanded(false);
