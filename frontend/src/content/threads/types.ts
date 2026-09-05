@@ -52,6 +52,23 @@ export type PdfBubble = {
 };
 export type ArtifactBubble = { type: "artifactCard"; artifactId: string };
 export type QuizBubble = { type: "quiz"; md: string };
+export type McqOption = { label: string; detail?: string };
+export type McqBubble = {
+  type: "mcq";
+  question: string;
+  /** 3+ options; the answer lives in content so checking is client-side. */
+  options: McqOption[];
+  answerIndex: number;
+  /** Shown after the first pick, whether the pick was right or wrong. */
+  explanation: string;
+};
+export type StepItem = { heading: string; body: string };
+export type StepsBubble = {
+  type: "steps";
+  title: string;
+  intro?: string;
+  steps: StepItem[];
+};
 
 export type Bubble =
   | TextBubble
@@ -61,7 +78,9 @@ export type Bubble =
   | ImageBubble
   | PdfBubble
   | ArtifactBubble
-  | QuizBubble;
+  | QuizBubble
+  | McqBubble
+  | StepsBubble;
 
 export type UserBlock = {
   from: "user";

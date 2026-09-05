@@ -144,6 +144,76 @@ Send your answer and I’ll grade it like a short-answer exam question.`,
       ],
       time: "2026-09-04T13:45:10",
     },
+    {
+      from: "user",
+      bubbles: [
+        {
+          type: "text",
+          text: "UDP, because retransmission delays would hurt a live call — the app handles ordering and loss concealment itself.",
+        },
+      ],
+      time: "2026-09-04T13:46:00",
+    },
+    {
+      from: "assistant",
+      bubbles: [
+        {
+          type: "text",
+          text: "Correct — now try one the exam way, then measure it yourself in Wireshark.",
+        },
+        {
+          type: "mcq",
+          question:
+            "A page holds index.html plus 9 images, fetched over non-persistent HTTP. How many TCP connections are opened in total?",
+          options: [
+            { label: "One connection for everything" },
+            { label: "One connection per object — 10 total" },
+            { label: "One UDP datagram per object" },
+            { label: "Two connections: one for HTML, one for images" },
+          ],
+          answerIndex: 1,
+          explanation:
+            "Non-persistent HTTP opens a fresh TCP connection per object (1 HTML + 9 images = 10), closing each after the response.",
+        },
+        {
+          type: "steps",
+          title: "Record start/end timestamps for Non-Persistent",
+          intro:
+            "In the Wireshark packet list, find the very first HTTP packet (the initial GET for index.html) and note its Time value. Then find the very last HTTP packet (the final 200 OK response, likely for 10.jpg) and note its Time value. Subtract: Load Time = End Time − Start Time.",
+          steps: [
+            {
+              heading: "Filter to HTTP",
+              body: "Load your capture and apply the `http` display filter so only HTTP packets show in the list.",
+            },
+            {
+              heading: "Find the first packet",
+              body: "Locate the very first HTTP packet — the initial GET for index.html — and note its Time value. This is your Start Time.",
+            },
+            {
+              heading: "Find the last packet",
+              body: "Locate the very last HTTP packet — the final 200 OK response, likely for 10.jpg — and note its Time value. This is your End Time.",
+            },
+            {
+              heading: "Subtract",
+              body: "Load Time = End Time − Start Time. That gap covers all 10 connection setups plus transfers.",
+            },
+            {
+              heading: "Sanity-check",
+              body: "If the time looks near zero, confirm you read the Time column and not packet numbers — and that the capture actually used non-persistent connections.",
+            },
+          ],
+        },
+      ],
+      toolCalls: [
+        {
+          name: "retrieve",
+          target: "CN course slides",
+          status: "complete",
+          duration: "41ms",
+        },
+      ],
+      time: "2026-09-04T13:46:20",
+    },
   ],
   artifact: {
     id: TCP_VS_UDP_ARTIFACT_ID,

@@ -72,6 +72,8 @@ import type {
   Attachment,
   Block,
   Bubble,
+  McqBubble,
+  StepsBubble,
   Thread,
   ToolCall,
   UserBlock,
@@ -167,6 +169,159 @@ function StudyNoteCard({
         <Icon icon={ChevronRightIcon} size="sm" color="secondary" />
       </HStack>
     </ClickableCard>
+  );
+}
+
+// Interactive multiple-choice quiz (answers live in content, so checking
+// is client-side). Wrong picks can be retried by tapping another option.
+function McqCard({ bubble }: { bubble: McqBubble }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const correct = picked != null && picked === bubble.answerIndex;
+  return (
+    <Card variant="muted" padding={3} width="100%" maxWidth={560}>
+      <VStack gap={3}>
+        <Text type="label" weight="semibold">
+          {bubble.question}
+        </Text>
+        <VStack gap={2}>
+          {bubble.options.map((option, i) => {
+            const isAnswer = i === bubble.answerIndex;
+            const isPicked = i === picked;
+            return (
+              <Button
+                key={i}
+                label={`Option ${i + 1}: ${option.label}`}
+                variant={
+                  picked == null
+                    ? "secondary"
+                    : isAnswer
+                      ? "primary"
+                      : isPicked
+                        ? "destructive"
+                        : "secondary"
+                }
+                width="100%"
+                onClick={() => setPicked(i)}
+              >
+                {option.detail
+                  ? `${option.label} — ${option.detail}`
+                  : option.label}
+              </Button>
+            );
+          })}
+        </VStack>
+        {picked != null && (
+          <Text
+            type="supporting"
+            weight="semibold"
+            color={correct ? "accent" : "secondary"}
+          >
+            {correct ? "Correct. " : "Not quite — try another option. "}
+            {bubble.explanation}
+          </Text>
+        )}
+      </VStack>
+    </Card>
+  );
+}
+
+// Step-by-step instructions as a stepper card (title, current step,
+// numbered dots, view-all toggle, back/next) instead of a step wall.
+function StepsCard({ bubble }: { bubble: StepsBubble }) {
+  const [at, setAt] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  const step = bubble.steps[at];
+  return (
+    <Card variant="muted" padding={3} width="100%" maxWidth={560}>
+      <VStack gap={3}>
+        <VStack gap={1}>
+          <Text type="label" weight="semibold">
+            {bubble.title}
+          </Text>
+          {bubble.intro && (
+            <Text type="supporting" color="secondary">
+              {bubble.intro}
+            </Text>
+          )}
+        </VStack>
+        {!expanded && (
+          <VStack gap={1}>
+            <Text type="supporting" color="secondary">
+              Step {at + 1} of {bubble.steps.length}
+            </Text>
+            <Text type="body" weight="semibold">
+              {step.heading}
+            </Text>
+            <Text type="body">{step.body}</Text>
+          </VStack>
+        )}
+        <HStack gap={1} vAlign="center">
+          {bubble.steps.map((s, i) => (
+            <Button
+              key={i}
+              label={`Go to step ${i + 1}: ${s.heading}`}
+              variant={i === at ? "secondary" : "ghost"}
+              size="sm"
+              isIconOnly
+              onClick={() => {
+                setAt(i);
+                setExpanded(false);
+              }}
+            >
+              {i + 1}
+            </Button>
+          ))}
+          <Button
+            label={expanded ? "Hide all steps" : "View all steps"}
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "Hide steps" : "View all steps"}
+          </Button>
+        </HStack>
+        {expanded && (
+          <VStack gap={2}>
+            {bubble.steps.map((s, i) => (
+              <VStack key={i} gap={0}>
+                <Text
+                  type="supporting"
+                  weight="semibold"
+                  color={i === at ? "accent" : undefined}
+                >
+                  Step {i + 1} — {s.heading}
+                </Text>
+                <Text type="supporting" color="secondary">
+                  {s.body}
+                </Text>
+              </VStack>
+            ))}
+          </VStack>
+        )}
+        <HStack gap={2}>
+          <Button
+            label="Previous step"
+            variant="ghost"
+            size="sm"
+            isDisabled={at === 0}
+            onClick={() => setAt((v) => Math.max(0, v - 1))}
+          >
+            Back
+          </Button>
+          <Button
+            label="Next step"
+            variant="primary"
+            size="sm"
+            isDisabled={at === bubble.steps.length - 1}
+            onClick={() =>
+              setAt((v) => Math.min(bubble.steps.length - 1, v + 1))
+            }
+          >
+            Next
+          </Button>
+        </HStack>
+      </VStack>
+    </Card>
   );
 }
 
@@ -432,6 +587,21 @@ function assistantBlockText(block: AssistantBlock): string {
           return `\`\`\`${b.language}\n${b.code}\n\`\`\``;
         case "image":
           return `[image: ${b.alt}]`;
+        case "mcq":
+          return [
+            b.question,
+            ...b.options.map(
+              (o, i) => `${i + 1}. ${o.detail ? `${o.label} — ${o.detail}` : o.label}`,
+            ),
+            `Answer: ${b.options[b.answerIndex]?.label ?? ""}`,
+            b.explanation,
+          ].join("\n");
+        case "steps":
+          return [
+            b.title,
+            ...(b.intro ? [b.intro] : []),
+            ...b.steps.map((s, i) => `Step ${i + 1} — ${s.heading}: ${s.body}`),
+          ].join("\n");
         case "pdf":
           return `[PDF: ${b.title}]`;
         case "artifactCard":
@@ -989,6 +1159,10 @@ export default function ThreadView({
             {bubble.md}
           </Markdown>
         );
+      case "mcq":
+        return <McqCard key={key} bubble={bubble} />;
+      case "steps":
+        return <StepsCard key={key} bubble={bubble} />;
       case "code":
         return (
           <CodeBlock
