@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   Layout,
@@ -37,6 +37,15 @@ const TABS: { value: ProfileTab; label: string }[] = [
   { value: "privacy", label: "Privacy" },
   { value: "legal", label: "Legal" },
 ];
+
+// Deep-linkable tabs: /profile#study etc. Unknown hashes fall back.
+// SSR-safe (no window): server renders the default tab, client corrects
+// on mount — the same benign patch as session reads.
+function tabFromHash(): ProfileTab {
+  if (typeof window === "undefined") return "profile";
+  const hash = window.location.hash.replace(/^#/, "");
+  return TABS.some((t) => t.value === hash) ? (hash as ProfileTab) : "profile";
+}
 
 const SEMESTERS = Array.from({ length: 8 }, (_, i) => ({
   value: String(i + 1),
@@ -390,12 +399,15 @@ function AssistantSection() {
   );
 }
 
-export default function ProfileView({
-  initialTab = "profile",
-}: {
-  initialTab?: ProfileTab;
-} = {}) {
-  const [tab, setTab] = useState<ProfileTab>(initialTab);
+export default function ProfileView() {
+  const [tab, setTab] = useState<ProfileTab>(tabFromHash);
+  // Same-page hash jumps (e.g. composer Settings → #study) don't remount
+  // the persisted shell, so the tab follows the hash while in view.
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   return (
     <Layout
       height="fill"

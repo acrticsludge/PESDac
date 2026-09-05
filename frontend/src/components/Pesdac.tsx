@@ -1352,7 +1352,12 @@ export default function ShellSideNav({
                           items={[
                             {
                               label: "Study preferences",
-                              onClick: () => {},
+                              onClick: () => {
+                                // Shortcut to the full surface: Profile's
+                                // Study tab (my-profile spec §2).
+                                setView("profile");
+                                navigate("/profile#study");
+                              },
                             },
                             {
                               label: "Knowledge sources",
