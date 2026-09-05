@@ -43,6 +43,8 @@ import {
   unarchiveChat,
   listArchived,
   type ChatRef,
+  CANCEL_EVENT,
+  FOCUS_COMPOSER_EVENT,
 } from "../lib/session";
 
 import { AppShell } from "@astryxdesign/core/AppShell";
@@ -828,6 +830,53 @@ export default function ShellSideNav({
     if (target) revokeStaged([target]);
     setAttachments((prev) => prev.filter((s) => s.att.id !== id));
   };
+
+  // Global shortcuts: Ctrl/⌘+K new chat; Esc closes shell UI first, then
+  // defers to the open thread (stop stream / cancel edit / close find);
+  // "/" focuses whichever composer is visible. Never fires from editable
+  // targets (typing "/" or Ctrl+K in a field must not navigate).
+  useEffect(() => {
+    const isEditable = (t: EventTarget | null) =>
+      t instanceof HTMLElement &&
+      t.closest('input, textarea, [contenteditable="true"]') != null;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        startNewChat();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (
+          renameTarget != null ||
+          deleteTarget != null ||
+          isSearchOpen ||
+          isModeMenuOpen
+        ) {
+          setRenameTarget(null);
+          setDeleteTarget(null);
+          setIsSearchOpen(false);
+          setSearchQuery("");
+          setIsModeMenuOpen(false);
+          return;
+        }
+        window.dispatchEvent(new CustomEvent(CANCEL_EVENT));
+        return;
+      }
+      if (e.key === "/" && !isEditable(e.target)) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [renameTarget, deleteTarget, isSearchOpen, isModeMenuOpen]);
+
+  // Welcome composer answers "/" focus requests.
+  useEffect(() => {
+    const onFocus = () => composerInputRef.current?.focus();
+    window.addEventListener(FOCUS_COMPOSER_EVENT, onFocus);
+    return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, onFocus);
+  }, []);
 
   // Files from picker, drop, or paste all land in the drawer.
   const stageIntoDrawer = (files: File[]) => {

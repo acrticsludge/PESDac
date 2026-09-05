@@ -86,6 +86,8 @@ import {
   appendBlocks,
   removeLastOverlayBlock,
   truncateOverlay,
+  CANCEL_EVENT,
+  FOCUS_COMPOSER_EVENT,
 } from "../../lib/session";
 import { planResponse } from "../../lib/responder";
 
@@ -752,7 +754,21 @@ export default function ThreadView({
 
   // First message typed on welcome: run it once the thread mounts.
   const autoSendRef = useRef<typeof autoSend>(autoSend);
+
+  // Global shortcuts (no deps: re-subscribe each render for fresh state).
   useEffect(() => {
+    const onCancel = () => {
+      if (live) handleStop();
+      else if (editingIndex != null) cancelEdit();
+    };
+    const onFocus = () => composerInputRef.current?.focus();
+    window.addEventListener(CANCEL_EVENT, onCancel);
+    window.addEventListener(FOCUS_COMPOSER_EVENT, onFocus);
+    return () => {
+      window.removeEventListener(CANCEL_EVENT, onCancel);
+      window.removeEventListener(FOCUS_COMPOSER_EVENT, onFocus);
+    };
+  });  useEffect(() => {
     if (autoSendRef.current) {
       const payload = autoSendRef.current;
       autoSendRef.current = undefined;

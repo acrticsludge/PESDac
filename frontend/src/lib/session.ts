@@ -22,6 +22,11 @@ function emit() {
   listeners.forEach((fn) => fn());
 }
 
+// Global shortcut bus (see chat-power spec §3): Pesdac owns the keydown
+// listener; ThreadView and the welcome composer subscribe.
+export const CANCEL_EVENT = "pesdac:cancel";
+export const FOCUS_COMPOSER_EVENT = "pesdac:focus-composer";
+
 /** Re-render the caller whenever the session store changes (client only). */
 export function useSessionVersion() {
   const [, setVersion] = useState(0);
