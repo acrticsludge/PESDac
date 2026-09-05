@@ -15,6 +15,10 @@ export type PlannedTurn = {
   toolCalls: ToolCall[];
   answer: string;
   followUps: string[];
+  /** Simulated failure (mockup stage): lets the error UI exist pre-backend.
+   * Test phrases: "simulate error" (mid-stream abort), "simulate empty"
+   * (empty response), "simulate limit" (rate limit). */
+  error?: "stream-failed" | "rate-limited" | "empty";
 };
 
 export function planResponse(
@@ -31,6 +35,42 @@ export function planResponse(
   const refs = parseReferenceIds(question);
   const primary =
     refs.length > 0 ? sourceTarget(refs[0], subject) : `${subject} course slides`;
+
+  if (/\bsimulate (a )?limit\b/i.test(question)) {
+    return { toolCalls: [], answer: "", followUps: [], error: "rate-limited" };
+  }
+
+  if (/\bsimulate (an )?empty\b/i.test(question)) {
+    return {
+      toolCalls: [
+        {
+          name: "retrieve",
+          target: primary,
+          status: "complete",
+          duration: "41ms",
+        },
+      ],
+      answer: "",
+      followUps: [],
+      error: "empty",
+    };
+  }
+
+  if (/\bsimulate (an )?error\b/i.test(question)) {
+    return {
+      toolCalls: [
+        {
+          name: "retrieve",
+          target: primary,
+          status: "complete",
+          duration: "38ms",
+        },
+      ],
+      answer: `Here is the thing about **${short}** — the key idea is simpler than it looks. First, pin down the exact definition from your ${subject} slides. Then apply it one step at a time, checking each step before moving on. Most mistakes come from skipping that first part, so slow down there and the rest follows. If anything feels shaky, ask about that specific step and we will dig into it together.`,
+      followUps: [],
+      error: "stream-failed",
+    };
+  }
 
   if (/\bquiz me\b/i.test(question)) {
     return {

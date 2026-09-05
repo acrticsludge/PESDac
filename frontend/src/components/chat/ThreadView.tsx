@@ -54,12 +54,14 @@ import {
   XMarkIcon,
   ChevronRightIcon,
   AtSymbolIcon,
+  ArrowPathIcon,
 } from "@heroicons/react/24/outline";
 
 import type {
   Artifact,
   AssistantBlock,
   Attachment,
+  Block,
   Bubble,
   Thread,
   ToolCall,
@@ -76,6 +78,7 @@ import {
   useSessionVersion,
   getOverlay,
   appendBlocks,
+  removeLastOverlayBlock,
 } from "../../lib/session";
 import { planResponse } from "../../lib/responder";
 
@@ -226,6 +229,37 @@ const threadReferenceTrigger: ChatComposerTrigger = {
   }),
 };
 
+// Plain-text extraction for retry/regenerate (non-text bubbles contribute
+// nothing — attachments travel on the saved user message already).
+function userBlockText(block: UserBlock): string {
+  return block.bubbles
+    .map((b) => {
+      switch (b.type) {
+        case "text":
+          return b.text;
+        case "markdown":
+        case "quiz":
+          return b.md;
+        case "code":
+          return b.code;
+        case "mention":
+          return b.text;
+        default:
+          return "";
+      }
+    })
+    .join("\n")
+    .trim();
+}
+
+function lastUserText(blocks: Block[]): string {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.from === "user") return userBlockText(b);
+  }
+  return "";
+}
+
 export default function ThreadView({
   thread,
   sessionKey,
@@ -278,6 +312,12 @@ export default function ThreadView({
     full: string;
     followUps: string[];
   }>(null);
+  // Rate-limit state (mockup: simulated; backend: HTTP 429): the user
+  // message is already saved, retry resumes without duplicating it.
+  const [sendError, setSendError] = useState<{
+    text: string;
+    message: string;
+  } | null>(null);
   const timers = useRef<number[]>([]);
 
   useEffect(
@@ -292,10 +332,36 @@ export default function ThreadView({
     timers.current.push(window.setTimeout(fn, ms));
   };
 
+  const makeErrorBlock = (
+    kind: "failed" | "empty",
+    retryText: string,
+    partial?: string,
+  ): AssistantBlock => ({
+    from: "assistant",
+    bubbles: partial?.trim() ? [{ type: "markdown", md: partial.trim() }] : [],
+    error: { kind, retryText },
+    time: new Date().toISOString(),
+    footer: `PESDac · ${thread.subject}`,
+  });
+
+  // Tools settle as complete whenever a turn persists (stop included) — a
+  // saved turn must never show a perpetually-"running" chip.
+  const settleTools = (tools: ToolCall[]): ToolCall[] =>
+    tools.map((t) =>
+      t.status === "running"
+        ? {
+            ...t,
+            status: "complete" as const,
+            duration: t.duration || "stopped",
+          }
+        : t,
+    );
+
   const finalizeTurn = (
     tools: ToolCall[],
     text: string,
     followUps: string[],
+    retryText?: string,
   ) => {
     const trimmed = text.trim();
     if (trimmed) {
@@ -303,25 +369,76 @@ export default function ThreadView({
         {
           from: "assistant",
           bubbles: [{ type: "markdown", md: trimmed }],
-          // A stop during the tool-running phase must not persist
-          // perpetually-"running" chips — settle them as complete.
-          toolCalls: tools.map((t) =>
-            t.status === "running"
-              ? { ...t, status: "complete" as const, duration: t.duration || "stopped" }
-              : t,
-          ),
+          toolCalls: settleTools(tools),
           followUps,
           time: new Date().toISOString(),
           footer: `PESDac · ${thread.subject}`,
         },
       ]);
+    } else if (retryText) {
+      // Empty model response: say so with a retry, never go silent.
+      appendBlocks(sessionKey, [makeErrorBlock("empty", retryText)]);
     }
     setLive(null);
+  };
+
+  // Mid-stream abort (mockup: simulated; backend: disconnect/5xx): keep the
+  // partial text and offer a retry that resumes without duplicating the
+  // user's message.
+  const failTurn = (tools: ToolCall[], partial: string, retryText: string) => {
+    const block = makeErrorBlock("failed", retryText, partial);
+    block.toolCalls = settleTools(tools);
+    appendBlocks(sessionKey, [block]);
+    setLive(null);
+  };
+
+  // Assistant side of a turn: plan, stream, settle. handleSend owns the
+  // user message; retry/regenerate re-enter here directly (no duplicate).
+  const startTurn = (text: string, opts?: { forceOk?: boolean }) => {
+    if (live) return;
+    const plan = planResponse(text, thread.subject, composerMode);
+    if (plan.error === "rate-limited" && !opts?.forceOk) {
+      setSendError({
+        text,
+        message: "Too many requests — wait a few seconds, then retry.",
+      });
+      return;
+    }
+    if (plan.error === "empty" && !opts?.forceOk) {
+      appendBlocks(sessionKey, [makeErrorBlock("empty", text)]);
+      return;
+    }
+    const failAt = plan.error === "stream-failed" && !opts?.forceOk;
+    const running = plan.toolCalls.map((t) => ({ ...t, status: "running" as const, duration: "" }));
+    setLive({ tools: running, text: "", full: plan.answer, followUps: plan.followUps });
+    later(700, () => {
+      const words = plan.answer.split(/(\s+)/);
+      let i = 0;
+      const step = () => {
+        i += 2;
+        const partial = words.slice(0, i).join("");
+        if (failAt && i >= Math.max(2, Math.floor(words.length / 2))) {
+          failTurn(plan.toolCalls, partial, text);
+          return;
+        }
+        if (i >= words.length) {
+          finalizeTurn(plan.toolCalls, plan.answer, plan.followUps, text);
+          return;
+        }
+        setLive({ tools: plan.toolCalls, text: partial, full: plan.answer, followUps: plan.followUps });
+        // Demo pacing (slow on purpose so stop is testable; backend
+        // streams at its own rate later).
+        later(80, step);
+      };
+      setLive({ tools: plan.toolCalls, text: "", full: plan.answer, followUps: plan.followUps });
+      later(150, step);
+    });
   };
 
   const handleSend = (value: string, staged: StagedFile[] = attachments) => {
     const text = value.trim();
     if (!text || live) return;
+    setSendError(null);
     // Day break: new messages on a later day than the last one get a
     // "Today" divider first (mockup label; backend sends real dates).
     let needsDayDivider = false;
@@ -351,27 +468,44 @@ export default function ThreadView({
     // Staged files travel with this message; clear the drawer either way.
     setAttachments([]);
     revokeStaged(staged);
-    const plan = planResponse(text, thread.subject, composerMode);
-    const running = plan.toolCalls.map((t) => ({ ...t, status: "running" as const, duration: "" }));
-    setLive({ tools: running, text: "", full: plan.answer, followUps: plan.followUps });
-    later(700, () => {
-      const words = plan.answer.split(/(\s+)/);
-      let i = 0;
-      const step = () => {
-        i += 2;
-        const partial = words.slice(0, i).join("");
-        if (i >= words.length) {
-          finalizeTurn(plan.toolCalls, plan.answer, plan.followUps);
-          return;
-        }
-        setLive({ tools: plan.toolCalls, text: partial, full: plan.answer, followUps: plan.followUps });
-        // Demo pacing (slow on purpose so stop is testable; backend
-        // streams at its own rate later).
-        later(80, step);
-      };
-      setLive({ tools: plan.toolCalls, text: "", full: plan.answer, followUps: plan.followUps });
-      later(150, step);
-    });
+    startTurn(text);
+  };
+
+  // Rate-limit retry: resume the saved prompt, bypassing the simulation.
+  const handleRetry = () => {
+    if (!sendError || live) return;
+    const { text } = sendError;
+    setSendError(null);
+    startTurn(text, { forceOk: true });
+  };
+
+  // Regenerate: re-run the last turn. Session-added assistant turn → pop it
+  // and replay the prompt; trailing session-added user message (stopped or
+  // failed before an answer) → answer it directly. Static demo tails are
+  // immutable, so no regenerate there.
+  const canRegenerate =
+    live == null &&
+    sendError == null &&
+    blocks.length > thread.blocks.length &&
+    (blocks[blocks.length - 1].from === "assistant" ||
+      blocks[blocks.length - 1].from === "user");
+
+  const handleRegenerate = () => {
+    if (!canRegenerate || live) return;
+    const last = blocks[blocks.length - 1];
+    if (last.from === "assistant") {
+      const text =
+        last.error?.retryText ?? lastUserText(blocks.slice(0, -1));
+      if (!text) return;
+      if (!removeLastOverlayBlock(sessionKey)) return;
+      setSendError(null);
+      startTurn(text);
+    } else if (last.from === "user") {
+      const text = userBlockText(last);
+      if (!text) return;
+      setSendError(null);
+      startTurn(text);
+    }
   };
 
   const handleStop = () => {
@@ -568,6 +702,7 @@ export default function ThreadView({
 
   const renderAssistantBlock = (block: AssistantBlock, key: number) => {
     const after = block.toolCallsAfter ?? block.bubbles.length - 1;
+    const error = block.error;
     const toolCalls =
       block.toolCalls && block.toolCalls.length > 0 ? (
         <ChatToolCalls
@@ -597,7 +732,27 @@ export default function ThreadView({
           if (i === after && toolCalls) nodes.push(toolCalls);
           return nodes;
         })}
-        {after >= block.bubbles.length ? toolCalls : null}
+        {/* Empty-bubble error turns still show their tool calls. */}
+        {after >= block.bubbles.length || block.bubbles.length === 0
+          ? toolCalls
+          : null}
+        {error && (
+          <ChatMessageBubble variant="ghost">
+            <HStack gap={2} vAlign="center">
+              <Text type="supporting" color="secondary">
+                {error.kind === "empty"
+                  ? "PESDac returned an empty response."
+                  : "This response was interrupted before it finished."}
+              </Text>
+              <Button
+                label="Retry"
+                variant="ghost"
+                size="sm"
+                onClick={() => startTurn(error.retryText, { forceOk: true })}
+              />
+            </HStack>
+          </ChatMessageBubble>
+        )}
         <ChatMessageMetadata
           timestamp={<Timestamp value={block.time} format="time" />}
           footer={
@@ -634,23 +789,55 @@ export default function ThreadView({
                   style={{ flex: 1, minHeight: 0 }}
                   composer={
                     <VStack gap={2}>
-                      {live == null && followUps && (
-                        <HStack gap={2} wrap="wrap">
-                          {followUps.map((suggestion) => (
-                            <Button
-                              key={suggestion}
-                              label={suggestion}
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleSend(suggestion)}
-                            />
-                          ))}
-                        </HStack>
-                      )}
+                      {live == null &&
+                        (followUps || sendError || canRegenerate) && (
+                          <HStack gap={2} wrap="wrap" vAlign="center">
+                            {sendError ? (
+                              <Button
+                                label="Retry"
+                                variant="ghost"
+                                size="sm"
+                                icon={
+                                  <Icon icon={ArrowPathIcon} size="sm" />
+                                }
+                                onClick={handleRetry}
+                              />
+                            ) : (
+                              <>
+                                {followUps?.map((suggestion) => (
+                                  <Button
+                                    key={suggestion}
+                                    label={suggestion}
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleSend(suggestion)}
+                                  />
+                                ))}
+                                {canRegenerate && (
+                                  <Button
+                                    label="Regenerate response"
+                                    variant="ghost"
+                                    size="sm"
+                                    isIconOnly
+                                    icon={
+                                      <Icon icon={ArrowPathIcon} size="sm" />
+                                    }
+                                    onClick={handleRegenerate}
+                                  />
+                                )}
+                              </>
+                            )}
+                          </HStack>
+                        )}
                       <ChatComposer
                       onSubmit={handleSend}
                       onStop={handleStop}
                       isStopShown={live != null}
+                      status={
+                        sendError
+                          ? { type: "warning", message: sendError.message }
+                          : undefined
+                      }
                       placeholder={
                         composerMode === "ask"
                           ? thread.placeholder

@@ -94,6 +94,18 @@ export function appendBlocks(code: string, blocks: Block[]) {
   emit();
 }
 
+/** Pop the newest session-added block (for regenerate). Null when none. */
+export function removeLastOverlayBlock(code: string): Block | null {
+  const all = readJSON<Record<string, Block[]>>(OVERLAY_KEY, {});
+  const list = all[code] ?? [];
+  if (list.length === 0) return null;
+  const removed = list[list.length - 1];
+  all[code] = list.slice(0, -1);
+  writeJSON(OVERLAY_KEY, all);
+  emit();
+  return removed;
+}
+
 export function renameCustomChat(code: string, title: string) {
   const clean = title.trim().slice(0, 34);
   if (!clean) return;

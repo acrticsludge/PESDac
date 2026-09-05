@@ -79,6 +79,11 @@ export type AssistantBlock = {
   footer?: string;
   /** Follow-up suggestions persisted with a live turn (mockup stage). */
   followUps?: string[];
+  /** Failed turn: renders a notice + Retry instead of (or under) content. */
+  error?: {
+    kind: "failed" | "empty";
+    retryText: string;
+  };
   time: string;
 };
 
