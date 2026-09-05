@@ -69,7 +69,8 @@ Astryx+React single-island baseline; actual size recorded from the
 verification build below. No code splitting yet (route-split is backend-
 phase work once islands diverge).
 
-- Verification build chunk: `client.<hash>.js` ≈ ___ (fill from build).
+- Verification build chunk (2026-09-06): `AppLayout.<hash>.js` = 630 kB
+  (Astryx + React + app, single island); `client.<hash>.js` = 178 kB.
 
 ## 6. Dead controls — cut list (audit §3 decisions)
 
