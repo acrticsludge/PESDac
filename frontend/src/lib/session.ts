@@ -322,3 +322,27 @@ export function makeDraftThread(chat: CustomChat): Thread {
     blocks: [{ from: "system", text: divider, variant: "divider" }],
   };
 }
+
+// Per-answer feedback (mockup stage): static demo blocks are immutable, so
+// votes live in a side map keyed `${sessionKey}:${blockIndex}` instead of
+// on the blocks. Backend later: POST /turns/{id}/feedback.
+
+export type FeedbackVote = "up" | "down";
+
+const FEEDBACK_KEY = "pesdac-feedback-v1";
+
+export function feedbackKey(sessionKey: string, blockIndex: number): string {
+  return `${sessionKey}:${blockIndex}`;
+}
+
+export function getFeedback(voteKey: string): FeedbackVote | null {
+  return readJSON<Record<string, FeedbackVote>>(FEEDBACK_KEY, {})[voteKey] ?? null;
+}
+
+export function setFeedback(voteKey: string, vote: FeedbackVote | null) {
+  const all = readJSON<Record<string, FeedbackVote>>(FEEDBACK_KEY, {});
+  if (vote == null) delete all[voteKey];
+  else all[voteKey] = vote;
+  writeJSON(FEEDBACK_KEY, all);
+  emit();
+}

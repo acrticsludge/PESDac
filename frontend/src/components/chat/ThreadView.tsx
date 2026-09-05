@@ -59,6 +59,8 @@ import {
   ArrowPathIcon,
   EllipsisHorizontalIcon,
   PencilIcon,
+  HandThumbUpIcon,
+  HandThumbDownIcon,
 } from "@heroicons/react/24/outline";
 
 import type {
@@ -86,6 +88,10 @@ import {
   appendBlocks,
   removeLastOverlayBlock,
   truncateOverlay,
+  getFeedback,
+  setFeedback,
+  feedbackKey,
+  type FeedbackVote,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../../lib/session";
@@ -329,6 +335,41 @@ function CopyButton({ text, label }: { text: string; label: string }) {
         });
       }}
     />
+  );
+}
+
+// Thumbs feedback beside copy (toggle; clicking the active vote clears
+// it). Votes live in a side map so static demo turns can be rated too.
+function VoteButtons({ voteKey }: { voteKey: string }) {
+  useSessionVersion();
+  const vote = getFeedback(voteKey);
+  const cast = (v: FeedbackVote) =>
+    setFeedback(voteKey, vote === v ? null : v);
+  const thumb = (
+    v: FeedbackVote,
+    label: string,
+    icon: typeof HandThumbUpIcon,
+  ) => (
+    <Button
+      label={label}
+      variant="ghost"
+      size="sm"
+      isIconOnly
+      icon={
+        <Icon
+          icon={icon}
+          size="md"
+          color={vote === v ? "accent" : undefined}
+        />
+      }
+      onClick={() => cast(v)}
+    />
+  );
+  return (
+    <>
+      {thumb("up", "Good response", HandThumbUpIcon)}
+      {thumb("down", "Bad response", HandThumbDownIcon)}
+    </>
   );
 }
 
@@ -1008,6 +1049,9 @@ export default function ThreadView({
                 text={assistantBlockText(block)}
                 label="Copy response"
               />
+              {live == null && (
+                <VoteButtons voteKey={feedbackKey(sessionKey, key)} />
+              )}
               {showRegenerate && canRegenerateNow && (
                 <RegenerateButton onRegenerate={handleRegenerate} />
               )}
