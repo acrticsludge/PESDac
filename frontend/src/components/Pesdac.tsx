@@ -1215,7 +1215,12 @@ export default function ShellSideNav({
                     <ToggleButtonGroup
                       label="Subject"
                       value={category}
-                      onChange={setCategory}
+                      onChange={(value) => {
+                        setCategory(value);
+                        // Mirror the mode menu: picking a subject scopes
+                        // the mode; clearing returns to Auto.
+                        setMode(value ?? "auto");
+                      }}
                       size="lg"
                     >
                       <ToggleButton
