@@ -569,9 +569,11 @@ function ConversationItem({
 export default function ShellSideNav({
   initialSubject,
   initialCode,
+  initialView,
 }: {
   initialSubject?: string;
   initialCode?: string;
+  initialView?: "chat" | "profile";
 } = {}) {
   // URL is source of truth for shared links: /subject/[subject]/[code].
   // Fall back to welcome state for unknown codes (mockup phase).
@@ -581,6 +583,11 @@ export default function ShellSideNav({
     initialChat?.subject ??
     (isSubject(initialSubject) ? initialSubject : null);
 
+  // My Profile renders as a content-pane view inside the persisted shell
+  // (see my-profile spec): same sidebar, no rebuild. Optimistic setters on
+  // every navigation handler avoid a one-frame flash before the route-sync
+  // effect below corrects from props.
+  const [view, setView] = useState<"chat" | "profile">(initialView ?? "chat");
   // Added interaction state; the existing welcome/composer state remains intact.
   const [selectedChat, setSelectedChat] = useState<string | null>(
     initialChat?.label ?? null,
@@ -638,6 +645,7 @@ export default function ShellSideNav({
       initialCode != null ? getChatByCode(initialCode) : null;
     const subject =
       chat?.subject ?? (isSubject(initialSubject) ? initialSubject : null);
+    setView(initialView ?? "chat");
     setSelectedChat(chat?.label ?? null);
     setDraftCode(null);
     setDraftAutoSend(null);
@@ -649,7 +657,7 @@ export default function ShellSideNav({
     setIsSearchOpen(false);
     setSearchQuery("");
     setIsModeMenuOpen(false);
-  }, [initialSubject, initialCode]);
+  }, [initialSubject, initialCode, initialView]);
 
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
 
@@ -719,6 +727,9 @@ export default function ShellSideNav({
       : demoDisplayLabel(ref.id);
 
   const openRef = (ref: ChatRef) => {
+    // In-place open (no navigation), so the view must switch explicitly —
+    // no new props arrive to correct it via the route-sync effect.
+    setView("chat");
     if (ref.kind === "custom") {
       setDraftCode(ref.id);
       setDraftAutoSend(null);
@@ -801,6 +812,7 @@ export default function ShellSideNav({
   // every other code deep-links to the same welcome shell with the
   // correct subject + selection until its thread is built.
   const openConversation = (label: string) => {
+    setView("chat");
     setSelectedChat(label);
     setDraftCode(null);
     const subject = getChatSubject(label);
@@ -809,6 +821,7 @@ export default function ShellSideNav({
   };
 
   const startNewChat = () => {
+    setView("chat");
     setSelectedChat(null);
     setDraftCode(null);
     setDraftAutoSend(null);
@@ -976,6 +989,14 @@ export default function ShellSideNav({
                   label="My Profile"
                   icon={UserCircleIcon}
                   href="#"
+                  isSelected={view === "profile"}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setView("profile");
+                    if (window.location.pathname !== "/profile") {
+                      navigate("/profile");
+                    }
+                  }}
                 />
               </SideNavSection>
             }
@@ -987,7 +1008,7 @@ export default function ShellSideNav({
                 label="New chat"
                 icon={PlusIcon}
                 href="#"
-                isSelected={selectedChat === null}
+                isSelected={selectedChat === null && view === "chat"}
                 onClick={(event) => {
                   event.preventDefault();
                   startNewChat();
@@ -1138,6 +1159,27 @@ export default function ShellSideNav({
         /* ================================================================== */
       >
         {(() => {
+          // Profile view owns the content pane (sidebar untouched).
+          // Sections land in the next slice; this scaffold only proves
+          // the route + shell behavior.
+          if (view === "profile") {
+            return (
+              <Layout
+                height="fill"
+                contentWidth={720}
+                content={
+                  <LayoutContent>
+                    <VStack gap={2} vAlign="center" style={pageStyle}>
+                      <Text type="supporting" color="secondary">
+                        My Profile opens here — sections land in the next
+                        slice.
+                      </Text>
+                    </VStack>
+                  </LayoutContent>
+                }
+              />
+            );
+          }
           const draftChat =
             draftCode != null
               ? (customs.find((c) => c.code === draftCode) ?? null)
