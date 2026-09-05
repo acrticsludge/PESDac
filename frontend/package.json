@@ -16,6 +16,8 @@
     "@astryxdesign/core": "^0.5.2",
     "@astryxdesign/theme-neutral": "^0.5.2",
     "@heroicons/react": "^2.2.0",
+    "@neondatabase/auth": "^0.5.0-beta",
+    "@neondatabase/auth-ui": "^0.3.0-beta",
     "@stylexjs/stylex": "^0.19.0",
     "astro": "^6.0.0",
     "react": "^19.2.8",
@@ -28,6 +30,8 @@
     "vite": "^7"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "^0.5.2"
+    "@astrojs/check": "^0.9.10",
+    "@astryxdesign/cli": "^0.5.2",
+    "typescript": "^5.9.3"
   }
 }
