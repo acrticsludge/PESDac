@@ -146,6 +146,15 @@ export function removeLastOverlayBlock(code: string): Block | null {
   return removed;
 }
 
+/** Drop overlay blocks from `keep` on (for message edit: the edited user
+ * turn and everything after it is replaced by the resend). */
+export function truncateOverlay(code: string, keep: number) {
+  const all = readJSON<Record<string, Block[]>>(OVERLAY_KEY, {});
+  all[code] = (all[code] ?? []).slice(0, Math.max(0, keep));
+  writeJSON(OVERLAY_KEY, all);
+  emit();
+}
+
 export function renameCustomChat(code: string, title: string) {
   const clean = title.trim().slice(0, 34);
   if (!clean) return;

@@ -58,6 +58,7 @@ import {
   AtSymbolIcon,
   ArrowPathIcon,
   EllipsisHorizontalIcon,
+  PencilIcon,
 } from "@heroicons/react/24/outline";
 
 import type {
@@ -84,6 +85,7 @@ import {
   getOverlay,
   appendBlocks,
   removeLastOverlayBlock,
+  truncateOverlay,
 } from "../../lib/session";
 import { planResponse } from "../../lib/responder";
 
@@ -468,6 +470,11 @@ export default function ThreadView({
     text: string;
     message: string;
   } | null>(null);
+  // Message edit (index into blocks): prefill the composer; send replaces
+  // the turn, Esc cancels. Session-added user turns only.
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  // Controlled composer text (draft persistence + edit prefill).
+  const [composerText, setComposerText] = useState("");
   const timers = useRef<number[]>([]);
 
   useEffect(
@@ -589,6 +596,16 @@ export default function ThreadView({
     const text = value.trim();
     if (!text || live) return;
     setSendError(null);
+    // Edited resend: drop the edited user turn and everything after it;
+    // the normal path below appends the replacement and streams again.
+    if (editingIndex != null) {
+      truncateOverlay(
+        sessionKey,
+        Math.max(0, editingIndex - thread.blocks.length),
+      );
+      setEditingIndex(null);
+    }
+    setComposerText("");
     // Day break: new messages on a later day than the last one get a
     // "Today · Subject" divider first (mockup label; backend sends real dates).
     let needsDayDivider = false;
@@ -625,6 +642,22 @@ export default function ThreadView({
     setAttachments([]);
     revokeStaged(staged);
     startTurn(text);
+  };
+
+  // Edit a session-added user turn via the composer (static demo tails
+  // are immutable). The overlay is only truncated on send, so cancelling
+  // loses nothing.
+  const startEdit = (index: number) => {
+    const target = blocks[index];
+    if (live || target?.from !== "user") return;
+    setComposerText(userBlockText(target));
+    setEditingIndex(index);
+    composerInputRef.current?.focus();
+  };
+
+  const cancelEdit = () => {
+    setEditingIndex(null);
+    setComposerText("");
   };
 
   // Rate-limit retry: resume the saved prompt, bypassing the simulation.
@@ -685,6 +718,9 @@ export default function ThreadView({
       label,
       variant: "blue",
     });
+
+    // Controlled composer: pull the editor mutation back into state.
+    setComposerText(input.getValue() ?? "");
 
     document.activeElement?.dispatchEvent(
       new Event("input", {
@@ -849,6 +885,10 @@ export default function ThreadView({
                 ? "last"
                 : "middle"
             : undefined;
+        // Session-added turns are editable (static demo tails are not);
+        // the pencil lives in the metadata footer, mirroring copy on
+        // assistant turns.
+        const canEdit = isLast && key >= thread.blocks.length && live == null;
         return (
           <ChatMessageBubble
             key={i}
@@ -858,6 +898,18 @@ export default function ThreadView({
                 <ChatMessageMetadata
                   timestamp={
                     <Timestamp value={block.time} format="time" />
+                  }
+                  footer={
+                    canEdit ? (
+                      <Button
+                        label="Edit message"
+                        variant="ghost"
+                        size="sm"
+                        isIconOnly
+                        icon={<Icon icon={PencilIcon} size="md" />}
+                        onClick={() => startEdit(key)}
+                      />
+                    ) : undefined
                   }
                 />
               ) : undefined
@@ -971,6 +1023,23 @@ export default function ThreadView({
                   density="spacious"
                   style={{ flex: 1, minHeight: 0 }}
                   composer={
+                    <>
+                      {editingIndex != null && (
+                        <HStack gap={2} vAlign="center">
+                          <Text type="supporting" color="secondary">
+                            Editing message — Send applies it to this turn,
+                            Esc cancels.
+                          </Text>
+                          <Button
+                            label="Cancel edit"
+                            variant="ghost"
+                            size="sm"
+                            isIconOnly
+                            icon={<Icon icon={XMarkIcon} size="md" />}
+                            onClick={cancelEdit}
+                          />
+                        </HStack>
+                      )}
                       <ChatComposer
                       onSubmit={handleSend}
                       onStop={handleStop}
@@ -996,6 +1065,8 @@ export default function ThreadView({
                           handleRef={composerInputRef}
                           triggers={[threadReferenceTrigger]}
                           onFiles={stageIntoDrawer}
+                          value={composerText}
+                          onChange={setComposerText}
                         />
                       }
                       drawer={
@@ -1090,6 +1161,7 @@ export default function ThreadView({
                         <ChatDictationButton dictation={dictation} />
                       }
                       />
+                    </>
                   }
                 >
                   <ChatMessageList isStreaming={live != null}>
