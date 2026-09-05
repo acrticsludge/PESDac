@@ -571,19 +571,67 @@ const LANGUAGES = [
   { value: "en-US", label: "English (US)" },
   { value: "en-GB", label: "English (UK)" },
   { value: "hi", label: "Hindi" },
+  { value: "kn", label: "Kannada" },
+  { value: "ta", label: "Tamil" },
+  { value: "te", label: "Telugu" },
+  { value: "ml", label: "Malayalam" },
+  { value: "mr", label: "Marathi" },
+  { value: "bn", label: "Bengali" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+  { value: "ja", label: "Japanese" },
+  { value: "zh-CN", label: "Chinese (Simplified)" },
+  { value: "pt", label: "Portuguese" },
+  { value: "ru", label: "Russian" },
+  { value: "ar", label: "Arabic" },
+  { value: "ko", label: "Korean" },
 ];
 
 const REGIONS = [
   { value: "IN", label: "India" },
   { value: "US", label: "United States" },
   { value: "GB", label: "United Kingdom" },
+  { value: "DE", label: "Germany" },
+  { value: "FR", label: "France" },
+  { value: "JP", label: "Japan" },
+  { value: "CN", label: "China" },
+  { value: "CA", label: "Canada" },
+  { value: "AU", label: "Australia" },
+  { value: "AE", label: "UAE" },
+  { value: "SG", label: "Singapore" },
+  { value: "BR", label: "Brazil" },
+  { value: "ES", label: "Spain" },
+  { value: "IT", label: "Italy" },
+  { value: "NL", label: "Netherlands" },
+  { value: "KR", label: "South Korea" },
+  { value: "ZA", label: "South Africa" },
+  { value: "SA", label: "Saudi Arabia" },
 ];
 
 const TIMEZONES = [
-  { value: "IST", label: "Indian (GMT+05:30)" },
-  { value: "UTC", label: "UTC (GMT+00:00)" },
   { value: "PT", label: "Pacific (GMT-08:00)" },
+  { value: "MT", label: "Mountain (GMT-07:00)" },
+  { value: "CT", label: "Central (GMT-06:00)" },
   { value: "ET", label: "Eastern (GMT-05:00)" },
+  { value: "AT", label: "Atlantic (GMT-04:00)" },
+  { value: "ART", label: "Argentina (GMT-03:00)" },
+  { value: "HST", label: "Hawaii (GMT-10:00)" },
+  { value: "AKT", label: "Alaska (GMT-09:00)" },
+  { value: "UTC", label: "UTC (GMT+00:00)" },
+  { value: "CET", label: "Central European (GMT+01:00)" },
+  { value: "EET", label: "Eastern European (GMT+02:00)" },
+  { value: "SAST", label: "South Africa (GMT+02:00)" },
+  { value: "MSK", label: "Moscow (GMT+03:00)" },
+  { value: "GST", label: "Gulf (GMT+04:00)" },
+  { value: "IST", label: "Indian (GMT+05:30)" },
+  { value: "NPT", label: "Nepal (GMT+05:45)" },
+  { value: "BDT", label: "Dhaka (GMT+06:00)" },
+  { value: "ICT", label: "Bangkok (GMT+07:00)" },
+  { value: "CST", label: "China / Singapore (GMT+08:00)" },
+  { value: "JST", label: "Japan / Korea (GMT+09:00)" },
+  { value: "AET", label: "Sydney (GMT+10:00)" },
+  { value: "NZT", label: "Auckland (GMT+12:00)" },
 ];
 
 export function LanguageSection() {
@@ -598,15 +646,17 @@ export function LanguageSection() {
             description="Used across menus, buttons, and email."
             icon={LanguageIcon}
             control={
-              <Selector
-                label="Language"
-                isLabelHidden
-                size="sm"
-                width={CONTROL_WIDTH}
-                options={LANGUAGES}
-                value={profile.language}
-                onChange={(value) => updateProfile({ language: value })}
-              />
+            <Selector
+              label="Language"
+              isLabelHidden
+              size="sm"
+              width={CONTROL_WIDTH}
+              hasSearch
+              searchPlaceholder="Search languages..."
+              options={LANGUAGES}
+              value={profile.language}
+              onChange={(value) => updateProfile({ language: value })}
+            />
             }
           />
           <SettingsRow
@@ -614,15 +664,17 @@ export function LanguageSection() {
             description="Dates, numbers, and currency."
             icon={GlobeAltIcon}
             control={
-              <Selector
-                label="Region format"
-                isLabelHidden
-                size="sm"
-                width={CONTROL_WIDTH}
-                options={REGIONS}
-                value={profile.region}
-                onChange={(value) => updateProfile({ region: value })}
-              />
+            <Selector
+              label="Region format"
+              isLabelHidden
+              size="sm"
+              width={CONTROL_WIDTH}
+              hasSearch
+              searchPlaceholder="Search regions..."
+              options={REGIONS}
+              value={profile.region}
+              onChange={(value) => updateProfile({ region: value })}
+            />
             }
           />
           <SettingsRow
@@ -630,15 +682,17 @@ export function LanguageSection() {
             description="Used for scheduling and every timestamp you see."
             icon={ClockIcon}
             control={
-              <Selector
-                label="Time zone"
-                isLabelHidden
-                size="sm"
-                width={CONTROL_WIDTH}
-                options={TIMEZONES}
-                value={profile.timezone}
-                onChange={(value) => updateProfile({ timezone: value })}
-              />
+            <Selector
+              label="Time zone"
+              isLabelHidden
+              size="sm"
+              width={CONTROL_WIDTH}
+              hasSearch
+              searchPlaceholder="Search time zones..."
+              options={TIMEZONES}
+              value={profile.timezone}
+              onChange={(value) => updateProfile({ timezone: value })}
+            />
             }
           />
         </CardRows>

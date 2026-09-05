@@ -188,7 +188,11 @@ export default function ProfileDialog({
         }
         start={
           isNarrow ? undefined : (
-            <LayoutPanel width={248} role="navigation">
+            // 260px: SideNav's own natural width (it sets a starting width
+            // with no flex-shrink). Anything narrower clips the rail and
+            // buys a horizontal scrollbar — as seen. Template uses the
+            // same 260px rail.
+            <LayoutPanel width={260} role="navigation">
               <SideNav
                 topContent={searchBox}
               >
