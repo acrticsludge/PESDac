@@ -1,5 +1,11 @@
 # Chat section gap audit — ChatGPT parity + error coverage
 
+> Implementation status (2026-09-05): §8 slices 1–7 built and committed;
+> slice 8 (backend-gated) captured as `docs/reasonix/specs/error-states.md`.
+> Still open: share links, interactive quiz checking, context-meter wiring,
+> truncation notices, @-token rendering inside user bubbles, Markdown
+> sanitization source-check, keyboard-only + Playwright verification.
+
 Date: 2026-09-05. Scope: everything inside the conversation experience —
 `ThreadView.tsx`, the welcome composer in `Pesdac.tsx`, `session.ts`,
 `responder.ts`, thread content model. Method: static end-to-end trace of
