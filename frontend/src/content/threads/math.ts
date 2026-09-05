@@ -72,7 +72,9 @@ const diffEq: Thread = {
     { from: "system", text: "Yesterday · Mathematics", variant: "divider" },
     {
       from: "user",
-      attachments: ["math-notes-de.pdf"],
+      attachments: [
+        { id: "seed-math-1", name: "math-notes-de.pdf", mime: "application/pdf", size: 876544 },
+      ],
       bubbles: [
         {
           type: "mention",

@@ -11,6 +11,17 @@ import {
   getChatSubject,
   isSubject,
 } from "../lib/chat";
+import {
+  REFERENCE_ITEMS,
+  stripReferenceTokens,
+} from "../lib/references";
+import {
+  stageFiles,
+  revokeStaged,
+  attachmentLabel,
+  type StagedFile,
+} from "../lib/attachments";
+import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
 import { getThread } from "../content/threads";
 import {
@@ -91,6 +102,8 @@ import {
 } from "@astryxdesign/core/ToggleButton";
 
 import { Token } from "@astryxdesign/core/Token";
+
+import { Thumbnail } from "@astryxdesign/core/Thumbnail";
 
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 
@@ -467,32 +480,6 @@ const MODE_OPTIONS = [
 /*                          Reference / @ trigger                              */
 /* -------------------------------------------------------------------------- */
 
-const REFERENCE_ITEMS: SearchableItem<{ type: string }>[] = [
-  {
-    id: "slides",
-    label: "Course Slides",
-    auxiliaryData: {
-      type: "PESDac course material",
-    },
-  },
-
-  {
-    id: "textbook",
-    label: "Textbook",
-    auxiliaryData: {
-      type: "PESDac knowledge source",
-    },
-  },
-
-  {
-    id: "lectures",
-    label: "Lecture Recordings",
-    auxiliaryData: {
-      type: "PESDac knowledge source",
-    },
-  },
-];
-
 const referenceTrigger: ChatComposerTrigger = {
   character: "@",
 
@@ -594,7 +581,10 @@ export default function ShellSideNav({
   // Custom (session) conversation open in-place (mockup: no URL for customs).
   const [draftCode, setDraftCode] = useState<string | null>(null);
   // Draft auto-send: first message typed on welcome, sent on thread mount.
-  const [draftAutoSend, setDraftAutoSend] = useState<string | null>(null);
+  const [draftAutoSend, setDraftAutoSend] = useState<{
+    text: string;
+    attachments: Attachment[];
+  } | null>(null);
   // Rename dialog (custom chats + demo display-label overrides).
   const [renameTarget, setRenameTarget] = useState<
     { kind: "custom"; code: string } | { kind: "demo"; label: string } | null
@@ -616,7 +606,7 @@ export default function ShellSideNav({
 
   const [category, setCategory] = useState<string | null>(initialSubjectValue);
 
-  const [attachments, setAttachments] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<StagedFile[]>([]);
 
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
 
@@ -782,11 +772,21 @@ export default function ShellSideNav({
     if (!text) return;
     // Mockup default: unscoped chats file under CN until backend scopes them.
     const subject = category ?? (mode && mode !== "auto" ? mode : "CN");
-    const chat = createCustomChat(subject, text);
+    // @ tokens stay in the sent text (responder scopes on them) but out of
+    // the sidebar title.
+    const chat = createCustomChat(subject, stripReferenceTokens(text) || text);
+    const staged = attachments;
     setSelectedChat(null);
     setAttachments([]);
+    revokeStaged(staged);
     setDraftCode(chat.code);
-    setDraftAutoSend(text);
+    setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
+  };
+
+  const removeStaged = (id: string) => {
+    const target = attachments.find((s) => s.att.id === id);
+    if (target) revokeStaged([target]);
+    setAttachments((prev) => prev.filter((s) => s.att.id !== id));
   };
 
   /* ---------------------------------------------------------------------- */
@@ -1091,7 +1091,7 @@ export default function ShellSideNav({
                         onFiles={(files) =>
                           setAttachments((prev) => [
                             ...prev,
-                            ...files.map((file) => file.name),
+                            ...stageFiles(files),
                           ])
                         }
                       />
@@ -1100,23 +1100,32 @@ export default function ShellSideNav({
                     /* Attached files                                         */
                     /* ------------------------------------------------------ */
 
-                    drawer={
-                      attachments.length > 0 ? (
-                        <ChatComposerDrawer count={attachments.length}>
-                          {attachments.map((name) => (
-                            <Token
-                              key={name}
-                              label={name}
-                              onRemove={() =>
-                                setAttachments((prev) =>
-                                  prev.filter((n) => n !== name),
-                                )
-                              }
-                            />
-                          ))}
-                        </ChatComposerDrawer>
-                      ) : undefined
-                    }
+                      drawer={
+                        attachments.length > 0 ? (
+                          <ChatComposerDrawer
+                            count={attachments.length}
+                            label="Files"
+                          >
+                            {attachments.map((staged) =>
+                              staged.previewUrl ? (
+                                <Thumbnail
+                                  key={staged.att.id}
+                                  src={staged.previewUrl}
+                                  alt={staged.att.name}
+                                  label={attachmentLabel(staged.att)}
+                                  onRemove={() => removeStaged(staged.att.id)}
+                                />
+                              ) : (
+                                <Token
+                                  key={staged.att.id}
+                                  label={attachmentLabel(staged.att)}
+                                  onRemove={() => removeStaged(staged.att.id)}
+                                />
+                              ),
+                            )}
+                          </ChatComposerDrawer>
+                        ) : undefined
+                      }
                     /* ------------------------------------------------------ */
                     /* Reference button                                        */
                     /* ------------------------------------------------------ */

@@ -135,7 +135,9 @@ const virtualMemory: Thread = {
     { from: "system", text: "Monday · Operating Systems", variant: "divider" },
     {
       from: "user",
-      attachments: ["OS Ch9 Textbook.pdf"],
+      attachments: [
+        { id: "seed-os-1", name: "OS Ch9 Textbook.pdf", mime: "application/pdf", size: 3123200 },
+      ],
       bubbles: [
         {
           type: "mention",

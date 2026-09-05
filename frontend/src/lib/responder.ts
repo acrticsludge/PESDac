@@ -3,6 +3,11 @@
 // (SSE) with identical output shape. No randomness: same input → same turn.
 
 import type { ToolCall } from "../content/threads/types";
+import {
+  parseReferenceIds,
+  stripReferenceTokens,
+  sourceTarget,
+} from "./references";
 
 export type ResponseMode = "ask" | "deep";
 
@@ -17,18 +22,22 @@ export function planResponse(
   subject: string,
   mode: ResponseMode = "ask",
 ): PlannedTurn {
+  // @ mentions scope retrieval: "@textbook ..." searches the textbook
+  // first. Tokens are stripped so they never leak into echoes/titles.
+  const clean = stripReferenceTokens(question) || question.trim();
   const short =
-    question.trim().length > 140
-      ? question.trim().slice(0, 140) + "…"
-      : question.trim();
+    clean.length > 140 ? clean.slice(0, 140) + "…" : clean;
   const seed = question.length;
+  const refs = parseReferenceIds(question);
+  const primary =
+    refs.length > 0 ? sourceTarget(refs[0], subject) : `${subject} course slides`;
 
   if (/\bquiz me\b/i.test(question)) {
     return {
       toolCalls: [
         {
           name: "retrieve",
-          target: `${subject} course slides`,
+          target: primary,
           status: "complete",
           duration: `${28 + (seed % 31)}ms`,
         },
@@ -56,7 +65,7 @@ Reply with your answers and I will check them step by step.`,
       toolCalls: [
         {
           name: "retrieve",
-          target: `${subject} course slides`,
+          target: primary,
           status: "complete",
           duration: `${32 + (seed % 37)}ms`,
         },
@@ -93,7 +102,7 @@ Ask a follow-up on any step, or say **"quiz me"** and I will test you on it.`,
     toolCalls: [
       {
         name: "retrieve",
-        target: `${subject} course slides`,
+        target: primary,
         status: "complete",
         duration: `${32 + (seed % 37)}ms`,
       },

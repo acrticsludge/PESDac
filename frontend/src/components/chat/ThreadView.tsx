@@ -34,8 +34,17 @@ import {
   ChatTokenizedText,
   ChatToolCalls,
   ChatComposer,
+  ChatComposerDrawer,
   ChatComposerInput,
+  ChatDictationButton,
+  useChatDictation,
+  type ChatComposerInputHandle,
+  type ChatComposerTrigger,
 } from "@astryxdesign/core/Chat";
+import {
+  createStaticSource,
+  TypeaheadItem,
+} from "@astryxdesign/core/Typeahead";
 import { useResizable, ResizeHandle } from "@astryxdesign/core/Resizable";
 
 import {
@@ -50,11 +59,19 @@ import {
 import type {
   Artifact,
   AssistantBlock,
+  Attachment,
   Bubble,
   Thread,
   ToolCall,
   UserBlock,
 } from "../../content/threads/types";
+import { REFERENCE_ITEMS, referenceIdForLabel } from "../../lib/references";
+import {
+  stageFiles,
+  revokeStaged,
+  attachmentLabel,
+  type StagedFile,
+} from "../../lib/attachments";
 import {
   useSessionVersion,
   getOverlay,
@@ -188,6 +205,27 @@ function PdfPreviewBody({ file, title }: { file: string; title: string }) {
 /*                              Thread view                                    */
 /* -------------------------------------------------------------------------- */
 
+// Same @ reference menu as the welcome composer (per-thread labels resolve
+// to source ids for the responder via referenceIdForLabel).
+const threadReferenceTrigger: ChatComposerTrigger = {
+  character: "@",
+
+  searchSource: createStaticSource(REFERENCE_ITEMS),
+
+  renderItem: (item) => (
+    <TypeaheadItem
+      item={item}
+      description={(item.auxiliaryData as { type: string })?.type}
+    />
+  ),
+
+  onSelect: (item) => ({
+    value: `@${item.id}`,
+    label: item.label,
+    variant: "blue",
+  }),
+};
+
 export default function ThreadView({
   thread,
   sessionKey,
@@ -195,7 +233,7 @@ export default function ThreadView({
 }: {
   thread: Thread;
   sessionKey: string;
-  autoSend?: string;
+  autoSend?: string | { text: string; attachments?: Attachment[] };
 }) {
   const [composerMode, setComposerMode] = useState<"ask" | "deep">(thread.mode);
   const [isArtifactOpen, setIsArtifactOpen] = useState(thread.artifact != null);
@@ -209,6 +247,13 @@ export default function ThreadView({
     file: string;
   } | null>(null);
   const rootRef = useRef<HTMLElement>(null);
+  const composerInputRef = useRef<ChatComposerInputHandle>(null);
+  const dictation = useChatDictation({
+    inputRef: composerInputRef,
+  });
+  // Staged uploads (metadata persists with the sent message; File handles
+  // and preview URLs stay in memory until send/remove).
+  const [attachments, setAttachments] = useState<StagedFile[]>([]);
 
   // Session overlay: blocks appended this session (persisted per code).
   useSessionVersion();
@@ -274,7 +319,7 @@ export default function ThreadView({
     setLive(null);
   };
 
-  const handleSend = (value: string) => {
+  const handleSend = (value: string, staged: StagedFile[] = attachments) => {
     const text = value.trim();
     if (!text || live) return;
     // Day break: new messages on a later day than the last one get a
@@ -294,8 +339,18 @@ export default function ThreadView({
       ...(needsDayDivider
         ? [{ from: "system", text: "Today", variant: "divider" } as const]
         : []),
-      { from: "user", bubbles: [{ type: "text", text }], time: new Date().toISOString() },
+      {
+        from: "user",
+        bubbles: [{ type: "text", text }],
+        ...(staged.length > 0
+          ? { attachments: staged.map((s) => s.att) }
+          : {}),
+        time: new Date().toISOString(),
+      },
     ]);
+    // Staged files travel with this message; clear the drawer either way.
+    setAttachments([]);
+    revokeStaged(staged);
     const plan = planResponse(text, thread.subject, composerMode);
     const running = plan.toolCalls.map((t) => ({ ...t, status: "running" as const, duration: "" }));
     setLive({ tools: running, text: "", full: plan.answer, followUps: plan.followUps });
@@ -326,13 +381,47 @@ export default function ThreadView({
     else setLive(null);
   };
 
+  // Reference menu → composer (same token shape as welcome).
+  const insertReference = (label: string) => {
+    const input = composerInputRef.current;
+
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+
+    input.insertToken({
+      value: `@${referenceIdForLabel(label)}`,
+      label,
+      variant: "blue",
+    });
+
+    document.activeElement?.dispatchEvent(
+      new Event("input", {
+        bubbles: true,
+      }),
+    );
+  };
+
+  const removeStaged = (id: string) => {
+    const target = attachments.find((s) => s.att.id === id);
+    if (target) revokeStaged([target]);
+    setAttachments((prev) => prev.filter((s) => s.att.id !== id));
+  };
+
   // First message typed on welcome: run it once the thread mounts.
-  const autoSendRef = useRef<string | undefined>(autoSend);
+  const autoSendRef = useRef<typeof autoSend>(autoSend);
   useEffect(() => {
     if (autoSendRef.current) {
-      const text = autoSendRef.current;
+      const payload = autoSendRef.current;
       autoSendRef.current = undefined;
-      const t = window.setTimeout(() => handleSend(text), 350);
+      const text = typeof payload === "string" ? payload : payload.text;
+      const staged: StagedFile[] =
+        typeof payload === "string"
+          ? []
+          : (payload.attachments ?? []).map((att) => ({ att }));
+      const t = window.setTimeout(() => handleSend(text, staged), 350);
       return () => window.clearTimeout(t);
     }
   }, []);
@@ -440,8 +529,8 @@ export default function ThreadView({
     <ChatMessage key={key} sender="user">
       {block.attachments && block.attachments.length > 0 && (
         <HStack gap={1} wrap="wrap">
-          {block.attachments.map((name) => (
-            <Token key={name} label={name} />
+          {block.attachments.map((att) => (
+            <Token key={att.id} label={attachmentLabel(att)} />
           ))}
         </HStack>
       )}
@@ -567,7 +656,44 @@ export default function ThreadView({
                           ? thread.placeholder
                           : "Ask for a deep, step-by-step explanation..."
                       }
-                      input={<ChatComposerInput />}
+                      input={
+                        <ChatComposerInput
+                          handleRef={composerInputRef}
+                          triggers={[threadReferenceTrigger]}
+                          onFiles={(files) =>
+                            setAttachments((prev) => [
+                              ...prev,
+                              ...stageFiles(files),
+                            ])
+                          }
+                        />
+                      }
+                      drawer={
+                        attachments.length > 0 ? (
+                          <ChatComposerDrawer
+                            count={attachments.length}
+                            label="Files"
+                          >
+                            {attachments.map((staged) =>
+                              staged.previewUrl ? (
+                                <Thumbnail
+                                  key={staged.att.id}
+                                  src={staged.previewUrl}
+                                  alt={staged.att.name}
+                                  label={attachmentLabel(staged.att)}
+                                  onRemove={() => removeStaged(staged.att.id)}
+                                />
+                              ) : (
+                                <Token
+                                  key={staged.att.id}
+                                  label={attachmentLabel(staged.att)}
+                                  onRemove={() => removeStaged(staged.att.id)}
+                                />
+                              ),
+                            )}
+                          </ChatComposerDrawer>
+                        ) : undefined
+                      }
                       headerActions={
                         <DropdownMenu
                           button={{
@@ -582,7 +708,7 @@ export default function ThreadView({
                           items={thread.composerReferenceItems.map((item) => ({
                             label: item.label,
                             description: item.description,
-                            onClick: () => {},
+                            onClick: () => insertReference(item.label),
                           }))}
                         />
                       }
@@ -605,6 +731,9 @@ export default function ThreadView({
                             },
                           ]}
                         />
+                      }
+                      sendActions={
+                        <ChatDictationButton dictation={dictation} />
                       }
                       />
                     </VStack>

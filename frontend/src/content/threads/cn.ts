@@ -17,7 +17,10 @@ const tcpVsUdp: Thread = {
     { from: "system", text: "Today · Computer Networks", variant: "divider" },
     {
       from: "user",
-      attachments: ["CN Lecture 07.pdf", "CN textbook"],
+      attachments: [
+        { id: "seed-cn-1", name: "CN Lecture 07.pdf", mime: "application/pdf", size: 2457600 },
+        { id: "seed-cn-2", name: "CN textbook", mime: "application/pdf", size: 18944000 },
+      ],
       bubbles: [
         {
           type: "mention",

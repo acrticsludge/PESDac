@@ -10,6 +10,13 @@ export type ToolCall = {
   duration: string;
 };
 
+export type Attachment = {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+};
+
 export type MentionToken = {
   value: string;
   label: string;
@@ -57,7 +64,7 @@ export type Bubble =
 export type UserBlock = {
   from: "user";
   bubbles: Bubble[];
-  attachments?: string[];
+  attachments?: Attachment[];
   time: string;
 };
 
