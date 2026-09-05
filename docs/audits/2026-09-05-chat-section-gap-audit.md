@@ -121,12 +121,15 @@ failure branch, `finalizeTurn` always succeeds, no `status` is ever set.
    the first 700ms are `{status:"running", duration:""}`. The saved block
    renders a perpetually-"running" tool chip. Fix: mark tools complete
    (or drop durations) in `finalizeTurn`.
-2. **SSR/client divergence with stored chats — Latent bug.** `session.ts`
-   reads `localStorage` during render; SSR emits empty sidebar/overlays,
-   first client render emits stored data. Fresh profiles never see it
-   (which is why dev looks clean); any returning user with stored chats
-   risks hydration-mismatch warnings. Fix: gate session-dependent render
-   on a mounted flag.
+2. **SSR/client divergence with stored chats — Latent bug, resolved by
+    reverting the first fix.** `session.ts` reads `localStorage` during
+    render; SSR emits empty sidebar/overlays, first client render emits
+    stored data. A mount-gate was tried (slice 6) and reverted the same
+    day: gating makes pinned/renamed chats visibly jump sections on first
+    paint and on every chat switch/refresh — strictly worse than the
+    theoretical hydration warning. Direct reads stay; React patches the
+    SSR mismatch invisibly, and no hydration issue has ever been observed
+    (only the benign #418 autofill warning).
 3. **Multi-tab divergence.** Store listeners are in-memory only; no
    `storage` event handling. Two tabs silently fork. Cheap fix, low
    priority.

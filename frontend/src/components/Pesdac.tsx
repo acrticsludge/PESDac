@@ -27,7 +27,6 @@ import AttachButton from "./chat/AttachButton";
 import { getThread } from "../content/threads";
 import {
   useSessionVersion,
-  useMounted,
   useStorageHealth,
   listCustomChats,
   createCustomChat,
@@ -600,13 +599,13 @@ export default function ShellSideNav({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   useSessionVersion();
-  const mounted = useMounted();
-  // SSR emits empty session state and the first client paint must match it,
-  // so every session read during render resolves to empty until mount.
-  // (Dialogs/menus only open post-mount, so their data is unaffected.)
-  const customs = mounted ? listCustomChats() : [];
-  const pinnedRefs = mounted ? listPinned() : [];
-  const archivedRefs = mounted ? listArchived() : [];
+  // Session reads run directly during render — NOT gated on mount. Gating
+  // makes pinned/renamed chats visibly jump sections on first paint (and on
+  // every chat switch/refresh). SSR renders empty and React patches on
+  // hydration: a benign, invisible correction.
+  const customs = listCustomChats();
+  const pinnedRefs = listPinned();
+  const archivedRefs = listArchived();
   const refKeys = (refs: ChatRef[]) =>
     new Set(refs.map((r) => `${r.kind}:${r.id}`));
   const pinKeys = refKeys(pinnedRefs);
@@ -614,8 +613,6 @@ export default function ShellSideNav({
   const isPinnedHere = (ref: ChatRef) => pinKeys.has(`${ref.kind}:${ref.id}`);
   const isArchivedHere = (ref: ChatRef) =>
     archivedKeys.has(`${ref.kind}:${ref.id}`);
-  const displayLabel = (label: string) =>
-    mounted ? demoDisplayLabel(label) : label;
   const storageOk = useStorageHealth();
 
   const [mode, setMode] = useState<string | null>(
@@ -643,7 +640,7 @@ export default function ShellSideNav({
     renameTarget?.kind === "custom"
       ? (customs.find((c) => c.code === renameTarget.code)?.title ?? "")
       : renameTarget
-        ? displayLabel(renameTarget.label)
+        ? demoDisplayLabel(renameTarget.label)
         : "";
 
   const saveRename = () => {
@@ -679,7 +676,7 @@ export default function ShellSideNav({
   const refTitle = (ref: ChatRef): string | null =>
     ref.kind === "custom"
       ? (customs.find((c) => c.code === ref.id)?.title ?? null)
-      : displayLabel(ref.id);
+      : demoDisplayLabel(ref.id);
 
   const openRef = (ref: ChatRef) => {
     if (ref.kind === "custom") {
@@ -963,7 +960,7 @@ export default function ShellSideNav({
                   (chat) =>
                     !isArchivedHere({ kind: "demo", id: chat.label }) &&
                     !isPinnedHere({ kind: "demo", id: chat.label }) &&
-                    matchesQuery(displayLabel(chat.label)),
+                    matchesQuery(demoDisplayLabel(chat.label)),
                 );
                 const workspaceCustoms = customs.filter(
                   (c) =>
@@ -990,7 +987,7 @@ export default function ShellSideNav({
                   >
                     <VStack gap={0.5}>
                       {demoChats.map((chat) => {
-                        const display = displayLabel(chat.label);
+                        const display = demoDisplayLabel(chat.label);
                         const ref: ChatRef = {
                           kind: "demo",
                           id: chat.label,

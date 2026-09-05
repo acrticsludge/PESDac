@@ -80,7 +80,6 @@ import {
 } from "../../lib/attachments";
 import {
   useSessionVersion,
-  useMounted,
   useStorageHealth,
   getOverlay,
   appendBlocks,
@@ -438,11 +437,11 @@ export default function ThreadView({
   const [transcriptCopied, setTranscriptCopied] = useState(false);
 
   // Session overlay: blocks appended this session (persisted per code).
-  // Gated on mount so SSR and first client paint agree (see useMounted).
+  // Read directly (see Pesdac.tsx note) so sent messages and renames show
+  // on first paint instead of jumping in after mount.
   useSessionVersion();
-  const mounted = useMounted();
   const storageOk = useStorageHealth();
-  const overlay = mounted ? getOverlay(sessionKey) : [];
+  const overlay = getOverlay(sessionKey);
   const blocks = [...thread.blocks, ...overlay];
 
   // Follow-ups from the latest assistant turn (live turns persist theirs).
@@ -1131,40 +1130,34 @@ export default function ThreadView({
                       <ChatToolCalls calls={live.tools} />
                       </ChatMessage>
                     )}
-                    {/* Follow-ups anchor to the last message in flow — never
+                    {/* Follow-ups anchor to the end of the message flow — never
                         in the sticky dock, so scrolled content can't slide
-                        under them. */}
+                        under them. No avatar/bubble: centered pills read as
+                        "what to ask next", not as another answer. */}
                     {live == null && (followUps || sendError) && (
-                      <ChatMessage
-                        sender="assistant"
-                        avatar={<Avatar name="PESDac" size="md" />}
-                      >
-                        <ChatMessageBubble variant="ghost">
-                          <HStack gap={2} wrap="wrap" vAlign="center">
-                            {sendError ? (
-                              <Button
-                                label="Retry"
-                                variant="ghost"
-                                size="sm"
-                                icon={
-                                  <Icon icon={ArrowPathIcon} size="sm" />
-                                }
-                                onClick={handleRetry}
-                              />
-                            ) : (
-                              followUps?.map((suggestion) => (
-                                <Button
-                                  key={suggestion}
-                                  label={suggestion}
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleSend(suggestion)}
-                                />
-                              ))
-                            )}
-                          </HStack>
-                        </ChatMessageBubble>
-                      </ChatMessage>
+                      <HStack gap={2} wrap="wrap" vAlign="center" hAlign="center">
+                        {sendError ? (
+                          <Button
+                            label="Retry"
+                            variant="ghost"
+                            size="sm"
+                            icon={
+                              <Icon icon={ArrowPathIcon} size="sm" />
+                            }
+                            onClick={handleRetry}
+                          />
+                        ) : (
+                          followUps?.map((suggestion) => (
+                            <Button
+                              key={suggestion}
+                              label={suggestion}
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleSend(suggestion)}
+                            />
+                          ))
+                        )}
+                      </HStack>
                     )}
                   </ChatMessageList>
                 </ChatLayout>
