@@ -26,6 +26,8 @@ import ThreadView from "./chat/ThreadView";
 import { getThread } from "../content/threads";
 import {
   useSessionVersion,
+  useMounted,
+  useStorageHealth,
   listCustomChats,
   createCustomChat,
   renameCustomChat,
@@ -33,10 +35,8 @@ import {
   renameDemoChat,
   demoDisplayLabel,
   makeDraftThread,
-  isPinned,
   togglePin,
   listPinned,
-  isArchived,
   archiveChat,
   unarchiveChat,
   listArchived,
@@ -599,6 +599,23 @@ export default function ShellSideNav({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   useSessionVersion();
+  const mounted = useMounted();
+  // SSR emits empty session state and the first client paint must match it,
+  // so every session read during render resolves to empty until mount.
+  // (Dialogs/menus only open post-mount, so their data is unaffected.)
+  const customs = mounted ? listCustomChats() : [];
+  const pinnedRefs = mounted ? listPinned() : [];
+  const archivedRefs = mounted ? listArchived() : [];
+  const refKeys = (refs: ChatRef[]) =>
+    new Set(refs.map((r) => `${r.kind}:${r.id}`));
+  const pinKeys = refKeys(pinnedRefs);
+  const archivedKeys = refKeys(archivedRefs);
+  const isPinnedHere = (ref: ChatRef) => pinKeys.has(`${ref.kind}:${ref.id}`);
+  const isArchivedHere = (ref: ChatRef) =>
+    archivedKeys.has(`${ref.kind}:${ref.id}`);
+  const displayLabel = (label: string) =>
+    mounted ? demoDisplayLabel(label) : label;
+  const storageOk = useStorageHealth();
 
   const [mode, setMode] = useState<string | null>(
     initialSubjectValue ?? "auto",
@@ -623,10 +640,9 @@ export default function ShellSideNav({
 
   const renamePlaceholder =
     renameTarget?.kind === "custom"
-      ? (listCustomChats().find((c) => c.code === renameTarget.code)?.title ??
-        "")
+      ? (customs.find((c) => c.code === renameTarget.code)?.title ?? "")
       : renameTarget
-        ? demoDisplayLabel(renameTarget.label)
+        ? displayLabel(renameTarget.label)
         : "";
 
   const saveRename = () => {
@@ -661,8 +677,8 @@ export default function ShellSideNav({
   // Pinned + archived rows (customs by code, demos by label).
   const refTitle = (ref: ChatRef): string | null =>
     ref.kind === "custom"
-      ? (listCustomChats().find((c) => c.code === ref.id)?.title ?? null)
-      : demoDisplayLabel(ref.id);
+      ? (customs.find((c) => c.code === ref.id)?.title ?? null)
+      : displayLabel(ref.id);
 
   const openRef = (ref: ChatRef) => {
     if (ref.kind === "custom") {
@@ -701,7 +717,7 @@ export default function ShellSideNav({
   // (Archive is instant; Delete asks first).
   const listedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => [
     {
-      label: isPinned(ref) ? "Unpin" : "Pin",
+      label: isPinnedHere(ref) ? "Unpin" : "Pin",
       onClick: () => togglePin(ref),
     },
     { label: "Rename", onClick: () => startRename(ref, display) },
@@ -732,15 +748,15 @@ export default function ShellSideNav({
 
   const collectRows = (refs: ChatRef[], includeArchived: boolean) =>
     refs
-      .filter((ref) => includeArchived || !isArchived(ref))
+      .filter((ref) => includeArchived || !isArchivedHere(ref))
       .map((ref) => ({ ref, title: refTitle(ref) }))
       .filter(
         (r): r is { ref: ChatRef; title: string } =>
           r.title != null && matchesQuery(r.title),
       );
 
-  const pinnedRows = collectRows(listPinned(), false);
-  const archivedRows = collectRows(listArchived(), true);
+  const pinnedRows = collectRows(pinnedRefs, false);
+  const archivedRows = collectRows(archivedRefs, true);
 
   // Chat navigation: shareable URL is /subject/[subject]/[code].
   // For now the fully implemented conversation is CN → TCP vs UDP;
@@ -938,21 +954,21 @@ export default function ShellSideNav({
               {WORKSPACES.map((workspace) => {
                 const demoChats = workspace.chats.filter(
                   (chat) =>
-                    !isArchived({ kind: "demo", id: chat.label }) &&
-                    !isPinned({ kind: "demo", id: chat.label }) &&
-                    matchesQuery(demoDisplayLabel(chat.label)),
+                    !isArchivedHere({ kind: "demo", id: chat.label }) &&
+                    !isPinnedHere({ kind: "demo", id: chat.label }) &&
+                    matchesQuery(displayLabel(chat.label)),
                 );
-                const customs = listCustomChats().filter(
+                const workspaceCustoms = customs.filter(
                   (c) =>
                     c.subject === workspace.name &&
-                    !isArchived({ kind: "custom", id: c.code }) &&
-                    !isPinned({ kind: "custom", id: c.code }) &&
+                    !isArchivedHere({ kind: "custom", id: c.code }) &&
+                    !isPinnedHere({ kind: "custom", id: c.code }) &&
                     matchesQuery(c.title),
                 );
                 if (
                   query !== "" &&
                   demoChats.length === 0 &&
-                  customs.length === 0
+                  workspaceCustoms.length === 0
                 ) {
                   return null;
                 }
@@ -967,7 +983,7 @@ export default function ShellSideNav({
                   >
                     <VStack gap={0.5}>
                       {demoChats.map((chat) => {
-                        const display = demoDisplayLabel(chat.label);
+                        const display = displayLabel(chat.label);
                         const ref: ChatRef = {
                           kind: "demo",
                           id: chat.label,
@@ -982,7 +998,7 @@ export default function ShellSideNav({
                           />
                         );
                       })}
-                      {customs.map((c) => {
+                      {workspaceCustoms.map((c) => {
                         const ref: ChatRef = {
                           kind: "custom",
                           id: c.code,
@@ -1032,7 +1048,7 @@ export default function ShellSideNav({
         {(() => {
           const draftChat =
             draftCode != null
-              ? (listCustomChats().find((c) => c.code === draftCode) ?? null)
+              ? (customs.find((c) => c.code === draftCode) ?? null)
               : null;
           const draftThread = draftChat ? makeDraftThread(draftChat) : null;
           const thread =
@@ -1078,6 +1094,15 @@ export default function ShellSideNav({
 
                   <ChatComposer
                     onSubmit={handleWelcomeSend}
+                    status={
+                      !storageOk
+                        ? {
+                            type: "warning",
+                            message:
+                              "History isn't saving in this browser — new chats will be lost on reload.",
+                          }
+                        : undefined
+                    }
                     placeholder={
                       category
                         ? `Ask something about ${category}...`

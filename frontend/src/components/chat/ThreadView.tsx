@@ -78,6 +78,8 @@ import {
 } from "../../lib/attachments";
 import {
   useSessionVersion,
+  useMounted,
+  useStorageHealth,
   getOverlay,
   appendBlocks,
   removeLastOverlayBlock,
@@ -417,8 +419,11 @@ export default function ThreadView({
   const [transcriptCopied, setTranscriptCopied] = useState(false);
 
   // Session overlay: blocks appended this session (persisted per code).
+  // Gated on mount so SSR and first client paint agree (see useMounted).
   useSessionVersion();
-  const overlay = getOverlay(sessionKey);
+  const mounted = useMounted();
+  const storageOk = useStorageHealth();
+  const overlay = mounted ? getOverlay(sessionKey) : [];
   const blocks = [...thread.blocks, ...overlay];
 
   // Follow-ups from the latest assistant turn (live turns persist theirs).
@@ -978,7 +983,13 @@ export default function ThreadView({
                       status={
                         sendError
                           ? { type: "warning", message: sendError.message }
-                          : undefined
+                          : !storageOk
+                            ? {
+                                type: "warning",
+                                message:
+                                  "History isn't saving in this browser — new messages will be lost on reload.",
+                              }
+                            : undefined
                       }
                       placeholder={
                         composerMode === "ask"

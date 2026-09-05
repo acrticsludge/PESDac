@@ -34,6 +34,42 @@ export function useSessionVersion() {
   }, []);
 }
 
+/** True only after client mount. Session reads during render must resolve
+ * to empty until mount so SSR HTML and first client paint agree. */
+export function useMounted(): boolean {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  return mounted;
+}
+
+// localStorage health (quota / private mode). writeJSON flips the flag on
+// every write; the probe covers first paint before any write happens.
+let storageHealth: boolean | null = null;
+
+export function checkStorageHealth(): boolean {
+  if (typeof window === "undefined") return true;
+  if (storageHealth != null) return storageHealth;
+  try {
+    const key = "pesdac-storage-probe";
+    window.localStorage.setItem(key, "1");
+    window.localStorage.removeItem(key);
+    storageHealth = true;
+  } catch {
+    storageHealth = false;
+  }
+  return storageHealth;
+}
+
+/** Storage health, re-checked on every store change (SSR: true). */
+export function useStorageHealth(): boolean {
+  useSessionVersion();
+  const mounted = useMounted();
+  if (!mounted) return true;
+  return checkStorageHealth();
+}
+
 function readJSON<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -48,8 +84,12 @@ function writeJSON(key: string, value: unknown) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    storageHealth = true;
   } catch {
-    // Storage unavailable (private mode, quota) — session stays in memory.
+    // Storage unavailable (private mode, quota) — session stays in memory
+    // and subscribers re-render into the warning state.
+    storageHealth = false;
+    emit();
   }
 }
 
