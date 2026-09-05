@@ -1,17 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType, type SVGProps } from "react";
 
 import { Layout, VStack, HStack } from "@astryxdesign/core/Layout";
-import { Text } from "@astryxdesign/core/Text";
-import { Button } from "@astryxdesign/core/Button";
+import { Heading, Text } from "@astryxdesign/core/Text";
+import { Icon } from "@astryxdesign/core/Icon";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { TabList, Tab } from "@astryxdesign/core/TabList";
 import { Dialog } from "@astryxdesign/core/Dialog";
 import { DialogHeader } from "@astryxdesign/core/Dialog";
-import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { SideNav, SideNavSection, SideNavItem } from "@astryxdesign/core/SideNav";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import {
+  MagnifyingGlassIcon,
+  UserCircleIcon,
+  BookOpenIcon,
+  SparklesIcon,
+  ShieldCheckIcon,
+  DocumentTextIcon,
+} from "@heroicons/react/24/outline";
 import {
   TABS,
-  tabFromHash,
   IdentitySection,
   StudySection,
   AssistantSection,
@@ -20,9 +29,62 @@ import {
   type ProfileTab,
 } from "./sections";
 
+export type { ProfileTab };
+
+type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
+
+const NAV_GROUPS: {
+  label: string;
+  tabs: { value: ProfileTab; label: string; icon: IconComponent }[];
+}[] = [
+  {
+    label: "Account",
+    tabs: [{ value: "profile", label: "Profile", icon: UserCircleIcon }],
+  },
+  {
+    label: "Preferences",
+    tabs: [
+      { value: "study", label: "Study", icon: BookOpenIcon },
+      { value: "assistant", label: "Assistant", icon: SparklesIcon },
+    ],
+  },
+  {
+    label: "Data & legal",
+    tabs: [
+      { value: "privacy", label: "Privacy", icon: ShieldCheckIcon },
+      { value: "legal", label: "Legal", icon: DocumentTextIcon },
+    ],
+  },
+];
+
+const PANEL_META: Record<ProfileTab, { heading: string; description: string }> =
+  {
+    profile: {
+      heading: "Profile",
+      description: "How you appear across PESDac.",
+    },
+    study: {
+      heading: "Study",
+      description: "Subjects, schedule, and quiz level.",
+    },
+    assistant: {
+      heading: "Assistant",
+      description: "How answers behave by default.",
+    },
+    privacy: {
+      heading: "Privacy",
+      description: "What is kept, what leaves, and who may process it.",
+    },
+    legal: {
+      heading: "Legal",
+      description: "The documents behind the product.",
+    },
+  };
+
 // My Profile as a settings-dialog (modal over the chat — settings without
-// leaving the conversation). Section list filters as you type; the pane
-// swaps beside it. All controls are the same storage-backed rows.
+// leaving the conversation): grouped icon rail + searchable sections on
+// desktop, search + tab strip below 640px. All controls are the same
+// storage-backed rows.
 export default function ProfileDialog({
   isOpen,
   initialTab,
@@ -34,6 +96,7 @@ export default function ProfileDialog({
 }) {
   const [tab, setTab] = useState<ProfileTab>(initialTab);
   const [query, setQuery] = useState("");
+  const isNarrow = useMediaQuery("(max-width: 640px)");
   // Fresh open (or new entry tab) resets navigation state.
   useEffect(() => {
     if (isOpen) {
@@ -41,8 +104,28 @@ export default function ProfileDialog({
       setQuery("");
     }
   }, [isOpen, initialTab]);
-  const visible = TABS.filter((t) =>
-    t.label.toLowerCase().includes(query.trim().toLowerCase()),
+  const matches = (label: string) =>
+    label.toLowerCase().includes(query.trim().toLowerCase());
+  const visibleGroups = NAV_GROUPS.map((g) => ({
+    ...g,
+    tabs: g.tabs.filter((t) => matches(t.label)),
+  })).filter((g) => g.tabs.length > 0);
+  const visibleTabs = TABS.filter((t) => matches(t.label));
+  const meta = PANEL_META[tab];
+  const pane = (
+    <VStack gap={4} style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
+      <VStack gap={0.5}>
+        <Heading level={2}>{meta.heading}</Heading>
+        <Text type="supporting" color="secondary">
+          {meta.description}
+        </Text>
+      </VStack>
+      {tab === "profile" && <IdentitySection />}
+      {tab === "study" && <StudySection />}
+      {tab === "assistant" && <AssistantSection />}
+      {tab === "privacy" && <PrivacySection />}
+      {tab === "legal" && <LegalSection />}
+    </VStack>
   );
   return (
     <Dialog
@@ -60,11 +143,8 @@ export default function ProfileDialog({
           />
         }
         content={
-          <HStack gap={4} vAlign="start" width="100%">
-            <VStack
-              gap={2}
-              style={{ width: 220, flexShrink: 0 }}
-            >
+          isNarrow ? (
+            <VStack gap={3}>
               <TextInput
                 label="Search settings"
                 isLabelHidden
@@ -74,39 +154,70 @@ export default function ProfileDialog({
                 value={query}
                 onChange={setQuery}
               />
-              {visible.map((t) => (
-                <Button
-                  key={t.value}
-                  label={`${t.label} settings`}
-                  variant={t.value === tab ? "secondary" : "ghost"}
-                  width="100%"
-                  onClick={() => setTab(t.value)}
-                >
-                  {t.label}
-                </Button>
-              ))}
-              {visible.length === 0 && (
+              <TabList
+                value={tab}
+                onChange={(value) => setTab(value as ProfileTab)}
+                hasDivider
+              >
+                {visibleTabs.map((t) => (
+                  <Tab key={t.value} value={t.value} label={t.label} />
+                ))}
+              </TabList>
+              {visibleTabs.length === 0 ? (
                 <Text type="supporting" color="secondary">
                   No sections match.
                 </Text>
+              ) : (
+                pane
               )}
             </VStack>
-            <VStack
-              gap={4}
-              style={{ flex: 1, minWidth: 0, overflowY: "auto" }}
-            >
-              {tab === "profile" && <IdentitySection />}
-              {tab === "study" && <StudySection />}
-              {tab === "assistant" && <AssistantSection />}
-              {tab === "privacy" && <PrivacySection />}
-              {tab === "legal" && <LegalSection />}
-            </VStack>
-          </HStack>
+          ) : (
+            <HStack gap={4} vAlign="start" width="100%">
+              <VStack style={{ width: 248, flexShrink: 0 }}>
+                <SideNav
+                  topContent={
+                    <TextInput
+                      label="Search settings"
+                      isLabelHidden
+                      placeholder="Search settings..."
+                      startIcon={MagnifyingGlassIcon}
+                      hasClear
+                      value={query}
+                      onChange={setQuery}
+                    />
+                  }
+                >
+                  {visibleGroups.map((group) => (
+                    <SideNavSection key={group.label} title={group.label}>
+                      {group.tabs.map((t) => (
+                        <SideNavItem
+                          key={t.value}
+                          label={t.label}
+                          icon={
+                            <Icon
+                              icon={t.icon}
+                              size="sm"
+                              color="primary"
+                            />
+                          }
+                          isSelected={t.value === tab}
+                          onClick={() => setTab(t.value)}
+                        />
+                      ))}
+                    </SideNavSection>
+                  ))}
+                  {visibleGroups.length === 0 && (
+                    <Text type="supporting" color="secondary">
+                      No sections match.
+                    </Text>
+                  )}
+                </SideNav>
+              </VStack>
+              {pane}
+            </HStack>
+          )
         }
       />
     </Dialog>
   );
 }
-
-export { tabFromHash };
-export type { ProfileTab };

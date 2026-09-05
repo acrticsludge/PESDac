@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode, type ComponentType, type SVGProps } from "react";
 
 import { VStack, HStack } from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { Icon } from "@astryxdesign/core/Icon";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
+import {
+  SegmentedControl,
+  SegmentedControlItem,
+} from "@astryxdesign/core/SegmentedControl";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -14,6 +19,27 @@ import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Divider } from "@astryxdesign/core/Divider";
+import {
+  UserIcon,
+  EnvelopeIcon,
+  AcademicCapIcon,
+  CalendarDaysIcon,
+  Squares2X2Icon,
+  GlobeAltIcon,
+  ComputerDesktopIcon,
+  CpuChipIcon,
+  CircleStackIcon,
+  CalculatorIcon,
+  ClockIcon,
+  CheckCircleIcon,
+  SparklesIcon,
+  Cog6ToothIcon,
+  ChatBubbleLeftRightIcon,
+  DocumentTextIcon,
+  ArrowDownTrayIcon,
+  TrashIcon,
+  BookOpenIcon,
+} from "@heroicons/react/24/outline";
 import {
   clearAllChats,
   getProfile,
@@ -45,6 +71,100 @@ export function tabFromHash(): ProfileTab {
   return TABS.some((t) => t.value === hash) ? (hash as ProfileTab) : "profile";
 }
 
+type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
+
+/** The one control-column width, so controls align down the panel. */
+const CONTROL_WIDTH = 192;
+
+/**
+ * A filled, divided group of settings rows (settings-dialog idiom): muted
+ * Card, no padding (rows carry the inset so dividers stay full-bleed),
+ * subtle dividers between rows only.
+ */
+function SettingsCard({
+  title,
+  children,
+}: {
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <VStack gap={1.5}>
+      {title != null && (
+        <Text type="supporting" weight="semibold" color="secondary">
+          {title}
+        </Text>
+      )}
+      <Card padding={0} width="100%" variant="muted">
+        <VStack gap={0}>
+          {children}
+        </VStack>
+      </Card>
+    </VStack>
+  );
+}
+
+/**
+ * One setting: icon + name + explanation on the left, the control on the
+ * right in the shared column. The row owns the visible label, so every
+ * control inside one keeps `isLabelHidden`.
+ */
+function SettingsRow({
+  title,
+  description,
+  icon,
+  control,
+}: {
+  title: string;
+  description?: string;
+  /** Required: every row carries one, so titles align down the card. */
+  icon: IconComponent;
+  control?: ReactNode;
+}) {
+  return (
+    <VStack padding={4} gap={2}>
+      <HStack gap={3} vAlign="center" width="100%">
+        <Icon icon={icon} size="sm" color="secondary" />
+        <VStack gap={0.5} style={{ flex: 1, minWidth: 0 }}>
+          <Text type="label">{title}</Text>
+          {description != null && (
+            <Text type="supporting" color="secondary">
+              {description}
+            </Text>
+          )}
+        </VStack>
+        {control != null && (
+          <HStack
+            vAlign="center"
+            style={{
+              width: CONTROL_WIDTH,
+              flexShrink: 0,
+              justifyContent: "flex-end",
+            }}
+          >
+            {control}
+          </HStack>
+        )}
+      </HStack>
+    </VStack>
+  );
+}
+
+/** Card wrapper that inserts subtle dividers between its rows. */
+function CardRows({ children }: { children: ReactNode }) {
+  const rows = Array.isArray(children) ? children : [children];
+  return (
+    <>
+      {rows.map((row, i) => (
+        <VStack key={i} gap={0}>
+          {i > 0 && <Divider variant="subtle" />}
+          {row}
+        </VStack>
+      ))}
+    </>
+  );
+}
+
 const SEMESTERS = Array.from({ length: 8 }, (_, i) => ({
   value: String(i + 1),
   label: `Semester ${i + 1}`,
@@ -59,7 +179,7 @@ export function IdentitySection() {
   useSessionVersion();
   const profile = getProfile();
   return (
-    <VStack gap={4}>
+    <VStack gap={5}>
       <HStack gap={3} vAlign="center">
         <Avatar
           name={profile.displayName || profile.email || "?"}
@@ -75,56 +195,114 @@ export function IdentitySection() {
           </Text>
         </VStack>
       </HStack>
-      <Divider />
-      <VStack gap={3}>
-        <TextInput
-          label="Display name"
-          placeholder="Your name"
-          value={profile.displayName}
-          onChange={(value) => updateProfile({ displayName: value })}
-        />
-        <TextInput
-          label="Email"
-          placeholder="you@example.com"
-          value={profile.email}
-          onChange={(value) => updateProfile({ email: value })}
-        />
-        <TextInput
-          label="Institution"
-          placeholder="PES University"
-          value={profile.institution}
-          onChange={(value) => updateProfile({ institution: value })}
-        />
-        <Selector
-          label="Semester"
-          placeholder="Select semester"
-          hasClear
-          options={SEMESTERS}
-          value={profile.semester || null}
-          onChange={(value) => updateProfile({ semester: value ?? "" })}
-        />
-        <Selector
-          label="Branch"
-          placeholder="Select branch"
-          hasClear
-          options={BRANCHES}
-          value={profile.branch || null}
-          onChange={(value) => updateProfile({ branch: value ?? "" })}
-        />
-      </VStack>
+      <SettingsCard title="Identity">
+        <CardRows>
+          <SettingsRow
+            title="Display name"
+            description="Shown across PESDac."
+            icon={UserIcon}
+            control={
+              <TextInput
+                label="Display name"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                placeholder="Your name"
+                value={profile.displayName}
+                onChange={(value) => updateProfile({ displayName: value })}
+              />
+            }
+          />
+          <SettingsRow
+            title="Email"
+            description="Where account notices are sent."
+            icon={EnvelopeIcon}
+            control={
+              <TextInput
+                label="Email"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                placeholder="you@example.com"
+                value={profile.email}
+                onChange={(value) => updateProfile({ email: value })}
+              />
+            }
+          />
+          <SettingsRow
+            title="Institution"
+            description="Your college or university."
+            icon={AcademicCapIcon}
+            control={
+              <TextInput
+                label="Institution"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                placeholder="PES University"
+                value={profile.institution}
+                onChange={(value) => updateProfile({ institution: value })}
+              />
+            }
+          />
+          <SettingsRow
+            title="Semester"
+            icon={CalendarDaysIcon}
+            control={
+              <Selector
+                label="Semester"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                placeholder="Select"
+                hasClear
+                options={SEMESTERS}
+                value={profile.semester || null}
+                onChange={(value) => updateProfile({ semester: value ?? "" })}
+              />
+            }
+          />
+          <SettingsRow
+            title="Branch"
+            icon={Squares2X2Icon}
+            control={
+              <Selector
+                label="Branch"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                placeholder="Select"
+                hasClear
+                options={BRANCHES}
+                value={profile.branch || null}
+                onChange={(value) => updateProfile({ branch: value ?? "" })}
+              />
+            }
+          />
+        </CardRows>
+      </SettingsCard>
     </VStack>
   );
 }
 
-const WEEKLY_GOALS = ["3 days", "5 days", "7 days"].map((g) => ({
-  value: g,
-  label: `${g} / week`,
-}));
+const SUBJECT_ICONS: Record<string, IconComponent> = {
+  CN: GlobeAltIcon,
+  OS: ComputerDesktopIcon,
+  DLCD: CpuChipIcon,
+  DSA: CircleStackIcon,
+  Math: CalculatorIcon,
+};
+
+const WEEKLY_GOALS = [
+  { value: "3 days", label: "3 days" },
+  { value: "5 days", label: "5 days" },
+  { value: "7 days", label: "7 days" },
+];
 
 const DIFFICULTIES = [
-  { value: "easy", label: "Easy — recall and definitions" },
-  { value: "medium", label: "Medium — application and worked examples" },
-  { value: "hard", label: "Hard — exam-style and edge cases" },
+  { value: "easy", label: "Easy" },
+  { value: "medium", label: "Medium" },
+  { value: "hard", label: "Hard" },
 ];
 
 export function StudySection() {
@@ -139,52 +317,97 @@ export function StudySection() {
     });
   };
   return (
-    <VStack gap={4}>
-      <Heading level={3}>Study preferences</Heading>
-      <VStack gap={2}>
-        <Text type="body" weight="semibold">
-          Enrolled subjects
-        </Text>
-        {SUBJECTS.map((subject) => (
-          <Switch
-            key={subject}
-            label={subject}
-            description={`Include ${subject} in study suggestions`}
-            value={profile.subjects.includes(subject)}
-            onChange={(checked) => toggleSubject(subject)}
+    <VStack gap={5}>
+      <SettingsCard title="Enrolled subjects">
+        <CardRows>
+          {SUBJECTS.map((subject) => (
+            <SettingsRow
+              key={subject}
+              title={subject}
+              description={`Include ${subject} in study suggestions`}
+              icon={SUBJECT_ICONS[subject] ?? BookOpenIcon}
+              control={
+                <Switch
+                  label={subject}
+                  isLabelHidden
+                  value={profile.subjects.includes(subject)}
+                  onChange={() => toggleSubject(subject)}
+                />
+              }
+            />
+          ))}
+        </CardRows>
+      </SettingsCard>
+      <SettingsCard title="Schedule & level">
+        <CardRows>
+          <SettingsRow
+            title="Semester exams"
+            description="When your exams land."
+            icon={CalendarDaysIcon}
+            control={
+              <TextInput
+                label="Semester exams"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                placeholder="December 2026"
+                value={profile.examMonth}
+                onChange={(value) => updateProfile({ examMonth: value })}
+              />
+            }
           />
-        ))}
-      </VStack>
-      <Divider />
-      <VStack gap={3}>
-        <TextInput
-          label="Semester exams"
-          placeholder="e.g. December 2026"
-          value={profile.examMonth}
-          onChange={(value) => updateProfile({ examMonth: value })}
-        />
-        <Selector
-          label="Weekly study goal"
-          options={WEEKLY_GOALS}
-          value={profile.weeklyGoal}
-          onChange={(value) => updateProfile({ weeklyGoal: value })}
-        />
-        <Selector
-          label="Quiz difficulty"
-          description="Shapes future quiz questions; nothing changes in chat yet"
-          options={DIFFICULTIES}
-          value={profile.difficulty}
-          onChange={(value) => updateProfile({ difficulty: value })}
-        />
-      </VStack>
+          <SettingsRow
+            title="Weekly study goal"
+            description="Days per week you aim to study."
+            icon={CheckCircleIcon}
+            control={
+              <SegmentedControl
+                label="Weekly study goal"
+                size="sm"
+                value={profile.weeklyGoal}
+                onChange={(value) => updateProfile({ weeklyGoal: value })}
+              >
+                {WEEKLY_GOALS.map((g) => (
+                  <SegmentedControlItem
+                    key={g.value}
+                    value={g.value}
+                    label={g.label}
+                  />
+                ))}
+              </SegmentedControl>
+            }
+          />
+          <SettingsRow
+            title="Quiz difficulty"
+            description="Shapes future quiz questions; nothing changes in chat yet."
+            icon={SparklesIcon}
+            control={
+              <SegmentedControl
+                label="Quiz difficulty"
+                size="sm"
+                value={profile.difficulty}
+                onChange={(value) => updateProfile({ difficulty: value })}
+              >
+                {DIFFICULTIES.map((d) => (
+                  <SegmentedControlItem
+                    key={d.value}
+                    value={d.value}
+                    label={d.label}
+                  />
+                ))}
+              </SegmentedControl>
+            }
+          />
+        </CardRows>
+      </SettingsCard>
     </VStack>
   );
 }
 
 const DEPTHS = [
-  { value: "auto", label: "Auto — match the question" },
-  { value: "ask", label: "Ask — short answers first" },
-  { value: "deep", label: "Deep — step-by-step by default" },
+  { value: "auto", label: "Auto" },
+  { value: "ask", label: "Ask" },
+  { value: "deep", label: "Deep" },
 ];
 
 const VERBOSITIES = [
@@ -194,51 +417,112 @@ const VERBOSITIES = [
 ];
 
 const CITATIONS = [
-  { value: "always", label: "Always show sources" },
-  { value: "on request", label: "Only on request" },
+  { value: "always", label: "Always" },
+  { value: "on request", label: "On request" },
 ];
 
 export function AssistantSection() {
   useSessionVersion();
   const profile = getProfile();
   return (
-    <VStack gap={4}>
-      <Heading level={3}>Assistant behavior</Heading>
-      <VStack gap={3}>
-        <Selector
-          label="Default answer depth"
-          options={DEPTHS}
-          value={profile.depth}
-          onChange={(value) => updateProfile({ depth: value })}
-        />
-        <Selector
-          label="Explanation verbosity"
-          options={VERBOSITIES}
-          value={profile.verbosity}
-          onChange={(value) => updateProfile({ verbosity: value })}
-        />
-        <Selector
-          label="Source citations"
-          options={CITATIONS}
-          value={profile.citations}
-          onChange={(value) => updateProfile({ citations: value })}
-        />
-      </VStack>
-      <Divider />
-      <VStack gap={2}>
-        <Switch
-          label="Proactive quizzes"
-          description="Offer a quiz after finishing an explanation"
-          value={profile.proactiveQuiz}
-          onChange={(checked) => updateProfile({ proactiveQuiz: checked })}
-        />
-        <Switch
-          label="Follow-up suggestions"
-          description="Show suggestion pills under each answer"
-          value={profile.followUps}
-          onChange={(checked) => updateProfile({ followUps: checked })}
-        />
-      </VStack>
+    <VStack gap={5}>
+      <SettingsCard title="Answers">
+        <CardRows>
+          <SettingsRow
+            title="Default answer depth"
+            description="Auto matches the question, Ask keeps it short, Deep gives the chapter."
+            icon={Cog6ToothIcon}
+            control={
+              <SegmentedControl
+                label="Default answer depth"
+                size="sm"
+                value={profile.depth}
+                onChange={(value) => updateProfile({ depth: value })}
+              >
+                {DEPTHS.map((d) => (
+                  <SegmentedControlItem
+                    key={d.value}
+                    value={d.value}
+                    label={d.label}
+                  />
+                ))}
+              </SegmentedControl>
+            }
+          />
+          <SettingsRow
+            title="Explanation verbosity"
+            icon={ChatBubbleLeftRightIcon}
+            control={
+              <SegmentedControl
+                label="Explanation verbosity"
+                size="sm"
+                value={profile.verbosity}
+                onChange={(value) => updateProfile({ verbosity: value })}
+              >
+                {VERBOSITIES.map((v) => (
+                  <SegmentedControlItem
+                    key={v.value}
+                    value={v.value}
+                    label={v.label}
+                  />
+                ))}
+              </SegmentedControl>
+            }
+          />
+          <SettingsRow
+            title="Source citations"
+            icon={DocumentTextIcon}
+            control={
+              <SegmentedControl
+                label="Source citations"
+                size="sm"
+                value={profile.citations}
+                onChange={(value) => updateProfile({ citations: value })}
+              >
+                {CITATIONS.map((c) => (
+                  <SegmentedControlItem
+                    key={c.value}
+                    value={c.value}
+                    label={c.label}
+                  />
+                ))}
+              </SegmentedControl>
+            }
+          />
+        </CardRows>
+      </SettingsCard>
+      <SettingsCard title="Follow-ups">
+        <CardRows>
+          <SettingsRow
+            title="Proactive quizzes"
+            description="Offer a quiz after finishing an explanation."
+            icon={SparklesIcon}
+            control={
+              <Switch
+                label="Proactive quizzes"
+                isLabelHidden
+                value={profile.proactiveQuiz}
+                onChange={(checked) =>
+                  updateProfile({ proactiveQuiz: checked })
+                }
+              />
+            }
+          />
+          <SettingsRow
+            title="Follow-up suggestions"
+            description="Show suggestion pills under each answer."
+            icon={ChatBubbleLeftRightIcon}
+            control={
+              <Switch
+                label="Follow-up suggestions"
+                isLabelHidden
+                value={profile.followUps}
+                onChange={(checked) => updateProfile({ followUps: checked })}
+              />
+            }
+          />
+        </CardRows>
+      </SettingsCard>
       <Text type="supporting" color="secondary">
         Answer depth applies to new messages right away. Verbosity,
         citations, and quiz difficulty bind in the backend phase.
@@ -286,43 +570,61 @@ export function PrivacySection() {
   const profile = getProfile();
   const [confirmingClear, setConfirmingClear] = useState(false);
   return (
-    <VStack gap={4}>
-      <Heading level={3}>Privacy &amp; data</Heading>
-      <Selector
-        label="Chat history retention"
-        description="Enforced after the backend phase; stored as your preference today"
-        options={RETENTIONS}
-        value={profile.retention}
-        onChange={(value) => updateProfile({ retention: value })}
-      />
-      <Divider />
-      <VStack gap={2}>
-        <Text type="body" weight="semibold">
-          Your data
-        </Text>
-        <HStack gap={2}>
-          <Button
-            label="Export my data"
-            variant="secondary"
-            onClick={exportAllData}
-          >
-            Export my data
-          </Button>
-          <Button
-            label="Delete all chats"
-            variant="destructive"
-            onClick={() => setConfirmingClear(true)}
-          >
-            Delete all chats
-          </Button>
-        </HStack>
-        <Text type="supporting" color="secondary">
-          Export downloads every saved chat, draft, vote, and preference as
-          one JSON file. Delete removes all chats and their messages;
-          ratings, drafts, and profile settings are kept.
-        </Text>
-      </VStack>
-      <Divider />
+    <VStack gap={5}>
+      <SettingsCard title="History">
+        <CardRows>
+          <SettingsRow
+            title="Chat history retention"
+            description="Enforced after the backend phase; stored as your preference today."
+            icon={ClockIcon}
+            control={
+              <Selector
+                label="Chat history retention"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                options={RETENTIONS}
+                value={profile.retention}
+                onChange={(value) => updateProfile({ retention: value })}
+              />
+            }
+          />
+        </CardRows>
+      </SettingsCard>
+      <SettingsCard title="Your data">
+        <CardRows>
+          <SettingsRow
+            title="Export my data"
+            description="Download every saved chat, draft, vote, and preference as one JSON file."
+            icon={ArrowDownTrayIcon}
+            control={
+              <Button
+                label="Export my data"
+                variant="secondary"
+                size="sm"
+                onClick={exportAllData}
+              >
+                Export
+              </Button>
+            }
+          />
+          <SettingsRow
+            title="Delete all chats"
+            description="Removes all chats and their messages. Ratings, drafts, and profile settings are kept."
+            icon={TrashIcon}
+            control={
+              <Button
+                label="Delete all chats"
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmingClear(true)}
+              >
+                Delete
+              </Button>
+            }
+          />
+        </CardRows>
+      </SettingsCard>
       <Card variant="muted" padding={3} width="100%">
         <Text type="supporting" color="secondary">
           Conversations may be processed or used for training purposes by
@@ -367,28 +669,29 @@ const LEGAL_DOCS = [
 
 export function LegalSection() {
   return (
-    <VStack gap={4}>
-      <Heading level={3}>Legal</Heading>
-      <VStack gap={2}>
-        {LEGAL_DOCS.map((doc) => (
-          <Collapsible
-            key={doc.name}
-            trigger={
-              <HStack gap={2} vAlign="center" width="100%">
-                <Text type="body" weight="semibold">
-                  {doc.name}
-                </Text>
-                <Badge label="Publishes at launch" />
-              </HStack>
-            }
-          >
-            <Text type="supporting" color="secondary">
-              {doc.summary} The full document publishes at launch.
-            </Text>
-          </Collapsible>
-        ))}
-      </VStack>
-      <Divider />
+    <VStack gap={5}>
+      <SettingsCard title="Documents">
+        <CardRows>
+          {LEGAL_DOCS.map((doc) => (
+            <Collapsible
+              key={doc.name}
+              trigger={
+                <HStack gap={3} vAlign="center" width="100%">
+                  <Icon icon={DocumentTextIcon} size="sm" color="secondary" />
+                  <Text type="label" style={{ flex: 1 }}>
+                    {doc.name}
+                  </Text>
+                  <Badge label="Publishes at launch" />
+                </HStack>
+              }
+            >
+              <Text type="supporting" color="secondary">
+                {doc.summary} The full document publishes at launch.
+              </Text>
+            </Collapsible>
+          ))}
+        </CardRows>
+      </SettingsCard>
       <VStack gap={2}>
         <Text type="body">
           PESDac can make mistakes. Verify important answers against your

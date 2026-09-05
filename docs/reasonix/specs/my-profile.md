@@ -28,6 +28,23 @@ Dev:       & "C:\Program Files\nodejs\npm.cmd" run dev
 
 ## Architecture (settings-dialog — user direction 2026-09-06)
 
+## Template port (settings-dialog source, user direction 2026-09-06)
+
+The Playground `settings-dialog` source was ported idiom-for-idiom where
+0.5.2 allows it: grouped icon rail (`SideNav` + `topContent` search),
+muted zero-padding cards with subtle row dividers, icon-titled rows with
+a shared 192px control column, `SegmentedControl` for 2–3 named choices
+(depth, verbosity, citations, goal, difficulty), `isLabelHidden`
+controls (the row owns the label), panel heading + description,
+`useMediaQuery` narrow shell. Deliberate deviations: `TabList` strip
+instead of a custom tab row below 640px (system component); section
+filter instead of the setting-level combobox + keyboard traversal
+(kept small — promote if search proves inadequate); no container-query
+row stacking (no stylex in our source — rows hold two columns, narrow
+shell gives them full width); ghost-button rows not used — real
+`SideNavItem`s. All five sections, controls, copy, and storage behavior
+unchanged by the restyle.
+
 `AppLayout` always renders `Pesdac` and is `transition:persist`ed. Profile
 is a **`Dialog` modal over the chat** (settings without leaving the
 conversation), following the `settings-dialog` composition (header +
