@@ -445,3 +445,12 @@ export function updateProfile(patch: Partial<Profile>) {
   writeJSON(PROFILE_KEY, { ...getProfile(), ...patch });
   emit();
 }
+
+// Delete every chat: customs plus all session-added turns (including live
+// turns on demo threads). Votes, drafts, and profile are personal state,
+// not chats, and are kept.
+export function clearAllChats() {
+  writeJSON(CHATS_KEY, []);
+  writeJSON(OVERLAY_KEY, {});
+  emit();
+}

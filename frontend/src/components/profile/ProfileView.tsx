@@ -13,9 +13,15 @@ import { TabList, Tab } from "@astryxdesign/core/TabList";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Divider } from "@astryxdesign/core/Divider";
 import {
+  clearAllChats,
   getProfile,
   updateProfile,
   useSessionVersion,
@@ -103,12 +109,155 @@ function IdentitySection() {
   );
 }
 
-// Later slices replace these with the real sections (plan Tasks 4–5).
-function ComingSoon({ label }: { label: string }) {
+const RETENTIONS = [
+  { value: "forever", label: "Keep forever" },
+  { value: "1 year", label: "Keep for 1 year" },
+  { value: "30 days", label: "Keep for 30 days" },
+  { value: "session", label: "Session only" },
+];
+
+// Downloads every pesdac-* key as one JSON file. Handler-only window
+// access: safe in the SSR island because it runs on click, not render.
+function exportAllData() {
+  const data: Record<string, unknown> = {};
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const key = window.localStorage.key(i);
+    if (key != null && key.startsWith("pesdac-")) {
+      const raw = window.localStorage.getItem(key);
+      try {
+        data[key] = JSON.parse(raw ?? "null");
+      } catch {
+        data[key] = raw;
+      }
+    }
+  }
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "pesdac-data.json";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function PrivacySection() {
+  useSessionVersion();
+  const profile = getProfile();
+  const [confirmingClear, setConfirmingClear] = useState(false);
   return (
-    <Text type="supporting" color="secondary">
-      {label} controls land in the next slice.
-    </Text>
+    <VStack gap={4}>
+      <Selector
+        label="Chat history retention"
+        description="Enforced after the backend phase; stored as your preference today"
+        options={RETENTIONS}
+        value={profile.retention}
+        onChange={(value) => updateProfile({ retention: value })}
+      />
+      <Divider />
+      <VStack gap={2}>
+        <Text type="body" weight="semibold">
+          Your data
+        </Text>
+        <HStack gap={2}>
+          <Button
+            label="Export my data"
+            variant="secondary"
+            onClick={exportAllData}
+          >
+            Export my data
+          </Button>
+          <Button
+            label="Delete all chats"
+            variant="destructive"
+            onClick={() => setConfirmingClear(true)}
+          >
+            Delete all chats
+          </Button>
+        </HStack>
+        <Text type="supporting" color="secondary">
+          Export downloads every saved chat, draft, vote, and preference as
+          one JSON file. Delete removes all chats and their messages;
+          ratings, drafts, and profile settings are kept.
+        </Text>
+      </VStack>
+      <Divider />
+      <Card variant="muted" padding={3} width="100%">
+        <Text type="supporting" color="secondary">
+          Conversations may be processed or used for training purposes by
+          third-party model providers such as NVIDIA. Avoid sharing
+          sensitive personal information.
+        </Text>
+      </Card>
+      <AlertDialog
+        isOpen={confirmingClear}
+        onOpenChange={(open) => {
+          if (!open) setConfirmingClear(false);
+        }}
+        title="Delete all chats?"
+        description="Every chat and its messages will be permanently removed. This cannot be undone."
+        actionLabel="Delete"
+        onAction={() => {
+          clearAllChats();
+          setConfirmingClear(false);
+        }}
+      />
+    </VStack>
+  );
+}
+
+const LEGAL_DOCS = [
+  {
+    name: "Terms of Use",
+    summary: "The rules for using PESDac: acceptable use, accounts, and liability.",
+  },
+  {
+    name: "Privacy Policy",
+    summary:
+      "What PESDac stores, why, how long it is kept, and your rights over it.",
+  },
+  {
+    name: "Cookie Notice",
+    summary: "Which cookies and local storage PESDac uses and what each one does.",
+  },
+];
+
+function LegalSection() {
+  return (
+    <VStack gap={4}>
+      <VStack gap={2}>
+        {LEGAL_DOCS.map((doc) => (
+          <Collapsible
+            key={doc.name}
+            trigger={
+              <HStack gap={2} vAlign="center" width="100%">
+                <Text type="body" weight="semibold">
+                  {doc.name}
+                </Text>
+                <Badge label="Publishes at launch" />
+              </HStack>
+            }
+          >
+            <Text type="supporting" color="secondary">
+              {doc.summary} The full document publishes at launch.
+            </Text>
+          </Collapsible>
+        ))}
+      </VStack>
+      <Divider />
+      <VStack gap={2}>
+        <Text type="body">
+          PESDac can make mistakes. Verify important answers against your
+          course material.
+        </Text>
+        <Text type="supporting" color="secondary">
+          PESDac is a study aid. Your institution's academic integrity
+          policy applies to any submitted work.
+        </Text>
+      </VStack>
+    </VStack>
   );
 }
 
@@ -273,8 +422,8 @@ export default function ProfileView({
             {tab === "profile" && <IdentitySection />}
             {tab === "study" && <StudySection />}
             {tab === "assistant" && <AssistantSection />}
-            {tab === "privacy" && <ComingSoon label="Privacy and data" />}
-            {tab === "legal" && <ComingSoon label="Legal" />}
+            {tab === "privacy" && <PrivacySection />}
+            {tab === "legal" && <LegalSection />}
           </VStack>
         </LayoutContent>
       }
