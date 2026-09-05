@@ -393,3 +393,55 @@ export function writeDraft(draftKey: string, text: string) {
   else delete all[draftKey];
   writeJSON(DRAFTS_KEY, all);
 }
+
+// My Profile (mockup stage): identity + study/assistant/privacy prefs.
+// Blank identity by user direction; everything merges over defaults so
+// older stored payloads stay valid. Backend later binds these to an
+// auth identity (see my-profile spec).
+
+const PROFILE_KEY = "pesdac-profile-v1";
+
+export type Profile = {
+  displayName: string;
+  email: string;
+  institution: string;
+  semester: string;
+  branch: string;
+  subjects: string[];
+  examMonth: string;
+  weeklyGoal: string;
+  difficulty: string;
+  depth: string;
+  verbosity: string;
+  proactiveQuiz: boolean;
+  followUps: boolean;
+  citations: string;
+  retention: string;
+};
+
+export const DEFAULT_PROFILE: Profile = {
+  displayName: "",
+  email: "",
+  institution: "",
+  semester: "",
+  branch: "",
+  subjects: [],
+  examMonth: "",
+  weeklyGoal: "5 days",
+  difficulty: "medium",
+  depth: "auto",
+  verbosity: "balanced",
+  proactiveQuiz: true,
+  followUps: true,
+  citations: "on request",
+  retention: "forever",
+};
+
+export function getProfile(): Profile {
+  return { ...DEFAULT_PROFILE, ...readJSON<Partial<Profile>>(PROFILE_KEY, {}) };
+}
+
+export function updateProfile(patch: Partial<Profile>) {
+  writeJSON(PROFILE_KEY, { ...getProfile(), ...patch });
+  emit();
+}
