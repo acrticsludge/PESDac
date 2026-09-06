@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 
 import jwt as pyjwt
@@ -14,6 +15,8 @@ from app.auth import neon
 from app.db import get_db
 from app.models.users import User
 from app.schemas.common import UNAUTHORIZED
+
+logger = logging.getLogger("pesdac")
 
 
 def get_current_user_from_neon(
@@ -33,7 +36,14 @@ def get_current_user_from_neon(
         return JSONResponse(status_code=401, content=UNAUTHORIZED)
     try:
         claims = neon.verify_neon_jwt(token)
+    except pyjwt.ExpiredSignatureError:
+        logger.debug("401 expired JWT")
+        return JSONResponse(status_code=401, content=UNAUTHORIZED)
+    except pyjwt.InvalidSignatureError:
+        logger.debug("401 JWT bad signature")
+        return JSONResponse(status_code=401, content=UNAUTHORIZED)
     except pyjwt.PyJWTError:
+        logger.debug("401 JWT invalid")
         return JSONResponse(status_code=401, content=UNAUTHORIZED)
     sub = claims.get("sub", "")
     if not sub:
@@ -77,6 +87,9 @@ def check_mutation_origin(request: Request) -> JSONResponse | None:
     if _origin_of(origin) not in allowed:
         from app.schemas.common import error_body
 
+        logger.warning(
+            "403 %s %s origin=%s", request.method, request.url.path, origin
+        )
         return JSONResponse(
             status_code=403,
             content=error_body("FORBIDDEN", "Origin not allowed."),

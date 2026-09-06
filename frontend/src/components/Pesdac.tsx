@@ -28,6 +28,7 @@ import ThreadView from "./chat/ThreadView";
 import ProfileDialog, { type ProfileTab } from "./profile/ProfileDialog";
 import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
+import AppToasts, { type ShowToastFn } from "./AppToasts";
 import { apiLogout, useAuth } from "../lib/auth";
 import { tabFromHash } from "./profile/sections";
 import AttachButton from "./chat/AttachButton";
@@ -65,6 +66,8 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+
+import { LayerProvider } from "@astryxdesign/core/Layer";
 
 import { TextInput } from "@astryxdesign/core/TextInput";
 
@@ -490,6 +493,10 @@ export default function ShellSideNav({
     setProfileTab(tab);
     setIsProfileOpen(true);
   };
+  // Toast bridge (error surfaces F1/F2): handlers in this file live
+  // outside the provider subtree, so AppToasts publishes the toast fn
+  // here after mount. Null until then — every use is optional-chained.
+  const toastRef = useRef<ShowToastFn | null>(null);
   // Session gate (slice 2.4, spec §A): guests on app routes get the
   // required-purpose AuthGate dialog. Loading sessions render the shell
   // as-is — no flash of gate while Neon is still resolving.
@@ -506,12 +513,18 @@ export default function ShellSideNav({
       : "";
   // Account row Logout (plan item 24): sign out of Neon + notify our
   // backend, then leave the app routes — the gate re-opens next visit.
+  // Failure toasts (F1) and stays: navigating away would hide the error.
   const handleLogout = async () => {
     try {
       await apiLogout();
-    } finally {
-      navigate("/login");
+    } catch {
+      toastRef.current?.({
+        body: "Couldn't log you out. Try again.",
+        type: "error",
+      });
+      return;
     }
+    navigate("/login");
   };
   // Added interaction state; the existing welcome/composer state remains intact.
   const [selectedChat, setSelectedChat] = useState<string | null>(
@@ -893,6 +906,8 @@ export default function ShellSideNav({
 
   return (
     <Theme theme={PESDacMockupTheme} mode="dark">
+      {/* Layer host for toasts (F7): useToast() SSR-throws without it. */}
+      <LayerProvider>
       <AppShell
         contentPadding={0}
         /* ================================================================== */
@@ -1440,6 +1455,8 @@ export default function ShellSideNav({
 
         <AuthGate />
 
+        <AppToasts toastRef={toastRef} />
+
         <OnboardingDialog onActiveChange={setIsOnboardingOpen} />
 
         <ProfileDialog
@@ -1513,6 +1530,7 @@ export default function ShellSideNav({
           onAction={confirmDelete}
         />
       </AppShell>
+      </LayerProvider>
     </Theme>
   );
 }

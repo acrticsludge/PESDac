@@ -91,6 +91,20 @@ export class AuthRequiredError extends ApiError {
   }
 }
 
+/**
+ * Render any caught failure as user-safe copy (error surface F3).
+ * ApiError carries the server envelope message (server-authored,
+ * user-safe). A TypeError means the request never reached the server
+ * (DNS/refused/offline) — the browser's "Failed to fetch" means
+ * nothing to users, so map it to connection copy.
+ */
+export function toUserMessage(error: unknown, fallback: string): string {
+  if (error instanceof TypeError) {
+    return "Couldn't reach the server. Check your connection and try again.";
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 // ---- useAuth ---------------------------------------------------------------
 
 /**

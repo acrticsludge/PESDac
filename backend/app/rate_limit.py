@@ -7,6 +7,7 @@ touching routers (same `limit()` dependency signature).
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 
@@ -14,6 +15,8 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
 from app.schemas.common import error_body
+
+logger = logging.getLogger("pesdac")
 
 _buckets: dict[tuple[str, str], deque[float]] = {}
 
@@ -33,6 +36,9 @@ def check(key: str, request: Request, max_hits: int, window_s: int) -> JSONRespo
         bucket.popleft()
     if len(bucket) >= max_hits:
         retry_after = int(bucket[0] + window_s - now) + 1
+        logger.warning(
+            "429 %s key=%s ip=%s", request.url.path, key, _client_ip(request)
+        )
         resp = JSONResponse(status_code=429, content=error_body("RATE_LIMITED", "Too many attempts. Try again later."))
         resp.headers["Retry-After"] = str(retry_after)
         return resp

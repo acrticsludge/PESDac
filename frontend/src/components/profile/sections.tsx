@@ -49,7 +49,7 @@ import {
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
-import { useAuth, apiDeleteAccount, apiFetch } from "../../lib/auth";
+import { useAuth, apiDeleteAccount, apiFetch, toUserMessage } from "../../lib/auth";
 import { navigate } from "astro:transitions/client";
 import {
   BRANCHES,
@@ -208,11 +208,7 @@ export function IdentitySection() {
         return;
       }
     } catch (error) {
-      setDeleteNotice(
-        error instanceof Error
-          ? error.message
-          : "Couldn't delete your account. Try again.",
-      );
+      setDeleteNotice(toUserMessage(error, "Couldn't delete your account. Try again."));
       return;
     }
     navigate("/signup");
@@ -841,9 +837,7 @@ export function PrivacySection() {
         : dumpStore();
       downloadJson("pesdac-data.json", data);
     } catch (error) {
-      setServerError(
-        error instanceof Error ? error.message : "Export failed. Try again.",
-      );
+      setServerError(toUserMessage(error, "Export failed. Try again."));
     }
   }
 
@@ -859,9 +853,7 @@ export function PrivacySection() {
         await apiFetch<unknown>("/chats", { method: "DELETE" });
       } catch (error) {
         setServerError(
-          error instanceof Error
-            ? error.message
-            : "Couldn't delete chats. Try again.",
+          toUserMessage(error, "Couldn't delete chats. Try again."),
         );
         return;
       }

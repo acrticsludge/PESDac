@@ -33,6 +33,7 @@ import {
   apiGetMe,
   apiGetProfile,
   apiUpdateProfile,
+  toUserMessage,
 } from "../../lib/auth";
 import { updateProfile as updateLocalProfile } from "../../lib/session";
 import {
@@ -156,9 +157,7 @@ export default function OnboardingDialog({
       });
       setPhase("done");
     } catch (error) {
-      setFailure(
-        error instanceof Error ? error.message : "Couldn't save. Try again.",
-      );
+      setFailure(toUserMessage(error, "Couldn't save. Try again."));
     } finally {
       setIsSaving(false);
     }

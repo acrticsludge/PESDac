@@ -4,6 +4,8 @@ envelope normalization for validation errors. No UI, no frontend changes.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +14,12 @@ from fastapi.responses import JSONResponse
 from app import config
 from app.routers import auth, chats, demo_state, health, profiles, users
 from app.schemas.common import INTERNAL_ERROR, error_body
+
+# Server-side visibility (the user only ever sees the generic envelope
+# below). Stdlib logging, no deps: uvicorn configures the root handler,
+# pytest captures via caplog. Never log tokens, claims, or request
+# bodies here — method + path + reason only.
+logger = logging.getLogger("pesdac")
 
 
 def create_app(validate: bool = True) -> FastAPI:
@@ -41,6 +49,7 @@ def create_app(validate: bool = True) -> FastAPI:
     async def _validation(request: Request, exc: RequestValidationError):
         import json
 
+        logger.info("422 %s %s", request.method, request.url.path)
         # Pydantic ctx values hold exception objects (not JSON-serializable).
         details = json.loads(json.dumps(exc.errors(), default=str))
         return JSONResponse(
@@ -50,6 +59,7 @@ def create_app(validate: bool = True) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def _internal(request: Request, exc: Exception):
+        logger.exception("500 %s %s", request.method, request.url.path)
         return JSONResponse(status_code=500, content=INTERNAL_ERROR)
 
     app.include_router(health.router, prefix="/api/v1")
@@ -58,6 +68,11 @@ def create_app(validate: bool = True) -> FastAPI:
     app.include_router(chats.router, prefix="/api/v1")
     app.include_router(demo_state.router, prefix="/api/v1")
     app.include_router(users.router, prefix="/api/v1")
+    logger.info(
+        "PESDac API ready (env=%s, routes=%d)",
+        config.ENV,
+        len(app.routes),
+    )
     return app
 
 
