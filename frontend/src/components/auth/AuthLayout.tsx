@@ -38,6 +38,8 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
 import { Divider } from "@astryxdesign/core/Divider";
+import { Theme } from "@astryxdesign/core/theme";
+import { PESDacMockupTheme } from "../../theme/PESDacMockupTheme";
 
 import { authClient } from "../../lib/neon-auth";
 
@@ -54,8 +56,12 @@ const COLUMN_MIN_WIDTH = 240;
 // minHeight:100% fills the host so the centered card never leaves
 // an unpainted band; Center's padding prop keeps it off the
 // surface edges.
+// 100dvh (not 100%): the host chain (astro-island > body > html)
+// has no height, so a percentage min-height collapses to auto and
+// Center has no space to center in — the card sticks to the top.
+// Viewport units are independent of the host.
 const pageStyle: CSSProperties = {
-  minHeight: "100%",
+  minHeight: "100dvh",
   backgroundColor: "var(--color-background-body)",
 };
 const cardWrap: CSSProperties = {
@@ -315,7 +321,11 @@ export default function AuthLayout(props: AuthLayoutProps) {
     }
   }
 
+  // Every Astryx primitive reads its tokens from PESDacMockupTheme.
+  // The app pages get it from Pesdac.tsx; these standalone auth
+  // pages mount it here so the card renders themed, not unstyled.
   return (
+    <Theme theme={PESDacMockupTheme} mode="dark">
     <Center axis="both" padding={6} style={pageStyle}>
       <style>{LOGIN_SPLIT_CSS}</style>
       <VStack gap={4} width="100%">
@@ -485,5 +495,6 @@ export default function AuthLayout(props: AuthLayoutProps) {
         </div>
       </VStack>
     </Center>
+    </Theme>
   );
 }

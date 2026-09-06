@@ -106,10 +106,6 @@ export function buildChatPath(subject: Subject, code: string): string {
   return `/subject/${subject}/${code}`;
 }
 
-export function buildSubjectPath(subject: Subject): string {
-  return `/subject/${subject}`;
-}
-
 export function getAllChatPaths(): Array<{ subject: Subject; code: string }> {
   return Object.entries(CHAT_CODES).map(([label, code]) => ({
     subject: getChatSubject(label),

@@ -43,6 +43,7 @@ import {
 } from "@heroicons/react/24/outline";
 import {
   clearAllChats,
+  dumpStore,
   getProfile,
   updateProfile,
   useSessionVersion,
@@ -712,21 +713,10 @@ const RETENTIONS = [
   { value: "session", label: "Session only" },
 ];
 
-// Downloads every pesdac-* key as one JSON file. Handler-only window
+// Downloads the session store as one JSON file. Handler-only window
 // access: safe in the SSR island because it runs on click, not render.
 function exportAllData() {
-  const data: Record<string, unknown> = {};
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const key = window.localStorage.key(i);
-    if (key != null && key.startsWith("pesdac-")) {
-      const raw = window.localStorage.getItem(key);
-      try {
-        data[key] = JSON.parse(raw ?? "null");
-      } catch {
-        data[key] = raw;
-      }
-    }
-  }
+  const data = dumpStore();
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
   );

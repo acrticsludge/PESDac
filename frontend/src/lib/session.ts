@@ -1,7 +1,12 @@
-// Client session store (mockup stage): custom chats + per-conversation message
-// overlays persisted to localStorage. Same signatures the backend will serve
-// later (see send-path spec). SSR-safe: empty data on server, real data after
-// hydration via useSessionVersion().
+// Client session store (in-memory, 2026-09-07): browser persistence is
+// gone ahead of the backend move — nothing survives reload. Same
+// signatures the backend will serve later (see send-path spec); a fetch
+// adapter slots in without touching components. SSR-safe: empty data on
+// server, real data after hydration via useSessionVersion().
+//
+// One-time hygiene below deletes pre-migration `pesdac-*` keys so stale
+// browser data can never resurface. Afterwards nothing in the app uses
+// browser storage again.
 
 import { useEffect, useState } from "react";
 import type { Block, Thread } from "../content/threads/types";
@@ -22,13 +27,24 @@ function emit() {
   listeners.forEach((fn) => fn());
 }
 
-// Multi-tab sync: `storage` fires only in *other* tabs — exactly the fork
-// case. Any pesdac-* write re-renders this tab's subscribers, which re-read
-// from localStorage. Module scope: app lifetime, no cleanup.
+// Cross-tab sync died with browser persistence (no shared medium
+// anymore). Same-tab reactivity still flows through emit(); real sync
+// returns with the backend adapter.
+
+// Purge pre-migration keys once per page load, client only. Afterwards
+// the live store is memory and nothing reads browser storage again.
 if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key != null && e.key.startsWith("pesdac-")) emit();
-  });
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key != null && key.startsWith("pesdac-")) doomed.push(key);
+    }
+    for (const key of doomed) window.localStorage.removeItem(key);
+  } catch {
+    // Storage denied (private mode) — nothing to purge and nothing lost:
+    // the live store is memory either way.
+  }
 }
 
 // Global shortcut bus (see chat-power spec §3): Pesdac owns the keydown
@@ -48,84 +64,60 @@ export function useSessionVersion() {
   }, []);
 }
 
-/** True only after client mount. Session reads during render must resolve
- * to empty until mount so SSR HTML and first client paint agree. */
-export function useMounted(): boolean {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-  return mounted;
-}
+// In-memory JSON store (key → serialized value). No quota, no private-mode
+// failure, no corruption — health hooks below are pinned to healthy so
+// existing consumers (composer `status` warnings) keep compiling and simply
+// never fire until the backend adapter owns them.
 
-// localStorage health (quota / private mode). writeJSON flips the flag on
-// every write; the probe covers first paint before any write happens.
-let storageHealth: boolean | null = null;
+const mem = new Map<string, string>();
 
 export function checkStorageHealth(): boolean {
-  if (typeof window === "undefined") return true;
-  if (storageHealth != null) return storageHealth;
-  try {
-    const key = "pesdac-storage-probe";
-    window.localStorage.setItem(key, "1");
-    window.localStorage.removeItem(key);
-    storageHealth = true;
-  } catch {
-    storageHealth = false;
-  }
-  return storageHealth;
+  return true;
 }
 
-/** Storage health, re-checked on every store change (SSR: true). */
+/** Always healthy while the store is memory-backed (SSR: true). */
 export function useStorageHealth(): boolean {
   useSessionVersion();
-  const mounted = useMounted();
-  if (!mounted) return true;
-  return checkStorageHealth();
+  return true;
 }
 
-// Keys whose stored JSON failed to parse this session (see readJSON).
-// Successful writes clear the flag — a fresh write means the key healed.
-const corruptKeys = new Set<string>();
-
-/** Corrupt storage keys, re-read on every store change (SSR: empty). */
+/** Always empty while the store is memory-backed (SSR: empty). */
 export function useCorruptKeys(): string[] {
   useSessionVersion();
-  const mounted = useMounted();
-  if (!mounted) return [];
-  return [...corruptKeys];
+  return [];
 }
 
 function readJSON<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
+  const raw = mem.get(key);
+  if (raw == null) return fallback;
   try {
-    const raw = window.localStorage.getItem(key);
-    return raw == null ? fallback : (JSON.parse(raw) as T);
+    return JSON.parse(raw) as T;
   } catch {
-    // Corrupt value: fall back but say so once (console + notice state)
-    // instead of silently dropping saved history.
-    // eslint-disable-next-line no-console
-    console.error(`[pesdac] corrupt storage key, using fallback: ${key}`);
-    corruptKeys.add(key);
-    emit();
+    // Unreachable in practice (we only ever write our own JSON), but never
+    // let a bad entry wedge the session — drop it and fall back.
+    mem.delete(key);
     return fallback;
   }
 }
 
 function writeJSON(key: string, value: unknown) {
   if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-    // A fresh write heals a previously corrupt key (callers emit after
-    // writes, which re-renders the notice state).
-    corruptKeys.delete(key);
-    storageHealth = true;
-  } catch {
-    // Storage unavailable (private mode, quota) — session stays in memory
-    // and subscribers re-render into the warning state.
-    storageHealth = false;
-    emit();
+  mem.set(key, JSON.stringify(value));
+}
+
+/** Snapshot every store key (powers Export-my-data from memory). */
+export function dumpStore(): Record<string, unknown> {
+  if (typeof window === "undefined") return {};
+  const data: Record<string, unknown> = {};
+  for (const [key, raw] of mem) {
+    try {
+      data[key] = JSON.parse(raw);
+    } catch {
+      data[key] = raw;
+    }
   }
+  return data;
 }
 
 const TAKEN = new Set(Object.values(CHAT_CODES));
@@ -243,10 +235,6 @@ function readDemoOverrides(): DemoOverrides {
 
 export function demoDisplayLabel(label: string): string {
   return readDemoOverrides().renamed[label] ?? label;
-}
-
-export function isDemoHidden(label: string): boolean {
-  return readDemoOverrides().hidden.includes(label);
 }
 
 export function renameDemoChat(label: string, title: string) {

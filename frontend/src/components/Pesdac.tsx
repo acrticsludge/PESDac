@@ -26,6 +26,8 @@ import {
 import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
 import ProfileDialog, { type ProfileTab } from "./profile/ProfileDialog";
+import AuthGate from "./auth/AuthGate";
+import { useAuth } from "../lib/auth";
 import { tabFromHash } from "./profile/sections";
 import AttachButton from "./chat/AttachButton";
 import { getThread } from "../content/threads";
@@ -88,8 +90,6 @@ import type { IconType } from "@astryxdesign/core/Icon";
 
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 
-import type { StatusDotVariant } from "@astryxdesign/core/StatusDot";
-
 import {
   ChatComposer,
   ChatComposerDrawer,
@@ -103,7 +103,6 @@ import {
 import {
   createStaticSource,
   TypeaheadItem,
-  type SearchableItem,
 } from "@astryxdesign/core/Typeahead";
 
 import {
@@ -147,8 +146,6 @@ import {
 
 type Conversation = {
   label: string;
-  status: StatusDotVariant;
-  statusLabel: string;
 };
 
 type Workspace = {
@@ -165,141 +162,35 @@ const WORKSPACES: Workspace[] = [
   {
     name: "CN",
     icon: GlobeAltIcon,
-    chats: [
-      {
-        label: "OSI Model",
-        status: "success",
-        statusLabel: "Active",
-      },
-      {
-        label: "TCP vs UDP",
-        status: "neutral",
-        statusLabel: "Idle",
-      },
-      {
-        label: "IP Addressing & Subnetting",
-        status: "accent",
-        statusLabel: "In progress",
-      },
-      {
-        label: "Routing Protocols",
-        status: "neutral",
-        statusLabel: "Idle",
-      },
-    ],
+    chats: [],
   },
 
   {
     name: "OS",
     icon: ComputerDesktopIcon,
-    chats: [
-      {
-        label: "Process Scheduling",
-        status: "success",
-        statusLabel: "Active",
-      },
-      {
-        label: "Deadlocks",
-        status: "warning",
-        statusLabel: "Needs review",
-      },
-      {
-        label: "Virtual Memory",
-        status: "accent",
-        statusLabel: "In progress",
-      },
-      {
-        label: "File Systems",
-        status: "neutral",
-        statusLabel: "Idle",
-      },
-    ],
+    chats: [],
   },
 
   {
     name: "DLCD",
     icon: CpuChipIcon,
-    chats: [
-      {
-        label: "Boolean Algebra",
-        status: "success",
-        statusLabel: "Active",
-      },
-      {
-        label: "K-Maps",
-        status: "accent",
-        statusLabel: "In progress",
-      },
-      {
-        label: "Sequential Circuits",
-        status: "neutral",
-        statusLabel: "Idle",
-      },
-      {
-        label: "Flip-Flops",
-        status: "neutral",
-        statusLabel: "Idle",
-      },
-    ],
+    chats: [],
   },
 
   {
     name: "DSA",
     icon: CircleStackIcon,
-    chats: [
-      {
-        label: "Binary Trees",
-        status: "success",
-        statusLabel: "Active",
-      },
-      {
-        label: "Graph Algorithms",
-        status: "accent",
-        statusLabel: "In progress",
-      },
-      {
-        label: "Sorting Algorithms",
-        status: "neutral",
-        statusLabel: "Idle",
-      },
-      {
-        label: "Dynamic Programming",
-        status: "warning",
-        statusLabel: "Needs review",
-      },
-    ],
+    chats: [],
   },
 
   {
     name: "Math",
     icon: CalculatorIcon,
-    chats: [
-      {
-        label: "Matrices",
-        status: "success",
-        statusLabel: "Active",
-      },
-      {
-        label: "Differential Equations",
-        status: "neutral",
-        statusLabel: "Idle",
-      },
-      {
-        label: "Probability",
-        status: "accent",
-        statusLabel: "In progress",
-      },
-      {
-        label: "Fourier Series",
-        status: "warning",
-        statusLabel: "Needs review",
-      },
-    ],
+    chats: [],
   },
 ];
 
-const SELECTED_CHAT = "Binary Trees";
-
+// Sidebar labels only — statuses removed 2026-09-07 (never rendered).
 /* -------------------------------------------------------------------------- */
 /*                         Chat welcome configuration                          */
 /* -------------------------------------------------------------------------- */
@@ -595,6 +486,11 @@ export default function ShellSideNav({
     setProfileTab(tab);
     setIsProfileOpen(true);
   };
+  // Session gate (slice 2.4, spec §A): guests on app routes get the
+  // required-purpose AuthGate dialog. Loading sessions render the shell
+  // as-is — no flash of gate while Neon is still resolving.
+  const authState = useAuth();
+  const isGateOpen = authState.status === "guest";
   // Added interaction state; the existing welcome/composer state remains intact.
   const [selectedChat, setSelectedChat] = useState<string | null>(
     initialChat?.label ?? null,
@@ -881,6 +777,10 @@ export default function ShellSideNav({
         return;
       }
       if (e.key === "Escape") {
+        // The session gate is required-purpose and non-closable: while
+        // it is open Esc yields — it must not close shell UI behind the
+        // gate or cancel the open thread.
+        if (isGateOpen) return;
         if (!getProfile().shortcutCancel) return;
         if (
           renameTarget != null ||
@@ -906,7 +806,7 @@ export default function ShellSideNav({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [renameTarget, deleteTarget, isSearchOpen, isModeMenuOpen]);
+  }, [renameTarget, deleteTarget, isSearchOpen, isModeMenuOpen, isGateOpen]);
 
   // Welcome composer answers "/" focus requests.
   useEffect(() => {
@@ -1464,6 +1364,8 @@ export default function ShellSideNav({
           />
           );
         })()}
+
+        <AuthGate />
 
         <ProfileDialog
           isOpen={isProfileOpen}
