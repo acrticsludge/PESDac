@@ -30,6 +30,7 @@ import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
 import AppToasts, { type ShowToastFn } from "./AppToasts";
 import { apiLogout, useAuth } from "../lib/auth";
+import { sdkMessage } from "../lib/neon-auth";
 import { tabFromHash } from "./profile/sections";
 import AttachButton from "./chat/AttachButton";
 import { getThread } from "../content/threads";
@@ -517,9 +518,9 @@ export default function ShellSideNav({
   const handleLogout = async () => {
     try {
       await apiLogout();
-    } catch {
+    } catch (error) {
       toastRef.current?.({
-        body: "Couldn't log you out. Try again.",
+        body: sdkMessage(error, "Couldn't log you out. Try again."),
         type: "error",
       });
       return;

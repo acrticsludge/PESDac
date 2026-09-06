@@ -34,6 +34,8 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { CheckCircleIcon } from "@heroicons/react/24/outline";
 import { SparklesIcon } from "@heroicons/react/24/outline";
+import { EyeIcon } from "@heroicons/react/24/outline";
+import { EyeSlashIcon } from "@heroicons/react/24/outline";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
@@ -41,7 +43,7 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { Theme } from "@astryxdesign/core/theme";
 import { PESDacMockupTheme } from "../../theme/PESDacMockupTheme";
 
-import { authClient } from "../../lib/neon-auth";
+import { authClient, sdkMessage } from "../../lib/neon-auth";
 
 // Grid emits minmax(MIN, 1fr) where MIN is a hard floor, so MIN plus
 // the grid inset and page padding must fit the narrowest phone or
@@ -163,6 +165,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<FieldError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -270,10 +273,10 @@ export default function AuthLayout(props: AuthLayoutProps) {
         }
         succeed("You're signed in", "Redirecting to your dashboard…", true);
       }
-    } catch {
+    } catch (error) {
       setError({
         field: "password",
-        message: "Something went wrong. Try again.",
+        message: sdkMessage(error, "Something went wrong. Try again."),
       });
     } finally {
       setIsLoading(false);
@@ -289,10 +292,10 @@ export default function AuthLayout(props: AuthLayoutProps) {
         provider: "google",
         callbackURL: "/new",
       });
-    } catch {
+    } catch (error) {
       setError({
         field: "password",
-        message: "Google sign-in failed. Try again.",
+        message: sdkMessage(error, "Google sign-in failed. Try again."),
       });
       setIsGoogleLoading(false);
     }
@@ -327,17 +330,18 @@ export default function AuthLayout(props: AuthLayoutProps) {
         `We sent a reset link to ${email.trim()}.`,
         false,
       );
-    } catch {
+    } catch (error) {
       setError({
         field: "password",
-        message: "Couldn't send the reset email. Try again.",
+        message: sdkMessage(error, "Couldn't send the reset email. Try again."),
       });
     } finally {
       setIsLoading(false);
     }
   }
 
-  // Every Astryx primitive reads its tokens from PESDacMockupTheme.  // The app pages get it from Pesdac.tsx; these standalone auth
+  // Every Astryx primitive reads its tokens from PESDacMockupTheme.
+  // The app pages get it from Pesdac.tsx; these standalone auth
   // pages mount it here so the card renders themed, not unstyled.
   return (
     <Theme theme={PESDacMockupTheme} mode="dark">
@@ -422,7 +426,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 label="Password"
                                 isLabelHidden
                                 placeholder="Enter your password"
-                                type="password"
+                                type={showPassword ? "text" : "password"}
                                 value={password}
                                 onChange={(v: string) => {
                                   setPassword(v);
@@ -440,8 +444,26 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                     : undefined
                                 }
                               />
-                              {!isSignup && (
-                                <VStack hAlign="end">
+                              {/* Show/hide toggle left, forgot link right
+                                  (signin only). TextInput has no clickable
+                                  end slot, so the toggle lives here as a
+                                  ghost button rather than custom chrome. */}
+                              <HStack vAlign="center" justify="between" width="100%">
+                                <Button
+                                  label={showPassword ? "Hide" : "Show"}
+                                  variant="ghost"
+                                  size="sm"
+                                  icon={
+                                    <Icon
+                                      icon={showPassword ? EyeSlashIcon : EyeIcon}
+                                      size="sm"
+                                    />
+                                  }
+                                  onClick={() =>
+                                    setShowPassword((v) => !v)
+                                  }
+                                />
+                                {!isSignup && (
                                   <Link
                                     href="/login"
                                     size="sm"
@@ -454,8 +476,8 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                   >
                                     Forgot your password?
                                   </Link>
-                                </VStack>
-                              )}
+                                )}
+                              </HStack>
                             </VStack>
                           </VStack>
 

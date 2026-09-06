@@ -51,6 +51,31 @@ export async function apiLogout(): Promise<void> {
 }
 
 /**
+ * Render a Neon SDK failure as user-safe copy. The SDK *throws* on
+ * HTTP errors (it does not resolve `{error}`): the thrown error
+ * carries the server body (`{code, message}`) with `.message` set to
+ * the server's message — e.g. "User already exists. Use another
+ * email." Swallowing it behind a generic string hides the exact rule
+ * that fired, so prefer it. Bare TypeErrors never reached the server
+ * (DNS/refused/offline) → connection copy instead.
+ */
+export function sdkMessage(error: unknown, fallback: string): string {
+  if (error instanceof TypeError) {
+    return "Couldn't reach the server. Check your connection and try again.";
+  }
+  const err = error as {
+    message?: unknown;
+    body?: { message?: unknown } | null;
+  } | null;
+  const body = err?.body;
+  const bodyMessage =
+    typeof body === "object" && body !== null ? body.message : undefined;
+  if (typeof bodyMessage === "string" && bodyMessage) return bodyMessage;
+  if (typeof err?.message === "string" && err.message) return err.message;
+  return fallback;
+}
+
+/**
  * Delete the Neon user account. Returns true on success. If the SDK
  * does not expose this method — or the server rejects the delete
  * (feature disabled, stale session, verification-email flow) — returns
