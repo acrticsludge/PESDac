@@ -23,7 +23,6 @@ import {
   SegmentedControlItem,
 } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Spinner } from "@astryxdesign/core/Spinner";
 import {
   CheckboxList,
   CheckboxListItem,
@@ -74,11 +73,10 @@ export default function OnboardingDialog({
   const [isSaving, setIsSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
-  // Active while checking OR open: the Dialog (and its blurred
-  // backdrop) mounts during the slow first resolution too, so the
-  // window is never bare behind the wizard. Checking shows a loading
-  // state; Esc yields the whole time via onActiveChange.
-  const open = phase !== "done";
+  // Mounts only once the server confirms onboarding is needed:
+  // checking/done render nothing, so refreshes never flash a loader.
+  // The open Dialog already dims + blurs the window behind it.
+  const open = phase === "open";
   useEffect(() => {
     onActiveChange?.(open);
   }, [open, onActiveChange]);
@@ -180,14 +178,6 @@ export default function OnboardingDialog({
       <Layout
         content={
           <LayoutContent>
-            {phase !== "open" ? (
-              <VStack gap={3} hAlign="center">
-                <Spinner size="lg" label="Getting your profile ready" />
-                <Text type="supporting" color="secondary">
-                  Getting your profile ready…
-                </Text>
-              </VStack>
-            ) : (
             <VStack gap={4}>
               <VStack gap={1}>
                 <Heading level={2}>Set up your profile</Heading>
@@ -275,7 +265,6 @@ export default function OnboardingDialog({
                 />
               </VStack>
             </VStack>
-            )}
           </LayoutContent>
         }
       />
