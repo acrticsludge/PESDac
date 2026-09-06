@@ -1,18 +1,39 @@
 "use client";
 
 // Login-split layout for /login and /signup (spec §B + D5).
-// Astryx chrome around <AuthView>: brand row on the left, a muted
-// cover on the right (D5: muted, not marketing copy), a single
-// footer swap-link between login and signup, and no legal line (D4).
-// The auth form itself is Neon's <AuthView>.
 //
-// Structure mirrors the Playground login-split reference 1:1:
-// Center > VStack > Card(padding:0) > Grid(columns:fit, gap:8) >
-// [Section(form) | div.login-split-image > Card(transparent) > img]
+// Skeleton mirrors the Playground login-split reference 1:1:
+// Center > VStack(gap 4) > Card(padding 0, maxWidth 1000) >
+// Grid(fit, minWidth 240, gap 8, stretch) >
+//   [Section(transparent) > VStack(gap 4) > brand, StackItem(fill) >
+//    Center(vertical) > VStack(gap 4, stretch) > title + form, swap link
+//   | div.login-split-image > Card(transparent) > img(cover)]
 //
-// Container query reorders the cover to the top below 512px and
-// tightens the padding at that point, keyed to the grid (not the
-// window) so it never desyncs.
+// The form slot hosts Neon's <AuthView>. AuthView ships its own
+// Tailwind card (bg-card, border, rounded-xl, shadow, max-w-sm) with
+// its own header ("Sign Up" + description) — rendering that as-is
+// inside our Astryx card produces double chrome and double titles,
+// which is why the page looked out of place. So we:
+//   1. Kill the SDK header via cardHeader={<></>} — our Astryx
+//      display-1 title + subtitle are the only headers.
+//   2. Neutralize the SDK card via classNames.base (max-w-none,
+//      border-0, shadow-none, bg-transparent, rounded-none, p-0,
+//      gap-4) so only its inner form (inputs, button, divider,
+//      Google button) paints.
+//   3. Tighten its content padding via classNames.content (px-0
+//      gap-4) — the Grid already insets the form side.
+//   4. Hide its swap-link footer via classNames.footer + a CSS
+//      fallback (the project has no Tailwind, so the SDK's
+//      `hidden` utility only works because auth-ui/css ships it;
+//      the fallback makes it certain). Our Astryx swap link below
+//      the form is the single one.
+//   5. Map the SDK's shadcn tokens (--background, --primary, ...)
+//      to our Astryx dark values scoped to .neon-auth-ui, so the
+//      primary button reads light (#ebebeb on #171717, like the
+//      reference Login button) and inputs/borders read dark.
+//
+// D1: Google + email only (no Apple button). D4: no legal line.
+// D5: muted cover (see COVER_IMAGE_URL).
 
 import { useEffect, type CSSProperties } from "react";
 import { VStack, HStack, StackItem } from "@astryxdesign/core/Layout";
@@ -29,16 +50,19 @@ import "@neondatabase/auth-ui/css";
 
 import { authClient } from "../../lib/neon-auth";
 
+// Grid emits minmax(MIN, 1fr) where MIN is a hard floor, so MIN plus
+// the grid inset and page padding must fit the narrowest phone or
+// the column is clipped. 320 − 2×24 (page) − 2×16 (stacked inset)
+// = 240.
 const COLUMN_MIN_WIDTH = 240;
-
-// D5: the COVER slot is a muted, photographic-feeling image. We
-// ship a high-quality SVG illustration (rich vertical composition
-// with overlapping shapes) at /public/template-assets/... so it
-// reads as a real cover without depending on a network fetch. Drop
-// a vertical photo at the same path later if/when one is sourced
-// — the wrapper is already set up to object-fit:cover.
-const COVER_IMAGE_URL = "/template-assets/light-working-vertical-1.svg";
-
+// repeat:'fit' (auto-fit) collapses the two columns to one —
+// expanding to fill — below 2×MIN + 32(gap) = 512px. The container
+// query reorders the image and tightens the inset at that same
+// point, keyed to the card width (not the window) so it never
+// desyncs.
+// minHeight:100% fills the host so the centered card never leaves
+// an unpainted band; Center's padding prop keeps it off the
+// surface edges.
 const pageStyle: CSSProperties = {
   minHeight: "100%",
   backgroundColor: "var(--color-background-body)",
@@ -55,6 +79,25 @@ const coverImage: CSSProperties = {
   display: "block",
 };
 
+// Muted cover shipped locally (D5). Drop a vertical photo at the
+// same path to swap without touching layout (object-fit:cover).
+const COVER_IMAGE_URL = "/template-assets/light-working-vertical-1.svg";
+
+// The container query lives in a plain <style> tag so it needs NO
+// CSS compiler.
+// - Pad the grid, not the Card: the form's Section escapes Card's
+//   --container-padding-* vars, which would cancel the inset on the
+//   form side. container-type makes the grid the query container
+//   for the stack point.
+// - repeat:'fit' (auto-fit) collapses the two columns to one below
+//   511px; the query reorders the image (order:-1) and tightens the
+//   inset at that point, keyed to the card width (not the window)
+//   so it never desyncs.
+// - .neon-auth-ui tokens map the SDK's shadcn variables to our
+//   Astryx dark values (exact hexes from the theme). Scoped to the
+//   auth form so nothing else is affected.
+// - .neon-auth-ui footer fallback hides the SDK swap link even if
+//   its `hidden` utility ever stops resolving.
 const LOGIN_SPLIT_CSS = `
 .login-split-grid {
   container-type: inline-size;
@@ -76,6 +119,32 @@ const LOGIN_SPLIT_CSS = `
     max-height: 160px;
   }
 }
+.neon-auth-ui {
+  --background: #1b1b1b;
+  --foreground: #fafafa;
+  --card: transparent;
+  --card-foreground: #fafafa;
+  --popover: #1b1b1b;
+  --popover-foreground: #fafafa;
+  --primary: #ebebeb;
+  --primary-foreground: #171717;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --accent: #262626;
+  --accent-foreground: #fafafa;
+  --destructive: #ff6f6c;
+  --destructive-foreground: #171717;
+  --border: #FFFFFF1A;
+  --input: #525252;
+  --ring: #ebebeb;
+  --radius: 0.625rem;
+  width: 100%;
+}
+.neon-auth-ui [data-slot="card-footer"] {
+  display: none !important;
+}
 `;
 
 export type AuthLayoutProps = {
@@ -91,7 +160,7 @@ export type AuthLayoutProps = {
 };
 
 export default function AuthLayout(props: AuthLayoutProps) {
-  // F1.1 / spec §B: logged-in users bounce to /new on mount.
+  // Spec §B: logged-in users bounce to /new on mount.
   useEffect(() => {
     let cancelled = false;
     void authClient.getSession().then((res) => {
@@ -115,6 +184,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
               align="stretch"
               className="login-split-grid"
             >
+              {/* Form */}
               <Section variant="transparent" padding={0} height="100%">
                 <VStack gap={4} height="100%">
                   <HStack gap={2} vAlign="center">
@@ -144,9 +214,19 @@ export default function AuthLayout(props: AuthLayoutProps) {
                         >
                           <AuthView
                             pathname={props.pathname}
-                            // Hide the SDK's swap link; ours lives below
-                            // the card and is the only one.
-                            classNames={{ footer: "hidden" }}
+                            // Our Astryx title above is the only
+                            // header — suppress the SDK's own
+                            // ("Sign Up" + description).
+                            cardHeader={<></>}
+                            // Neutralize the SDK card so only its
+                            // inner form paints inside our Card.
+                            className="max-w-none border-0 shadow-none bg-transparent rounded-none p-0 gap-4"
+                            classNames={{
+                              base: "max-w-none border-0 shadow-none bg-transparent rounded-none p-0 gap-4",
+                              header: "p-0",
+                              content: "px-0 gap-4",
+                              footer: "hidden",
+                            }}
                           />
                         </NeonAuthUIProvider>
                       </VStack>
@@ -162,6 +242,9 @@ export default function AuthLayout(props: AuthLayoutProps) {
                 </VStack>
               </Section>
 
+              {/* Cover image — the transparent Card clips it to rounded
+                  corners (overflow:clip + radius), so the image needs
+                  no radius. */}
               <div className="login-split-image" aria-hidden="true">
                 <Card
                   variant="transparent"
