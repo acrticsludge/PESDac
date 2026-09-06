@@ -14,14 +14,22 @@ from alembic import op
 
 
 def upgrade() -> None:
+    # The 0001 server_default '{}' (text[]) cannot auto-cast to jsonb,
+    # so drop it first and re-add the equivalent jsonb default after.
+    op.execute("ALTER TABLE profiles ALTER COLUMN subjects DROP DEFAULT")
     op.execute(
         "ALTER TABLE profiles ALTER COLUMN subjects TYPE jsonb "
         "USING to_jsonb(subjects)"
     )
+    op.execute(
+        "ALTER TABLE profiles ALTER COLUMN subjects SET DEFAULT '[]'::jsonb"
+    )
 
 
 def downgrade() -> None:
+    op.execute("ALTER TABLE profiles ALTER COLUMN subjects DROP DEFAULT")
     op.execute(
         "ALTER TABLE profiles ALTER COLUMN subjects TYPE text[] "
         "USING (ARRAY(SELECT jsonb_array_elements_text(subjects)))"
     )
+    op.execute("ALTER TABLE profiles ALTER COLUMN subjects SET DEFAULT '{}'")
