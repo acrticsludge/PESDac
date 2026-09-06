@@ -27,6 +27,7 @@ import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
 import ProfileDialog, { type ProfileTab } from "./profile/ProfileDialog";
 import AuthGate from "./auth/AuthGate";
+import OnboardingDialog from "./auth/OnboardingDialog";
 import { apiLogout, useAuth } from "../lib/auth";
 import { tabFromHash } from "./profile/sections";
 import AttachButton from "./chat/AttachButton";
@@ -494,6 +495,9 @@ export default function ShellSideNav({
   // as-is — no flash of gate while Neon is still resolving.
   const authState = useAuth();
   const isGateOpen = authState.status === "guest";
+  // Onboarding wizard (slice 3.1): required while the server says the
+  // profile isn't set up. Same Esc yield as the gate.
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   // F1: first name = displayName up to the first space; empty when
   // logged out (or when Neon carries no display name) → generic heading.
   const firstName =
@@ -795,10 +799,10 @@ export default function ShellSideNav({
         return;
       }
       if (e.key === "Escape") {
-        // The session gate is required-purpose and non-closable: while
-        // it is open Esc yields — it must not close shell UI behind the
-        // gate or cancel the open thread.
-        if (isGateOpen) return;
+        // The session gate and onboarding wizard are required-purpose
+        // and non-closable: while either is open Esc yields — it must
+        // not close shell UI behind them or cancel the open thread.
+        if (isGateOpen || isOnboardingOpen) return;
         if (!getProfile().shortcutCancel) return;
         if (
           renameTarget != null ||
@@ -824,7 +828,7 @@ export default function ShellSideNav({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [renameTarget, deleteTarget, isSearchOpen, isModeMenuOpen, isGateOpen]);
+  }, [renameTarget, deleteTarget, isSearchOpen, isModeMenuOpen, isGateOpen, isOnboardingOpen]);
 
   // Welcome composer answers "/" focus requests.
   useEffect(() => {
@@ -1435,6 +1439,8 @@ export default function ShellSideNav({
         })()}
 
         <AuthGate />
+
+        <OnboardingDialog onActiveChange={setIsOnboardingOpen} />
 
         <ProfileDialog
           isOpen={isProfileOpen}

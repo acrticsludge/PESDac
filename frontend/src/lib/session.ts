@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import type { Block, Thread } from "../content/threads/types";
 import { CHAT_CODES, dayDividerLabel } from "./chat";
+import { isCampus } from "./profile-options";
 
 export type CustomChat = {
   code: string;
@@ -438,7 +439,12 @@ export const DEFAULT_PROFILE: Profile = {
 };
 
 export function getProfile(): Profile {
-  return { ...DEFAULT_PROFILE, ...readJSON<Partial<Profile>>(PROFILE_KEY, {}) };
+  const profile = { ...DEFAULT_PROFILE, ...readJSON<Partial<Profile>>(PROFILE_KEY, {}) };
+  // D7: the institution key now carries the campus. Any legacy
+  // free-text value maps to "" on read — RR/EC/blank are the only
+  // legal values downstream.
+  if (!isCampus(profile.institution)) profile.institution = "";
+  return profile;
 }
 
 export function updateProfile(patch: Partial<Profile>) {

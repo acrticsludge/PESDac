@@ -44,6 +44,22 @@ export type AuthUser = {
   onboardingDone: boolean;
 };
 
+/**
+ * Server profile row (GET/PATCH /profiles/me return the full row).
+ * Only the fields the UI reads or writes are listed; the server may
+ * return more (structural typing ignores extras).
+ */
+export type ServerProfile = {
+  displayName: string;
+  email: string;
+  institution: string;
+  semester: string;
+  branch: string;
+  subjects: string[];
+  campus: string;
+  onboardingDone: boolean;
+};
+
 export type AuthState =
   | { status: "loading" }
   | { status: "guest" }
@@ -122,6 +138,26 @@ export function useAuth(): AuthState {
 export async function apiGetMe(): Promise<AuthUser> {
   const res = await apiFetch<{ user: AuthUser }>("/auth/me");
   return res.user;
+}
+
+/** Read the full server profile row (auto-creates a blank row first time). */
+export async function apiGetProfile(): Promise<ServerProfile> {
+  return apiFetch<ServerProfile>("/profiles/me");
+}
+
+/**
+ * Merge a partial profile into the server row; returns the full row.
+ * Values are server-validated (campus RR/EC/blank, semesters, branches,
+ * ≤5 known subjects) — a 422 surfaces as ApiError for the caller to
+ * render.
+ */
+export async function apiUpdateProfile(
+  patch: Record<string, string | string[] | boolean>,
+): Promise<ServerProfile> {
+  return apiFetch<ServerProfile>("/profiles/me", {
+    method: "PATCH",
+    body: patch,
+  });
 }
 
 // ---- apiFetch --------------------------------------------------------------

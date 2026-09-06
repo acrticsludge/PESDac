@@ -19,6 +19,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Divider } from "@astryxdesign/core/Divider";
 import {
@@ -48,6 +49,13 @@ import {
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
+import { useAuth, apiDeleteAccount, apiFetch } from "../../lib/auth";
+import { navigate } from "astro:transitions/client";
+import {
+  BRANCHES,
+  CAMPUSES,
+  SEMESTERS,
+} from "../../lib/profile-options";
 
 export type ProfileTab =
   | "profile"
@@ -170,83 +178,139 @@ function CardRows({ children }: { children: ReactNode }) {
   );
 }
 
-const SEMESTERS = Array.from({ length: 8 }, (_, i) => ({
-  value: String(i + 1),
-  label: `Semester ${i + 1}`,
-}));
-
-const BRANCHES = ["CSE", "ECE", "EEE", "ME", "CE", "BT", "Other"].map((b) => ({
-  value: b,
-  label: b,
-}));
-
 export function IdentitySection() {
   useSessionVersion();
+  const auth = useAuth();
   const profile = getProfile();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
+  // Plan item 23: email + displayName are Neon-owned — read-only when
+  // authenticated. Logged out (unreachable behind the gate, kept for
+  // honesty) the local store remains editable.
+  const neonUser = auth.status === "authenticated" ? auth.user : null;
+  const displayName = neonUser?.displayName || profile.displayName;
+  const email = neonUser?.email || profile.email;
+
+  // F4: our rows first (users + profile + chats), then the Neon user
+  // record. Full success → /signup for a fresh start. SDK fallback
+  // (signed out, Neon record remains) → banner and stay: navigating
+  // would hide the support message, and closing the dialog lands on
+  // the gate, which routes to signup/login anyway.
+  async function handleDeleteAccount() {
+    setConfirmingDelete(false);
+    setDeleteNotice(null);
+    try {
+      const { fallback } = await apiDeleteAccount();
+      if (fallback) {
+        setDeleteNotice(
+          "Signed out. Contact support to finish deletion.",
+        );
+        return;
+      }
+    } catch (error) {
+      setDeleteNotice(
+        error instanceof Error
+          ? error.message
+          : "Couldn't delete your account. Try again.",
+      );
+      return;
+    }
+    navigate("/signup");
+  }
+
   return (
     <VStack gap={5}>
       <HStack gap={3} vAlign="center">
         <Avatar
-          name={profile.displayName || profile.email || "?"}
+          name={displayName || email || "?"}
           size="lg"
           shape="circle"
         />
         <VStack gap={0}>
           <Text type="body" weight="semibold">
-            {profile.displayName || "Your name"}
+            {displayName || "Your name"}
           </Text>
           <Text type="supporting" color="secondary">
-            {profile.email || "you@example.com"}
+            {email || "you@example.com"}
           </Text>
         </VStack>
       </HStack>
+      {deleteNotice != null && (
+        <Banner
+          status="error"
+          title="Account deletion"
+          description={deleteNotice}
+        />
+      )}
       <SettingsCard title="Identity">
         <CardRows>
           <SettingsRow
             title="Display name"
-            description="Shown across PESDac."
+            description={
+              neonUser != null
+                ? "Managed by your sign-in provider."
+                : "Shown across PESDac."
+            }
             icon={UserIcon}
             control={
-              <TextInput
-                label="Display name"
-                isLabelHidden
-                size="sm"
-                width={CONTROL_WIDTH}
-                placeholder="Your name"
-                value={profile.displayName}
-                onChange={(value) => updateProfile({ displayName: value })}
-              />
+              neonUser != null ? (
+                <Text type="body" maxLines={1}>
+                  {displayName || "—"}
+                </Text>
+              ) : (
+                <TextInput
+                  label="Display name"
+                  isLabelHidden
+                  size="sm"
+                  width={CONTROL_WIDTH}
+                  placeholder="Your name"
+                  value={profile.displayName}
+                  onChange={(value) => updateProfile({ displayName: value })}
+                />
+              )
             }
           />
           <SettingsRow
             title="Email"
-            description="Where account notices are sent."
+            description={
+              neonUser != null
+                ? "Managed by your sign-in provider."
+                : "Where account notices are sent."
+            }
             icon={EnvelopeIcon}
             control={
-              <TextInput
-                label="Email"
-                isLabelHidden
-                size="sm"
-                width={CONTROL_WIDTH}
-                placeholder="you@example.com"
-                value={profile.email}
-                onChange={(value) => updateProfile({ email: value })}
-              />
+              neonUser != null ? (
+                <Text type="body" maxLines={1}>
+                  {email || "—"}
+                </Text>
+              ) : (
+                <TextInput
+                  label="Email"
+                  isLabelHidden
+                  size="sm"
+                  width={CONTROL_WIDTH}
+                  placeholder="you@example.com"
+                  value={profile.email}
+                  onChange={(value) => updateProfile({ email: value })}
+                />
+              )
             }
           />
           <SettingsRow
-            title="Institution"
-            description="Your college or university."
+            title="Campus"
+            description="Your PES University campus."
             icon={AcademicCapIcon}
             control={
-              <TextInput
-                label="Institution"
+              <Selector
+                label="Campus"
                 isLabelHidden
                 size="sm"
                 width={CONTROL_WIDTH}
-                placeholder="PES University"
-                value={profile.institution}
-                onChange={(value) => updateProfile({ institution: value })}
+                placeholder="Select"
+                hasClear
+                options={CAMPUSES}
+                value={profile.institution || null}
+                onChange={(value) => updateProfile({ institution: value ?? "" })}
               />
             }
           />
@@ -286,6 +350,38 @@ export function IdentitySection() {
           />
         </CardRows>
       </SettingsCard>
+      <SettingsCard title="Danger zone">
+        <CardRows>
+          <SettingsRow
+            title="Delete account"
+            description="Removes your PESDac identity, profile, chats."
+            icon={TrashIcon}
+            control={
+              <Button
+                label="Delete account"
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                Delete
+              </Button>
+            }
+          />
+        </CardRows>
+      </SettingsCard>
+      <Text type="supporting" color="secondary">
+        Sign in and account management are handled by our auth provider.
+      </Text>
+      <AlertDialog
+        isOpen={confirmingDelete}
+        onOpenChange={(open) => {
+          if (!open) setConfirmingDelete(false);
+        }}
+        title="Delete your account?"
+        description="Everything you did on PESDac is permanently erased. This cannot be undone."
+        actionLabel="Delete"
+        onAction={() => void handleDeleteAccount()}
+      />
     </VStack>
   );
 }
@@ -713,16 +809,15 @@ const RETENTIONS = [
   { value: "session", label: "Session only" },
 ];
 
-// Downloads the session store as one JSON file. Handler-only window
-// access: safe in the SSR island because it runs on click, not render.
-function exportAllData() {
-  const data = dumpStore();
+// Downloads a JSON payload as one file. Handler-only window access:
+// safe in the SSR island because it runs on click, not render.
+function downloadJson(filename: string, data: unknown) {
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
   );
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "pesdac-data.json";
+  anchor.download = filename;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
@@ -731,8 +826,49 @@ function exportAllData() {
 
 export function PrivacySection() {
   useSessionVersion();
+  const auth = useAuth();
   const profile = getProfile();
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const loggedIn = auth.status === "authenticated";
+
+  // F2: server export when logged in, local dump when logged out.
+  async function handleExport() {
+    setServerError(null);
+    try {
+      const data = loggedIn
+        ? await apiFetch<Record<string, unknown>>("/users/me/export")
+        : dumpStore();
+      downloadJson("pesdac-data.json", data);
+    } catch (error) {
+      setServerError(
+        error instanceof Error ? error.message : "Export failed. Try again.",
+      );
+    }
+  }
+
+  // F3: server delete-all + local wipe when logged in (overlays still
+  // live in memory until the messages slice — clearAllChats covers the
+  // in-memory customs keys too, so no ghosts remain); local-only path
+  // unchanged when logged out. Keeps the existing confirm dialog.
+  async function handleClearAll() {
+    setConfirmingClear(false);
+    setServerError(null);
+    if (loggedIn) {
+      try {
+        await apiFetch<unknown>("/chats", { method: "DELETE" });
+      } catch (error) {
+        setServerError(
+          error instanceof Error
+            ? error.message
+            : "Couldn't delete chats. Try again.",
+        );
+        return;
+      }
+    }
+    clearAllChats();
+  }
+
   return (
     <VStack gap={5}>
       <SettingsCard title="History">
@@ -755,6 +891,13 @@ export function PrivacySection() {
           />
         </CardRows>
       </SettingsCard>
+      {serverError != null && (
+        <Banner
+          status="error"
+          title="Couldn't reach the server"
+          description={serverError}
+        />
+      )}
       <SettingsCard title="Your data">
         <CardRows>
           <SettingsRow
@@ -766,7 +909,7 @@ export function PrivacySection() {
                 label="Export my data"
                 variant="secondary"
                 size="sm"
-                onClick={exportAllData}
+                onClick={() => void handleExport()}
               >
                 Export
               </Button>
@@ -804,10 +947,7 @@ export function PrivacySection() {
         title="Delete all chats?"
         description="Every chat and its messages will be permanently removed. This cannot be undone."
         actionLabel="Delete"
-        onAction={() => {
-          clearAllChats();
-          setConfirmingClear(false);
-        }}
+        onAction={() => void handleClearAll()}
       />
     </VStack>
   );

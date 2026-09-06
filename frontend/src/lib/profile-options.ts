@@ -9,7 +9,10 @@
 // "unset" and is the only one the PATCH validator accepts in
 // addition to the explicit values.
 
-export const SEMESTERS = [
+// Mutable arrays (Astryx Selector takes a mutable options array), with
+// explicit literal unions so validators and consumers keep narrow types.
+export type SemesterValue = "" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8";
+export const SEMESTERS: { value: SemesterValue; label: string }[] = [
   { value: "", label: "Select semester" },
   { value: "1", label: "Semester 1" },
   { value: "2", label: "Semester 2" },
@@ -19,10 +22,18 @@ export const SEMESTERS = [
   { value: "6", label: "Semester 6" },
   { value: "7", label: "Semester 7" },
   { value: "8", label: "Semester 8" },
-] as const;
-export type SemesterValue = (typeof SEMESTERS)[number]["value"];
+];
 
-export const BRANCHES = [
+export type BranchValue =
+  | ""
+  | "CSE"
+  | "ECE"
+  | "EEE"
+  | "ME"
+  | "CE"
+  | "BT"
+  | "Other";
+export const BRANCHES: { value: BranchValue; label: string }[] = [
   { value: "", label: "Select branch" },
   { value: "CSE", label: "Computer Science (CSE)" },
   { value: "ECE", label: "Electronics & Communication (ECE)" },
@@ -31,20 +42,19 @@ export const BRANCHES = [
   { value: "CE", label: "Civil (CE)" },
   { value: "BT", label: "Biotechnology (BT)" },
   { value: "Other", label: "Other" },
-] as const;
-export type BranchValue = (typeof BRANCHES)[number]["value"];
+];
 
 // D7: Institution became Campus with exactly 2 options. The
 // Profile.institution key in session.ts stays (L3: legacy free-text
 // values map to "" on read), but the only legal API values are RR, EC,
 // or blank. Keep the labels here as the source for the profile
 // selector and the onboarding SegmentedControl.
-export const CAMPUSES = [
+export type CampusValue = "" | "RR" | "EC";
+export const CAMPUSES: { value: CampusValue; label: string }[] = [
   { value: "", label: "Select campus" },
   { value: "RR", label: "RR Campus" },
   { value: "EC", label: "EC Campus" },
-] as const;
-export type CampusValue = (typeof CAMPUSES)[number]["value"];
+];
 
 export function isCampus(v: string | undefined): v is CampusValue {
   return v === "" || v === "RR" || v === "EC";
@@ -52,17 +62,17 @@ export function isCampus(v: string | undefined): v is CampusValue {
 
 // F6: 5 subject codes + "Select all" item lives in the dialog, not
 // here — "Select all" is a UI affordance, not a stored value.
-export const SUBJECTS = [
+export type SubjectValue = "CN" | "OS" | "DLCD" | "DSA" | "Math";
+export const SUBJECTS: { value: SubjectValue; label: string }[] = [
   { value: "CN", label: "Computer Networks" },
   { value: "OS", label: "Operating Systems" },
   { value: "DLCD", label: "Digital Logic" },
   { value: "DSA", label: "Data Structures" },
   { value: "Math", label: "Mathematics" },
-] as const;
-export type SubjectValue = (typeof SUBJECTS)[number]["value"];
+];
 
 export function isSubject(v: string | undefined): v is SubjectValue {
-  return (SUBJECTS as readonly { value: string }[]).some((s) => s.value === v);
+  return (SUBJECTS as { value: string }[]).some((s) => s.value === v);
 }
 
 // Validators used by both the onboarding dialog and the profile tab.
