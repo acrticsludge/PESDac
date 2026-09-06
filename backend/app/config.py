@@ -7,6 +7,42 @@ import so the process never boots half-configured. No secrets are logged.
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    """Load the sibling `backend/.env` (stdlib parser, no new dependency).
+
+    Uvicorn does not read .env files on its own, so without this the
+    process boots with empty env: FRONTEND_ORIGINS=[] makes CORS reject
+    every preflight with 400 and DB routes have no DATABASE_URL. Real
+    environment variables always win — the file only fills gaps.
+    """
+    path = Path(__file__).resolve().parent.parent / ".env"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.lower().startswith("export "):
+            line = line[7:].lstrip()
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if (
+            len(value) >= 2
+            and value[0] == value[-1]
+            and value[0] in ("'", '"')
+        ):
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
 
 
 def _get(name: str, default: str | None = None) -> str | None:

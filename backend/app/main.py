@@ -93,6 +93,17 @@ try:
     if config.DATABASE_URL and config.NEON_AUTH_JWKS_URL and config.FRONTEND_ORIGINS:
         app = create_app(validate=True)
     else:
+        # Unvalidated boot (tests, or env missing entirely). With no
+        # FRONTEND_ORIGINS every CORS preflight 400s — this warning is
+        # the signal, not silent breakage.
+        logger.warning(
+            "PESDac API booting WITHOUT validated env "
+            "(DATABASE_URL=%s, JWKS=%s, ORIGINS=%s)",
+            bool(config.DATABASE_URL),
+            bool(config.NEON_AUTH_JWKS_URL),
+            config.FRONTEND_ORIGINS,
+        )
         app = create_app(validate=False)
 except RuntimeError:
+    logger.warning("PESDac API misconfigured; booting unvalidated fallback")
     app = create_app(validate=False)
