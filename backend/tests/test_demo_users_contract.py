@@ -1,5 +1,12 @@
 """Demo-state + self-service data contract (v6 — Neon JWT auth, arch §7.4, §7.5)."""
 
+from __future__ import annotations
+
+import uuid
+
+from app.models.chats import Chat, DemoState
+from app.models.profiles import Profile
+
 
 def test_demo_state_roundtrip_and_validation(client, auth_header):
     client.headers.update(auth_header(email="d@example.com"))
@@ -14,10 +21,11 @@ def test_demo_state_roundtrip_and_validation(client, auth_header):
     assert client.get("/api/v1/demo-state").json()["overrides"][0]["demoLabel"] == "TCP vs UDP"
 
 
-def test_export_shape_and_delete_account_cascade(client, auth_header):
+def test_export_shape_and_delete_account_cascade(client, auth_header, dbsession):
     client.headers.update(auth_header(email="e@example.com"))
     client.post("/api/v1/chats", json={"subject": "DSA", "title": "Trees"})
     client.patch("/api/v1/profiles/me", json={"difficulty": "hard"})
+    client.put("/api/v1/demo-state/TCP%20vs%20UDP", json={"isPinned": True})
     r = client.get("/api/v1/users/me/export")
     assert r.status_code == 200
     body = r.json()
@@ -25,8 +33,15 @@ def test_export_shape_and_delete_account_cascade(client, auth_header):
     assert body["profile"]["difficulty"] == "hard"
     assert len(body["chats"]) == 1
     assert "exportedAt" in body
+    old_id = uuid.UUID(client.get("/api/v1/auth/me").json()["user"]["id"])
     r = client.delete("/api/v1/users/me")
     assert r.status_code == 202
+    # Orphan check against the OLD row id: /me would upsert a fresh row
+    # for the still-valid Neon session, so re-querying through the API
+    # can never prove the cascade — assert directly on the tables.
+    assert dbsession.get(Profile, old_id) is None
+    assert dbsession.query(Chat).filter(Chat.user_id == old_id).count() == 0
+    assert dbsession.query(DemoState).filter(DemoState.user_id == old_id).count() == 0
     # Backend user row is gone. /me upserts a fresh row on the next
     # call (the Neon session is still valid; the frontend is expected
     # to call authClient.signOut() too — spec §I.F4).

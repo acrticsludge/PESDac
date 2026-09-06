@@ -1,9 +1,8 @@
 """0002 v6 — Campus selector + onboarding flag.
 
-Keeps the v5 onboarding/campus columns. Drops the v5 §E columns that
-Neon Auth now owns (password_hash, password_changed_at,
-email_verified_at, oauth_accounts, refresh_tokens, password_reset_tokens).
-Reversible; downgrade restores the v5 schema exactly.
+Adds `profiles.campus` (constrained to '', 'RR', 'EC') and
+`profiles.onboarding_done`. The v5 auth columns/tables that Neon Auth
+now owns are dropped later in 0003. Reversible.
 """
 
 from __future__ import annotations

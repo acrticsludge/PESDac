@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import security
 from app.db import get_db
 from app.deps import get_current_user_from_neon
 from app.models.profiles import Profile

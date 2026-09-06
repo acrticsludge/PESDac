@@ -52,14 +52,20 @@ export async function apiLogout(): Promise<void> {
 
 /**
  * Delete the Neon user account. Returns true on success. If the SDK
- * does not expose this method the caller should fall back to signOut
- * and a support banner (see auth plan §23).
+ * does not expose this method — or the server rejects the delete
+ * (feature disabled, stale session, verification-email flow) — returns
+ * false so the caller falls back to signOut and a support banner
+ * (see auth plan §23).
  */
 export async function deleteNeonUser(): Promise<boolean> {
   const client = authClient as unknown as {
     deleteUser?: () => Promise<unknown>;
   };
   if (typeof client.deleteUser !== "function") return false;
-  await client.deleteUser();
+  try {
+    await client.deleteUser();
+  } catch {
+    return false;
+  }
   return true;
 }

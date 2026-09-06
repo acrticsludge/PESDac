@@ -420,7 +420,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                     : undefined
                                 }
                               />
-                              {error != null && !isSignup && (
+                              {!isSignup && (
                                 <VStack hAlign="end">
                                   <Link
                                     href="/login"

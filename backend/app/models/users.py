@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, String
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from app.db import Base
@@ -31,3 +31,18 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    # ORM-level delete cascade: `db.delete(user)` removes the profile,
+    # chats, and demo rows in the same flush. The DB FKs carry
+    # ondelete="CASCADE" too (prod safety net); the ORM path is what
+    # makes the cascade work on SQLite (tests) and portable generally.
+    # String class names avoid import cycles with the child models.
+    profile: Mapped["Profile | None"] = relationship(
+        "Profile", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    chats: Mapped[list["Chat"]] = relationship(
+        "Chat", back_populates="user", cascade="all, delete-orphan"
+    )
+    demo_states: Mapped[list["DemoState"]] = relationship(
+        "DemoState", back_populates="user", cascade="all, delete-orphan"
+    )

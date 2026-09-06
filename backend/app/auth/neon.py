@@ -5,7 +5,8 @@ JWKS is cached 1h by `kid`. On unknown `kid` we refetch once before
 failing. Required claims: `sub`, `email`, `exp`. The frontend never
 sets `aud` (Neon does not always set it), so we don't require it.
 
-The only network seam is `load_jwks_from(url)` — tests monkeypatch it.
+The only network seam is `_load_jwks` (set via `_set_loader`) — tests
+monkeypatch it; production uses `_default_loader` below.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ import time
 from typing import Any, Callable
 
 import jwt
-from jwt import PyJWKClient
 
 from app import config
 
@@ -33,10 +33,23 @@ def _set_loader(loader: Callable[[str], dict[str, dict]] | None) -> None:
 
 
 def _default_loader(url: str) -> dict[str, dict]:
-    """Real loader: PyJWKClient gives us keys by kid."""
-    if not hasattr(_default_loader, "_client"):
-        _default_loader._client = PyJWKClient(url, cache_keys=True, lifespan=_TTL_SECONDS)
-    return _default_loader._client
+    """Real loader: fetch the JWKS document and index keys by kid.
+
+    Stdlib only (no new deps): the JWKS URL is a plain JSON document
+    (`{"keys": [...]}`). Entries without a `kid` are skipped.
+    """
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        doc = json.loads(resp.read().decode("utf-8"))
+    keys = doc.get("keys", []) if isinstance(doc, dict) else []
+    return {
+        entry["kid"]: entry
+        for entry in keys
+        if isinstance(entry, dict) and entry.get("kid")
+    }
 
 
 def _get_jwk_for(kid: str) -> dict | None:
@@ -49,12 +62,7 @@ def _get_jwk_for(kid: str) -> dict | None:
             if _load_jwks is not None:
                 _jwks_cache.update(_load_jwks(config.NEON_AUTH_JWKS_URL))
             else:
-                client = _default_loader(config.NEON_AUTH_JWKS_URL)
-                # PyJWKClient: fetch a known-bad key to force the JWKS fetch
-                # is wasteful; instead, re-instantiate to refresh.
-                _default_loader._client = PyJWKClient(
-                    config.NEON_AUTH_JWKS_URL, cache_keys=True, lifespan=_TTL_SECONDS
-                )
+                _jwks_cache.update(_default_loader(config.NEON_AUTH_JWKS_URL))
             _fetched_at = time.monotonic()
         except Exception:
             return None
@@ -78,6 +86,7 @@ def _add_to_cache(jwks: dict[str, dict]) -> None:
 
 def verify_neon_jwt(token: str) -> dict[str, Any]:
     """Verify `token` and return the claims dict. Raises jwt.PyJWTError."""
+    global _fetched_at
     if not config.NEON_AUTH_JWKS_URL:
         raise jwt.InvalidTokenError("NEON_AUTH_JWKS_URL is not configured")
     headers = jwt.get_unverified_header(token)
@@ -86,8 +95,9 @@ def verify_neon_jwt(token: str) -> dict[str, Any]:
         raise jwt.InvalidTokenError("Missing kid header")
     jwk_dict = _get_jwk_for(kid)
     if jwk_dict is None:
-        # One forced refetch then re-look-up.
-        reset_cache()
+        # One forced refetch then re-look-up. Expire the timestamp
+        # rather than reset_cache() so a loader override survives.
+        _fetched_at = 0.0
         jwk_dict = _get_jwk_for(kid)
     if jwk_dict is None:
         raise jwt.InvalidTokenError("Unknown kid")

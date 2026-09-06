@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import config
-from app.deps import _Unauthorized
 from app.routers import auth, chats, demo_state, health, profiles, users
 from app.schemas.common import INTERNAL_ERROR, error_body
 
@@ -37,10 +36,6 @@ def create_app(validate: bool = True) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return response
-
-    @app.exception_handler(_Unauthorized)
-    async def _unauthorized(request: Request, exc: _Unauthorized):
-        return exc.response
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, exc: RequestValidationError):

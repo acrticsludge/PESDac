@@ -25,6 +25,16 @@ def _get_bool(name: str, default: bool) -> bool:
     return raw.lower() in ("1", "true", "yes", "on")
 
 
+def _get_int(name: str, default: int) -> int:
+    raw = _get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 ENV: str = _get("ENV", "dev") or "dev"
 
 DATABASE_URL: str | None = _get("DATABASE_URL")
@@ -44,12 +54,11 @@ FRONTEND_ORIGINS: list[str] = (
 
 COOKIE_SECURE: bool = _get_bool("COOKIE_SECURE", True)
 
-# Legacy defaults kept so any consumer that still references them
-# doesn't crash. Auth-class rate limiting is now Neon-owned; the
-# remaining values are reserved for future per-IP abuse protection on
-# our chat/profile routes.
-RATE_LIMIT_LOGIN: int = 10
-RATE_LIMIT_SIGNUP: int = 5
+# Auth-class rate limiting is Neon-owned; the remaining values are
+# reserved for future per-IP abuse protection on our chat/profile
+# routes. Read from env so .env.example stays truthful.
+RATE_LIMIT_LOGIN: int = _get_int("RATE_LIMIT_LOGIN", 10)
+RATE_LIMIT_SIGNUP: int = _get_int("RATE_LIMIT_SIGNUP", 5)
 
 
 def validate_startup(require_db: bool = True) -> None:

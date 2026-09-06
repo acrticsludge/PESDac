@@ -6,8 +6,10 @@ Spec login-signup v6 §7.1, §10. JWKS is monkeypatched via
 
 from __future__ import annotations
 
+import io
 import json
 import time
+import urllib.request
 import uuid
 from base64 import urlsafe_b64encode
 
@@ -166,3 +168,38 @@ def test_verify_neon_jwt_rejects_wrong_alg(jwks_seeded):
     )
     with pytest.raises(pyjwt.InvalidTokenError):
         neon.verify_neon_jwt(token)
+
+
+def test_verify_neon_jwt_rejects_expired_token(jwks_seeded):
+    priv = jwks_seeded
+    token = pyjwt.encode(
+        {"sub": "u", "email": "e@x.com", "exp": int(time.time()) - 60},
+        priv, algorithm="EdDSA", headers={"kid": "test-kid"},
+    )
+    with pytest.raises(pyjwt.ExpiredSignatureError):
+        neon.verify_neon_jwt(token)
+
+
+def test_verify_neon_jwt_rejects_tampered_signature(jwks_seeded):
+    # Right kid, right claims — but signed by a different Ed25519 key.
+    other_priv = Ed25519PrivateKey.generate()
+    token = _make_jwt(other_priv, sub="u", email="e@x.com")
+    with pytest.raises(pyjwt.InvalidSignatureError):
+        neon.verify_neon_jwt(token)
+
+
+def test_default_loader_fetches_jwks_over_http(ed_keypair, monkeypatch):
+    # C1 regression: the production path (no test loader, cold cache)
+    # must fetch the JWKS document itself — not just read the dict.
+    priv, pub_der = ed_keypair
+    doc = json.dumps({"keys": [_jwk_for(pub_der)]}).encode()
+    monkeypatch.setattr(config, "NEON_AUTH_JWKS_URL", "https://test.invalid/jwks", raising=False)
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda req, timeout=10: io.BytesIO(doc)
+    )
+    neon.reset_cache()
+    try:
+        claims = neon.verify_neon_jwt(_make_jwt(priv, sub="u", email="e@x.com"))
+        assert claims["sub"] == "u"
+    finally:
+        neon.reset_cache()

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 from app.models.users import _utcnow
@@ -71,3 +71,5 @@ class Profile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
+    # Back-reference for User.profile delete cascade (see models/users.py).
+    user: Mapped["User"] = relationship("User", back_populates="profile")

@@ -6,8 +6,11 @@ the verified claims at first /me and never re-trusted from the client
 after that. The cascading FK from profiles.user_id is preserved by
 recreating the fk against this new table.
 
-Reversible. Downgrade drops the table (the foreign keys from
-`profiles.user_id` and `chats.user_id` are removed first).
+Reversible. Downgrade removes the v6 `users` table and restores the
+v5 `users` table + auth-side tables exactly as 0001 created them
+(portable Text-email variant with the lower() unique index, not the
+citext attempt). Schema-only reversal — v5 rows dropped by upgrade()
+are not recoverable.
 """
 
 from __future__ import annotations
@@ -58,7 +61,65 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Exact reverse of upgrade(): drop the v6 users table + its FKs,
+    # then restore the v5 users table and auth-side tables as 0001
+    # created them (email-keyed users + oauth/refresh/reset tables,
+    # original FK names preserved).
     op.execute("ALTER TABLE chats DROP CONSTRAINT IF EXISTS chats_user_id_fkey")
     op.execute("ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_user_id_fkey")
     op.drop_index("ix_users_neon_user_id", table_name="users")
     op.drop_table("users")
+    op.create_table(
+        "users",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("gen_random_uuid()")),
+        sa.Column("email", sa.Text(), nullable=False, unique=True),
+        sa.Column("password_hash", sa.Text(), nullable=True),
+        sa.Column("display_name", sa.String(80), nullable=False, server_default=""),
+        sa.Column("email_verified_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.CheckConstraint("email ~ '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'", name="users_email_format"),
+    )
+    op.create_index("ix_users_email_lower", "users", [sa.text("lower(email)")], unique=True)
+    op.create_table(
+        "oauth_accounts",
+        sa.Column("user_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("provider", sa.Text(), nullable=False, server_default="google", primary_key=True),
+        sa.Column("provider_sub", sa.Text(), nullable=False, primary_key=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.UniqueConstraint("user_id", "provider", name="uq_oauth_user_provider"),
+    )
+    op.create_table(
+        "refresh_tokens",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("gen_random_uuid()")),
+        sa.Column("user_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("token_hash", sa.Text(), nullable=False, unique=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+    )
+    op.create_index("ix_refresh_tokens_user_active", "refresh_tokens", ["user_id"],
+                    postgresql_where=sa.text("revoked_at IS NULL"))
+    op.create_table(
+        "password_reset_tokens",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("gen_random_uuid()")),
+        sa.Column("user_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("token_hash", sa.Text(), nullable=False, unique=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+    )
+    op.execute(
+        "ALTER TABLE profiles ADD CONSTRAINT profiles_user_id_fkey "
+        "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+    )
+    op.execute(
+        "ALTER TABLE chats ADD CONSTRAINT chats_user_id_fkey "
+        "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+    )

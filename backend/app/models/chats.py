@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 from app.models.users import _utcnow
@@ -30,6 +30,8 @@ class Chat(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
+    # Back-reference for User.chats delete cascade (see models/users.py).
+    user: Mapped["User"] = relationship("User", back_populates="chats")
 
 
 class DemoState(Base):
@@ -45,6 +47,8 @@ class DemoState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
+    # Back-reference for User.demo_states delete cascade (see models/users.py).
+    user: Mapped["User"] = relationship("User", back_populates="demo_states")
 
 
 # Canonical demo labels (frontend/src/lib/chat.ts CHAT_CODES keys). PUT with an

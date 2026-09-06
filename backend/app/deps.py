@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import jwt as pyjwt
 from fastapi import Depends, Header, Request
 from fastapi.responses import JSONResponse
@@ -47,15 +49,16 @@ def get_current_user_from_neon(
     return user
 
 
-def require_user(result: User | JSONResponse) -> User:
-    if isinstance(result, JSONResponse):
-        raise _Unauthorized(result)
-    return result
+def _origin_of(value: str) -> str:
+    """Reduce an Origin/Referer header to `scheme://host[:port]`.
 
-
-class _Unauthorized(Exception):
-    def __init__(self, response: JSONResponse):
-        self.response = response
+    Prefix matching is a bypass (`http://localhost:4321.evil.com`
+    startswith the allowed origin), so compare exact origins only.
+    """
+    parts = urlparse(value)
+    if not parts.scheme or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}".lower()
 
 
 def check_mutation_origin(request: Request) -> JSONResponse | None:
@@ -70,8 +73,8 @@ def check_mutation_origin(request: Request) -> JSONResponse | None:
     origin = request.headers.get("origin") or request.headers.get("referer")
     if not origin:
         return None  # non-browser client (tests, curl)
-    allowed = any(origin.startswith(o) for o in config.FRONTEND_ORIGINS)
-    if not allowed:
+    allowed = {_origin_of(o) for o in config.FRONTEND_ORIGINS} - {""}
+    if _origin_of(origin) not in allowed:
         from app.schemas.common import error_body
 
         return JSONResponse(
