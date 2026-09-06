@@ -50,6 +50,7 @@ import {
   useSessionVersion,
 } from "../../lib/session";
 import { useAuth, apiDeleteAccount, apiFetch, toUserMessage } from "../../lib/auth";
+import { linkGoogleAccount, sdkMessage } from "../../lib/neon-auth";
 import { navigate } from "astro:transitions/client";
 import {
   BRANCHES,
@@ -184,6 +185,8 @@ export function IdentitySection() {
   const profile = getProfile();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
+  const [isLinking, setIsLinking] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   // Plan item 23: email + displayName are Neon-owned — read-only when
   // authenticated. Logged out (unreachable behind the gate, kept for
   // honesty) the local store remains editable.
@@ -214,6 +217,23 @@ export function IdentitySection() {
     navigate("/signup");
   }
 
+  // Link Google to the signed-in account (fixes account_not_linked for
+  // password-first users): requires a live session, redirects to Google
+  // and back on success. Already-linked returns with no URL — either
+  // way a return without redirect means reset the button.
+  async function handleLinkGoogle() {
+    if (isLinking) return;
+    setIsLinking(true);
+    setLinkError(null);
+    try {
+      await linkGoogleAccount();
+    } catch (error) {
+      setLinkError(sdkMessage(error, "Couldn't link Google. Try again."));
+    }
+    setIsLinking(false);
+    // A real redirect unloads the page, so reaching here means stay.
+  }
+
   return (
     <VStack gap={5}>
       <HStack gap={3} vAlign="center">
@@ -236,6 +256,13 @@ export function IdentitySection() {
           status="error"
           title="Account deletion"
           description={deleteNotice}
+        />
+      )}
+      {linkError != null && (
+        <Banner
+          status="error"
+          title="Google linking"
+          description={linkError}
         />
       )}
       <SettingsCard title="Identity">
@@ -292,11 +319,25 @@ export function IdentitySection() {
               )
             }
           />
+          {neonUser != null && (
+            <SettingsRow
+              title="Google account"
+              description="Link Google to sign in with one click next time."
+              icon={GlobeAltIcon}
+              control={
+                <Button
+                  label={isLinking ? "Linking…" : "Link Google account"}
+                  variant="secondary"
+                  isLoading={isLinking}
+                  onClick={() => void handleLinkGoogle()}
+                />
+              }
+            />
+          )}
           <SettingsRow
             title="Campus"
             description="Your PES University campus."
-            icon={AcademicCapIcon}
-            control={
+            icon={AcademicCapIcon}            control={
               <Selector
                 label="Campus"
                 isLabelHidden

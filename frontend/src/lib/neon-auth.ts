@@ -51,6 +51,58 @@ export async function apiLogout(): Promise<void> {
 }
 
 /**
+ * Link the Google identity to the currently signed-in Neon user.
+ * The user must already be authenticated (e.g. via email+password):
+ * Neon returns the Google authorization URL, we redirect there and
+ * back — then future Google sign-ins land on the same account instead
+ * of `account_not_linked`.
+ *
+ * SDK truth: the Neon wrapper's narrowed type hides the link route, so
+ * this calls the underlying Better Auth endpoint directly
+ * (POST /link-social — same contract the SDK's own adapters use:
+ * session cookie via credentials:include, JSON body, `{url,redirect}`
+ * response). Failures throw SDK-shaped errors (see sdkMessage).
+ */
+export async function linkGoogleAccount(): Promise<void> {
+  const res = await fetch(`${url.replace(/\/+$/, "")}/link-social`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      provider: "google",
+      callbackURL: "/new",
+      errorCallbackURL: "/new?error=linking-failed",
+    }),
+  });
+  let parsed: unknown = null;
+  try {
+    parsed = await res.json();
+  } catch {
+    parsed = null;
+  }
+  if (!res.ok) {
+    const body =
+      typeof parsed === "object" && parsed !== null
+        ? (parsed as { message?: unknown; code?: unknown })
+        : null;
+    const message =
+      typeof body?.message === "string" && body.message
+        ? body.message
+        : "Couldn't link Google. Try again.";
+    throw new Error(message);
+  }
+  const redirectUrl =
+    typeof parsed === "object" && parsed !== null
+      ? (parsed as { url?: unknown }).url
+      : undefined;
+  if (typeof redirectUrl !== "string" || !redirectUrl) {
+    // Already linked (status:true, no URL): nothing further to do.
+    return;
+  }
+  window.location.assign(redirectUrl);
+}
+
+/**
  * Render a Neon SDK failure as user-safe copy. The SDK *throws* on
  * HTTP errors (it does not resolve `{error}`): the thrown error
  * carries the server body (`{code, message}`) with `.message` set to
