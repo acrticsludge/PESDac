@@ -27,7 +27,7 @@ import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
 import ProfileDialog, { type ProfileTab } from "./profile/ProfileDialog";
 import AuthGate from "./auth/AuthGate";
-import { useAuth } from "../lib/auth";
+import { apiLogout, useAuth } from "../lib/auth";
 import { tabFromHash } from "./profile/sections";
 import AttachButton from "./chat/AttachButton";
 import { getThread } from "../content/threads";
@@ -85,6 +85,7 @@ import {
 } from "@astryxdesign/core/SideNav";
 
 import { NavIcon } from "@astryxdesign/core/NavIcon";
+import { Avatar } from "@astryxdesign/core/Avatar";
 import { Icon } from "@astryxdesign/core/Icon";
 import type { IconType } from "@astryxdesign/core/Icon";
 
@@ -138,6 +139,8 @@ import {
   CircleStackIcon,
   CalculatorIcon,
   AtSymbolIcon,
+  ArrowRightStartOnRectangleIcon,
+  ArrowLeftStartOnRectangleIcon,
 } from "@heroicons/react/24/outline";
 
 /* -------------------------------------------------------------------------- */
@@ -491,6 +494,21 @@ export default function ShellSideNav({
   // as-is — no flash of gate while Neon is still resolving.
   const authState = useAuth();
   const isGateOpen = authState.status === "guest";
+  // F1: first name = displayName up to the first space; empty when
+  // logged out (or when Neon carries no display name) → generic heading.
+  const firstName =
+    authState.status === "authenticated"
+      ? authState.user.displayName.split(/\s/, 1)[0]
+      : "";
+  // Account row Logout (plan item 24): sign out of Neon + notify our
+  // backend, then leave the app routes — the gate re-opens next visit.
+  const handleLogout = async () => {
+    try {
+      await apiLogout();
+    } finally {
+      navigate("/login");
+    }
+  };
   // Added interaction state; the existing welcome/composer state remains intact.
   const [selectedChat, setSelectedChat] = useState<string | null>(
     initialChat?.label ?? null,
@@ -894,6 +912,34 @@ export default function ShellSideNav({
             }
             footer={
               <SideNavSection title="Account" isHeaderHidden>
+                {authState.status === "authenticated" && (
+                  <HStack gap={2} vAlign="center" padding={1}>
+                    <Avatar
+                      name={
+                        authState.user.displayName ||
+                        authState.user.email ||
+                        "?"
+                      }
+                      size="sm"
+                    />
+                    <VStack gap={0.5}>
+                      <Text type="body" weight="bold" maxLines={1}>
+                        {authState.user.displayName ||
+                          authState.user.email ||
+                          "?"}
+                      </Text>
+                      {authState.user.displayName !== "" && (
+                        <Text
+                          type="supporting"
+                          color="secondary"
+                          maxLines={1}
+                        >
+                          {authState.user.email}
+                        </Text>
+                      )}
+                    </VStack>
+                  </HStack>
+                )}
                 <SideNavItem label="Settings" icon={Cog6ToothIcon} href="#" />
 
                 <SideNavItem
@@ -905,6 +951,27 @@ export default function ShellSideNav({
                     openProfile("profile");
                   }}
                 />
+                {authState.status === "authenticated" ? (
+                  <SideNavItem
+                    label="Logout"
+                    icon={ArrowLeftStartOnRectangleIcon}
+                    href="#"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void handleLogout();
+                    }}
+                  />
+                ) : authState.status === "guest" ? (
+                  <SideNavItem
+                    label="Login"
+                    icon={ArrowRightStartOnRectangleIcon}
+                    href="#"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      navigate("/login");
+                    }}
+                  />
+                ) : null}
               </SideNavSection>
             }
           >
@@ -1107,7 +1174,9 @@ export default function ShellSideNav({
                     </HStack>
 
                     <Text type="display-2" as="h1">
-                      What are you studying today?
+                      {firstName !== ""
+                        ? `What are you studying today, ${firstName}?`
+                        : "What are you studying today?"}
                     </Text>
                   </VStack>
 
