@@ -6,36 +6,24 @@
 // Center > VStack(gap 4) > Card(padding 0, maxWidth 1000) >
 // Grid(fit, minWidth 240, gap 8, stretch) >
 //   [Section(transparent) > VStack(gap 4) > brand, StackItem(fill) >
-//    Center(vertical) > VStack(gap 4, stretch) > title + form, swap link
+//    Center(vertical) > form, swap link
 //   | div.login-split-image > Card(transparent) > img(cover)]
 //
-// The form slot hosts Neon's <AuthView>. AuthView ships its own
-// Tailwind card (bg-card, border, rounded-xl, shadow, max-w-sm) with
-// its own header ("Sign Up" + description) — rendering that as-is
-// inside our Astryx card produces double chrome and double titles,
-// which is why the page looked out of place. So we:
-//   1. Kill the SDK header via cardHeader={<></>} — our Astryx
-//      display-1 title + subtitle are the only headers.
-//   2. Neutralize the SDK card via classNames.base (max-w-none,
-//      border-0, shadow-none, bg-transparent, rounded-none, p-0,
-//      gap-4) so only its inner form (inputs, button, divider,
-//      Google button) paints.
-//   3. Tighten its content padding via classNames.content (px-0
-//      gap-4) — the Grid already insets the form side.
-//   4. Hide its swap-link footer via classNames.footer + a CSS
-//      fallback (the project has no Tailwind, so the SDK's
-//      `hidden` utility only works because auth-ui/css ships it;
-//      the fallback makes it certain). Our Astryx swap link below
-//      the form is the single one.
-//   5. Map the SDK's shadcn tokens (--background, --primary, ...)
-//      to our Astryx dark values scoped to .neon-auth-ui, so the
-//      primary button reads light (#ebebeb on #171717, like the
-//      reference Login button) and inputs/borders read dark.
+// The form itself is Astryx primitives (TextInput / Button /
+// Divider / Link / EmptyState), exactly like the reference — NOT
+// the SDK's <AuthView>. AuthView is a shadcn-styled form; hosting
+// it inside our Astryx card produced double chrome, double titles,
+// foreign proportions, and validation errors firing on load. The
+// Astryx controls below are wired to the Neon SDK directly:
+// sign-in → authClient.signIn.email, sign-up →
+// authClient.signUp.email, Google → authClient.signIn.social.
+// Forgot-password calls authClient.forgetPassword and swaps the
+// form to a confirmation EmptyState.
 //
 // D1: Google + email only (no Apple button). D4: no legal line.
 // D5: muted cover (see COVER_IMAGE_URL).
 
-import { useEffect, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { VStack, HStack, StackItem } from "@astryxdesign/core/Layout";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Center } from "@astryxdesign/core/Center";
@@ -43,10 +31,13 @@ import { Card } from "@astryxdesign/core/Card";
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import { Icon } from "@astryxdesign/core/Icon";
-import { Link } from "@astryxdesign/core/Link";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { CheckCircleIcon } from "@heroicons/react/24/outline";
 import { SparklesIcon } from "@heroicons/react/24/outline";
-import { AuthView, NeonAuthUIProvider } from "@neondatabase/auth-ui";
-import "@neondatabase/auth-ui/css";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Button } from "@astryxdesign/core/Button";
+import { Link } from "@astryxdesign/core/Link";
+import { Divider } from "@astryxdesign/core/Divider";
 
 import { authClient } from "../../lib/neon-auth";
 
@@ -83,6 +74,32 @@ const coverImage: CSSProperties = {
 // same path to swap without touching layout (object-fit:cover).
 const COVER_IMAGE_URL = "/template-assets/light-working-vertical-1.svg";
 
+// Google "G" (same four-color mark the Neon SDK renders on its own
+// Google button), inlined so the Astryx secondary button needs no
+// external asset. 16×16 like the reference social buttons.
+function GoogleMark() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 256 262" aria-hidden="true">
+      <path
+        d="M255.878 133.451c0-10.734-.871-18.567-2.756-26.69H130.55v48.448h71.947c-1.45 12.04-9.283 30.172-26.69 42.356l-.244 1.622 38.755 30.023 2.685.268c24.659-22.774 38.875-56.282 38.875-96.027"
+        fill="#4285f4"
+      />
+      <path
+        d="M130.55 261.1c35.248 0 64.839-11.605 86.453-31.622l-41.196-31.913c-11.024 7.688-25.82 13.055-45.257 13.055-34.523 0-63.824-22.773-74.269-54.25l-1.531.13-40.298 31.187-.527 1.465C35.393 231.798 79.49 261.1 130.55 261.1"
+        fill="#34a853"
+      />
+      <path
+        d="M56.281 156.37c-2.756-8.123-4.351-16.827-4.351-25.82 0-8.994 1.595-17.697 4.206-25.82l-.073-1.73L15.26 71.312l-1.335.635C5.077 89.644 0 109.517 0 130.55s5.077 40.905 13.925 58.602z"
+        fill="#fbbc05"
+      />
+      <path
+        d="M130.55 50.479c24.514 0 41.05 10.589 50.479 19.438l36.844-35.974C195.245 12.91 165.798 0 130.55 0 79.49 0 35.393 29.301 13.925 71.947l42.211 32.783c10.59-31.477 39.891-54.251 74.414-54.251"
+        fill="#eb4335"
+      />
+    </svg>
+  );
+}
+
 // The container query lives in a plain <style> tag so it needs NO
 // CSS compiler.
 // - Pad the grid, not the Card: the form's Section escapes Card's
@@ -93,11 +110,6 @@ const COVER_IMAGE_URL = "/template-assets/light-working-vertical-1.svg";
 //   511px; the query reorders the image (order:-1) and tightens the
 //   inset at that point, keyed to the card width (not the window)
 //   so it never desyncs.
-// - .neon-auth-ui tokens map the SDK's shadcn variables to our
-//   Astryx dark values (exact hexes from the theme). Scoped to the
-//   auth form so nothing else is affected.
-// - .neon-auth-ui footer fallback hides the SDK swap link even if
-//   its `hidden` utility ever stops resolving.
 const LOGIN_SPLIT_CSS = `
 .login-split-grid {
   container-type: inline-size;
@@ -107,7 +119,6 @@ const LOGIN_SPLIT_CSS = `
 .login-split-image {
   width: 100%;
   order: 0;
-  min-height: 520px;
 }
 @container login-split (max-width: 511px) {
   .login-split-grid {
@@ -115,40 +126,12 @@ const LOGIN_SPLIT_CSS = `
   }
   .login-split-image {
     order: -1;
-    min-height: 160px;
-    max-height: 160px;
   }
-}
-.neon-auth-ui {
-  --background: #1b1b1b;
-  --foreground: #fafafa;
-  --card: transparent;
-  --card-foreground: #fafafa;
-  --popover: #1b1b1b;
-  --popover-foreground: #fafafa;
-  --primary: #ebebeb;
-  --primary-foreground: #171717;
-  --secondary: #262626;
-  --secondary-foreground: #fafafa;
-  --muted: #262626;
-  --muted-foreground: #a3a3a3;
-  --accent: #262626;
-  --accent-foreground: #fafafa;
-  --destructive: #ff6f6c;
-  --destructive-foreground: #171717;
-  --border: #FFFFFF1A;
-  --input: #525252;
-  --ring: #ebebeb;
-  --radius: 0.625rem;
-  width: 100%;
-}
-.neon-auth-ui [data-slot="card-footer"] {
-  display: none !important;
 }
 `;
 
 export type AuthLayoutProps = {
-  /** Which Neon form to render: sign-in or sign-up. */
+  /** Sign-in or sign-up mode. Signup adds a Name field. */
   pathname: "sign-in" | "sign-up";
   /** Card header line (e.g. "Welcome back" / "Create your account"). */
   title: string;
@@ -159,7 +142,28 @@ export type AuthLayoutProps = {
   swapLabel: string;
 };
 
+type FieldError = {
+  field: "name" | "email" | "password";
+  message: string;
+};
+
 export default function AuthLayout(props: AuthLayoutProps) {
+  const isSignup = props.pathname === "sign-up";
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<FieldError | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  // Signup can end in "verify your email" instead of a session —
+  // the success card then says check-your-inbox and we do NOT
+  // navigate. Forgot-password reuses the same success slot.
+  const [success, setSuccess] = useState({
+    title: "You're signed in",
+    description: "Redirecting to your dashboard…",
+  });
+
   // Spec §B: logged-in users bounce to /new on mount.
   useEffect(() => {
     let cancelled = false;
@@ -171,6 +175,145 @@ export default function AuthLayout(props: AuthLayoutProps) {
       cancelled = true;
     };
   }, []);
+
+  function succeed(title: string, description: string, navigate: boolean) {
+    setSuccess({ title, description });
+    setIsSuccess(true);
+    if (navigate) {
+      window.setTimeout(() => {
+        window.location.assign("/new");
+      }, 800);
+    }
+  }
+
+  async function handleSubmit() {
+    if (isLoading || isSuccess) return;
+    if (isSignup && !name.trim()) {
+      setError({ field: "name", message: "Enter your name." });
+      return;
+    }
+    if (!email.trim()) {
+      setError({ field: "email", message: "Enter your email." });
+      return;
+    }
+    if (!password) {
+      setError({ field: "password", message: "Enter your password." });
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      if (isSignup) {
+        const res = await authClient.signUp.email({
+          email: email.trim(),
+          password,
+          name: name.trim(),
+        });
+        if (res?.error) {
+          setError({
+            field: "password",
+            message:
+              typeof res.error.message === "string" && res.error.message
+                ? res.error.message
+                : "Couldn't create your account. Try again.",
+          });
+          return;
+        }
+        // Some configs require email verification before a session
+        // exists — check before deciding to navigate.
+        const session = await authClient.getSession();
+        if (session?.data) {
+          succeed("You're signed in", "Redirecting to your dashboard…", true);
+        } else {
+          succeed(
+            "Check your inbox",
+            `We sent a verification link to ${email.trim()}.`,
+            false,
+          );
+        }
+      } else {
+        const res = await authClient.signIn.email({
+          email: email.trim(),
+          password,
+        });
+        if (res?.error) {
+          setError({
+            field: "password",
+            message:
+              typeof res.error.message === "string" && res.error.message
+                ? res.error.message
+                : "Incorrect password. Try again.",
+          });
+          return;
+        }
+        succeed("You're signed in", "Redirecting to your dashboard…", true);
+      }
+    } catch {
+      setError({
+        field: "password",
+        message: "Something went wrong. Try again.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleGoogle() {
+    if (isLoading || isGoogleLoading || isSuccess) return;
+    setIsGoogleLoading(true);
+    setError(null);
+    try {
+      await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/new",
+      });
+    } catch {
+      setError({
+        field: "password",
+        message: "Google sign-in failed. Try again.",
+      });
+      setIsGoogleLoading(false);
+    }
+    // On success the SDK redirects away, so no reset here.
+  }
+
+  async function handleForgot() {
+    if (isLoading || isSuccess) return;
+    if (!email.trim()) {
+      setError({ field: "email", message: "Enter your email first." });
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await authClient.requestPasswordReset({
+        email: email.trim(),
+        redirectTo: "/login",
+      });
+      if (res?.error) {
+        setError({
+          field: "password",
+          message:
+            typeof res.error.message === "string" && res.error.message
+              ? res.error.message
+              : "Couldn't send the reset email. Try again.",
+        });
+        return;
+      }
+      succeed(
+        "Check your inbox",
+        `We sent a reset link to ${email.trim()}.`,
+        false,
+      );
+    } catch {
+      setError({
+        field: "password",
+        message: "Couldn't send the reset email. Try again.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   return (
     <Center axis="both" padding={6} style={pageStyle}>
@@ -196,49 +339,131 @@ export default function AuthLayout(props: AuthLayoutProps) {
 
                   <StackItem size="fill">
                     <Center axis="vertical" height="100%">
-                      <VStack gap={4} hAlign="stretch" width="100%">
-                        <VStack gap={1}>
-                          <Text type="display-1" as="h2">
-                            {props.title}
-                          </Text>
-                          <Text type="body" color="secondary" size="sm">
-                            {props.subtitle}
-                          </Text>
-                        </VStack>
+                      {isSuccess ? (
+                        <EmptyState
+                          title={success.title}
+                          description={success.description}
+                          icon={<Icon icon={CheckCircleIcon} size="lg" />}
+                        />
+                      ) : (
+                        <VStack gap={4} hAlign="stretch" width="100%">
+                          <VStack gap={1}>
+                            <Text type="display-1" as="h2">
+                              {props.title}
+                            </Text>
+                            <Text type="body" color="secondary" size="sm">
+                              {props.subtitle}
+                            </Text>
+                          </VStack>
 
-                        <NeonAuthUIProvider
-                          authClient={authClient}
-                          social={{ providers: ["google"] }}
-                          redirectTo="/new"
-                          defaultTheme="dark"
-                        >
-                          <AuthView
-                            pathname={props.pathname}
-                            // Our Astryx title above is the only
-                            // header — suppress the SDK's own
-                            // ("Sign Up" + description).
-                            cardHeader={<></>}
-                            // Neutralize the SDK card so only its
-                            // inner form paints inside our Card.
-                            className="max-w-none border-0 shadow-none bg-transparent rounded-none p-0 gap-4"
-                            classNames={{
-                              base: "max-w-none border-0 shadow-none bg-transparent rounded-none p-0 gap-4",
-                              header: "p-0",
-                              content: "px-0 gap-4",
-                              footer: "hidden",
+                          <VStack gap={2}>
+                            {isSignup && (
+                              <TextInput
+                                label="Name"
+                                isLabelHidden
+                                placeholder="Name"
+                                value={name}
+                                onChange={(v: string) => {
+                                  setName(v);
+                                  setError(null);
+                                }}
+                                size="lg"
+                                status={
+                                  error?.field === "name"
+                                    ? { type: "error", message: error.message }
+                                    : undefined
+                                }
+                              />
+                            )}
+                            <TextInput
+                              label="Email"
+                              isLabelHidden
+                              type="email"
+                              placeholder="name@company.com"
+                              value={email}
+                              onChange={(v: string) => {
+                                setEmail(v);
+                                setError(null);
+                              }}
+                              size="lg"
+                              status={
+                                error?.field === "email"
+                                  ? { type: "error", message: error.message }
+                                  : undefined
+                              }
+                            />
+                            <VStack gap={1}>
+                              <TextInput
+                                label="Password"
+                                isLabelHidden
+                                placeholder="Enter your password"
+                                type="password"
+                                value={password}
+                                onChange={(v: string) => {
+                                  setPassword(v);
+                                  setError(null);
+                                }}
+                                size="lg"
+                                status={
+                                  error?.field === "password"
+                                    ? { type: "error", message: error.message }
+                                    : undefined
+                                }
+                              />
+                              {error != null && !isSignup && (
+                                <VStack hAlign="end">
+                                  <Link
+                                    href="/login"
+                                    size="sm"
+                                    color="secondary"
+                                    type="supporting"
+                                    onClick={(e: React.MouseEvent) => {
+                                      e.preventDefault();
+                                      void handleForgot();
+                                    }}
+                                  >
+                                    Forgot your password?
+                                  </Link>
+                                </VStack>
+                              )}
+                            </VStack>
+                          </VStack>
+
+                          <Button
+                            label={isSignup ? "Create an account" : "Login"}
+                            variant="primary"
+                            size="lg"
+                            isLoading={isLoading}
+                            onClick={() => {
+                              void handleSubmit();
                             }}
                           />
-                        </NeonAuthUIProvider>
-                      </VStack>
+
+                          <Divider label="Or continue with" />
+
+                          <Button
+                            label="Google"
+                            variant="secondary"
+                            icon={<GoogleMark />}
+                            size="lg"
+                            isLoading={isGoogleLoading}
+                            onClick={() => {
+                              void handleGoogle();
+                            }}
+                          />
+                        </VStack>
+                      )}
                     </Center>
                   </StackItem>
 
-                  <Text type="supporting" color="secondary">
-                    {props.swapLabel}{" "}
-                    <Link href={props.swapHref} type="supporting">
-                      {props.swapHref === "/login" ? "Log in" : "Sign up"}
-                    </Link>
-                  </Text>
+                  {!isSuccess && (
+                    <Text type="supporting" color="secondary">
+                      {props.swapLabel}{" "}
+                      <Link href={props.swapHref} type="supporting">
+                        {props.swapHref === "/login" ? "Log in" : "Sign up"}
+                      </Link>
+                    </Text>
+                  )}
                 </VStack>
               </Section>
 
