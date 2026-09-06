@@ -201,7 +201,10 @@ PESDac is permanently erased. This cannot be undone.", action "Delete")
 → `authClient.deleteUser()` (removes the Neon user record; falls back
 to `authClient.signOut()` + a "Contact support to finish deletion"
 banner if the SDK does not expose `deleteUser`) → `navigate("/signup")`
-(gate re-opens on next check).
+on full success only. On the fallback path the dialog stays open so the
+support banner remains visible (navigating would unmount it unseen);
+closing the dialog lands on the gate, which routes to signup/login
+anyway (gate re-opens on next check).
 F5 Sign-in methods card — REMOVED. The card in §G is gone; the Account
 section's "Sign in is handled by our auth provider" line is the only
 acknowledgement.

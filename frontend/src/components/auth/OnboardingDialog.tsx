@@ -123,6 +123,8 @@ export default function OnboardingDialog({
 
   if (auth.status !== "authenticated" || !open) return null;
 
+  // validateCampus allows blank (PATCH accepts it); the wizard
+  // requires an actual pick, hence the separate campus !== "".
   const canSave =
     !isSaving &&
     validateCampus(campus) === null &&

@@ -167,6 +167,13 @@ export type ApiFetchInit = Omit<RequestInit, "body" | "headers"> & {
   headers?: Record<string, string>;
 };
 
+// The backend serves everything under /api/v1 (see app/main.py). The
+// prefix is joined here — the single place — so callers pass bare
+// paths ("/auth/me") and PUBLIC_API_BASE_URL stays a clean host.
+// (Audit: without this every call 404s; there is no dev proxy.)
+const API_PREFIX = "/api/v1";
+const API_ROOT = API_BASE_URL.replace(/\/+$/, "");
+
 export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
   const token = await readAccessToken();
   const headers: Record<string, string> = {
@@ -177,7 +184,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   const body =
     init.body === undefined ? undefined : JSON.stringify(init.body);
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetch(`${API_ROOT}${API_PREFIX}${path}`, {
     ...init,
     headers: body ? { ...headers, "Content-Type": "application/json" } : headers,
     body,
