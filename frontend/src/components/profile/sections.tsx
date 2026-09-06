@@ -329,6 +329,7 @@ export function IdentitySection() {
                   label={isLinking ? "Linking…" : "Link Google account"}
                   variant="secondary"
                   isLoading={isLinking}
+                  isDisabled={isLinking}
                   onClick={() => void handleLinkGoogle()}
                 />
               }
