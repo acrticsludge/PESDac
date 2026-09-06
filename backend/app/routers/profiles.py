@@ -7,21 +7,18 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import check_mutation_origin, get_current_user_from_neon
-from app.models.profiles import Profile
+from app.deps import (
+    check_mutation_origin,
+    get_current_user_from_neon,
+    get_or_create_profile,
+)
 from app.schemas.profiles import PROFILE_FIELDS, ProfilePatch, profile_to_out
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 
-def _get_or_create(db: Session, user) -> Profile:
-    profile = db.get(Profile, user.id)
-    if profile is None:
-        profile = Profile(user_id=user.id, display_name=user.display_name, email=user.email)
-        db.add(profile)
-        db.commit()
-        db.refresh(profile)
-    return profile
+def _get_or_create(db: Session, user):
+    return get_or_create_profile(db, user)
 
 
 @router.get("/me")

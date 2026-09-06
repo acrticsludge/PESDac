@@ -118,6 +118,43 @@ def test_me_returns_same_user_on_repeated_calls(client: TestClient, jwks_seeded,
     assert len(users) == 1
 
 
+def test_me_upsert_adopts_race_winner(dbsession, monkeypatch):
+    """Parallel first-login calls (onboarding fires /auth/me +
+    /profiles/me together) can both SELECT-miss then both INSERT. The
+    loser must adopt the winner's row, not 500."""
+    from app.deps import _insert_or_select
+
+    sub = "neon-sub-race"
+    raced = {"done": False}
+    real_commit = dbsession.commit
+
+    def racy_commit():
+        if not raced["done"]:
+            raced["done"] = True
+            # A parallel request's row lands first: shelve our pending
+            # INSERT, commit the winner, re-queue ours.
+            pending = list(dbsession.new)
+            for obj in pending:
+                dbsession.expunge(obj)
+            dbsession.add(
+                User(neon_user_id=sub, email="w@example.com", display_name="Winner")
+            )
+            real_commit()
+            for obj in pending:
+                dbsession.add(obj)
+        return real_commit()
+
+    monkeypatch.setattr(dbsession, "commit", racy_commit)
+    user = _insert_or_select(
+        dbsession,
+        lambda: dbsession.scalar(select(User).where(User.neon_user_id == sub)),
+        lambda: User(neon_user_id=sub, email="l@example.com", display_name="Loser"),
+    )
+    assert user.email == "w@example.com"
+    rows = dbsession.scalars(select(User).where(User.neon_user_id == sub)).all()
+    assert len(rows) == 1
+
+
 def test_me_rejects_token_with_unknown_kid(client: TestClient, jwks_seeded):
     priv = jwks_seeded
     token = _make_jwt(priv, kid="other-kid", email="x@example.com")

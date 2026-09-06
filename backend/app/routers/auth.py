@@ -16,8 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user_from_neon
-from app.models.profiles import Profile
+from app.deps import get_current_user_from_neon, get_or_create_profile
 from app.models.users import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -34,12 +33,7 @@ def me(
     if isinstance(result, JR):
         return result
     user: User = result
-    profile = db.get(Profile, user.id)
-    if profile is None:
-        profile = Profile(user_id=user.id, display_name=user.display_name, email=user.email)
-        db.add(profile)
-        db.commit()
-        db.refresh(profile)
+    profile = get_or_create_profile(db, user)
     return {
         "user": {
             "id": str(user.id),
