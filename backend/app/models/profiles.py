@@ -22,7 +22,7 @@ VERBOSITIES = ("concise", "balanced", "thorough")
 CITATIONS = ("always", "on request")
 RETENTIONS = ("forever", "1 year", "30 days", "session")
 SEMESTERS = ("", "1", "2", "3", "4", "5", "6", "7", "8")
-BRANCHES = ("", "CSE", "ECE", "EEE", "ME", "CE", "BT", "Other")
+BRANCHES = ("", "CSE", "ECE", "EEE", "ME", "CE", "BT", "Other", "CSE(Core)", "CSE(AI&ML)")
 CAMPUSES = ("", "RR", "EC")
 LANGUAGES = (
     "en-US", "en-GB", "hi", "kn", "ta", "te", "ml", "mr", "bn",

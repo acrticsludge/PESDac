@@ -24,24 +24,11 @@ export const SEMESTERS: { value: SemesterValue; label: string }[] = [
   { value: "8", label: "Semester 8" },
 ];
 
-export type BranchValue =
-  | ""
-  | "CSE"
-  | "ECE"
-  | "EEE"
-  | "ME"
-  | "CE"
-  | "BT"
-  | "Other";
+export type BranchValue = "" | "CSE(Core)" | "CSE(AI&ML)";
 export const BRANCHES: { value: BranchValue; label: string }[] = [
   { value: "", label: "Select branch" },
-  { value: "CSE", label: "Computer Science (CSE)" },
-  { value: "ECE", label: "Electronics & Communication (ECE)" },
-  { value: "EEE", label: "Electrical & Electronics (EEE)" },
-  { value: "ME", label: "Mechanical (ME)" },
-  { value: "CE", label: "Civil (CE)" },
-  { value: "BT", label: "Biotechnology (BT)" },
-  { value: "Other", label: "Other" },
+  { value: "CSE(Core)", label: "CSE (Core)" },
+  { value: "CSE(AI&ML)", label: "CSE (AI & ML)" },
 ];
 
 // D7: Institution became Campus with exactly 2 options. The

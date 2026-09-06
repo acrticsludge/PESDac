@@ -47,3 +47,12 @@ def test_profiles_rejects_bad_enum_unknown_key_bad_subject(client, auth_header):
     assert r.status_code == 200
     assert r.json()["subjects"] == ["CN", "DSA"]
     assert r.json()["campus"] == "RR"
+
+
+def test_profiles_accepts_cse_core_and_aiml_branches(client, auth_header):
+    client.headers.update(auth_header(email="b@example.com"))
+    for branch in ("CSE(Core)", "CSE(AI&ML)"):
+        r = client.patch("/api/v1/profiles/me", json={"branch": branch})
+        assert r.status_code == 200
+        assert r.json()["branch"] == branch
+    assert client.patch("/api/v1/profiles/me", json={"branch": "CSE(Bio)"}).status_code == 422
