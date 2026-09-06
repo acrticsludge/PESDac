@@ -13,5 +13,4 @@ def error_body(code: str, message: str, details: Any | None = None) -> dict:
 
 
 INTERNAL_ERROR = error_body("INTERNAL", "Something went wrong.")
-NOT_FOUND = error_body("NOT_FOUND", "Not found.")
 UNAUTHORIZED = error_body("UNAUTHORIZED", "Authentication required.")

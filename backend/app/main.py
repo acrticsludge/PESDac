@@ -5,6 +5,7 @@ envelope normalization for validation errors. No UI, no frontend changes.
 from __future__ import annotations
 
 import logging
+import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -13,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from app import config
 from app.routers import auth, chats, demo_state, health, profiles, users
-from app.schemas.common import INTERNAL_ERROR, error_body
+from app.schemas.common import error_body
 
 # Server-side visibility (the user only ever sees the generic envelope
 # below). Stdlib logging, no deps: uvicorn configures the root handler,
@@ -59,8 +60,17 @@ def create_app(validate: bool = True) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def _internal(request: Request, exc: Exception):
-        logger.exception("500 %s %s", request.method, request.url.path)
-        return JSONResponse(status_code=500, content=INTERNAL_ERROR)
+        # Generic by design (never leak internals), but quoted with a
+        # reference the server log carries: "what went wrong" is
+        # answerable by grepping the ref, without asking the user.
+        ref = uuid.uuid4().hex[:8]
+        logger.exception("500 %s %s ref=%s", request.method, request.url.path, ref)
+        return JSONResponse(
+            status_code=500,
+            content=error_body(
+                "INTERNAL", f"Something went wrong. Reference: {ref}."
+            ),
+        )
 
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")

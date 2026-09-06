@@ -27,7 +27,10 @@ export default function AppToasts({
     toastRef.current = toast;
     const onUnhandled = (event: PromiseRejectionEvent) => {
       console.error("Unhandled rejection:", event.reason);
-      toast({ body: "Something went wrong. Try again.", type: "error" });
+      toast({
+        body: "Something went wrong. Try again — if it keeps happening, reload the page.",
+        type: "error",
+      });
     };
     window.addEventListener("unhandledrejection", onUnhandled);
     return () => {

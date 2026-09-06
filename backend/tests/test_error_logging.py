@@ -38,3 +38,34 @@ def test_validation_error_logs_method_and_path(client, auth_header, caplog):
         r = client.post("/api/v1/chats", json={})
     assert r.status_code == 422
     assert any(m.startswith("422 ") for m in caplog.messages)
+
+
+def test_500_quotes_reference_shared_with_server_log(client, caplog):
+    import uuid
+
+    from fastapi.responses import JSONResponse
+
+    from app.main import create_app
+
+    crashing = create_app(validate=False)
+
+    @crashing.get("/boom")
+    def boom():
+        raise RuntimeError("kaboom")
+
+    from fastapi.testclient import TestClient
+
+    with caplog.at_level(logging.ERROR, logger="pesdac"):
+        with TestClient(crashing, raise_server_exceptions=False) as c:
+            r = c.get("/boom")
+    assert r.status_code == 500
+    message = r.json()["error"]["message"]
+    assert message.startswith("Something went wrong. Reference: ")
+    ref = message.removeprefix("Something went wrong. Reference: ").rstrip(".")
+    assert len(ref) == 8 and all(ch in "0123456789abcdef" for ch in ref)
+    # Same ref in the server log with the traceback; internals stay
+    # server-side (no "kaboom" in the user message).
+    assert "kaboom" not in message
+    assert any(f"ref={ref}" in m for m in caplog.messages)
+    assert str(uuid.UUID(int=int(ref, 16)))  # well-formed hex
+

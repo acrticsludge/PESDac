@@ -48,6 +48,11 @@ import { authClient } from "../../lib/neon-auth";
 // the column is clipped. 320 − 2×24 (page) − 2×16 (stacked inset)
 // = 240.
 const COLUMN_MIN_WIDTH = 240;
+
+// Mirrors Better Auth's default password minimum. The server is the
+// source of truth (its PASSWORD_TOO_SHORT still renders); this only
+// states the rule upfront and saves a round trip.
+const MIN_PASSWORD_LENGTH = 8;
 // repeat:'fit' (auto-fit) collapses the two columns to one —
 // expanding to fill — below 2×MIN + 32(gap) = 512px. The container
 // query reorders the image and tightens the inset at that same
@@ -206,6 +211,17 @@ export default function AuthLayout(props: AuthLayoutProps) {
       setError({ field: "password", message: "Enter your password." });
       return;
     }
+    // Neon rejects short passwords server-side (PASSWORD_TOO_SHORT) —
+    // state the rule upfront and enforce it here so signup never burns
+    // a round trip to learn it. 8 matches Better Auth's default minimum;
+    // if the project ever raises it, the server message still renders.
+    if (isSignup && password.length < MIN_PASSWORD_LENGTH) {
+      setError({
+        field: "password",
+        message: `Use at least ${MIN_PASSWORD_LENGTH} characters.`,
+      });
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -321,8 +337,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
     }
   }
 
-  // Every Astryx primitive reads its tokens from PESDacMockupTheme.
-  // The app pages get it from Pesdac.tsx; these standalone auth
+  // Every Astryx primitive reads its tokens from PESDacMockupTheme.  // The app pages get it from Pesdac.tsx; these standalone auth
   // pages mount it here so the card renders themed, not unstyled.
   return (
     <Theme theme={PESDacMockupTheme} mode="dark">
@@ -414,6 +429,11 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                   setError(null);
                                 }}
                                 size="lg"
+                                description={
+                                  isSignup
+                                    ? `At least ${MIN_PASSWORD_LENGTH} characters.`
+                                    : undefined
+                                }
                                 status={
                                   error?.field === "password"
                                     ? { type: "error", message: error.message }
