@@ -275,7 +275,7 @@ own, Apple, avatar upload, remember-me, password toggle, Playwright.
 ## Success Criteria
 
 1. Gate blocks all non-auth routes, undismissable, correct routing.
-2. `<AuthView>` round-trips signup/login/Google → `/new` with profile
+2. Auth form round-trips signup/login/Google → `/new` with profile
    complete (email/displayName/campus/sem/branch/subjects).
 3. Onboarding required, all four fields, save closes, never again.
 4. Logout clears Neon cookie; `DELETE /users/me` cascades; gate
