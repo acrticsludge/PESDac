@@ -34,8 +34,6 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { CheckCircleIcon } from "@heroicons/react/24/outline";
 import { SparklesIcon } from "@heroicons/react/24/outline";
-import { EyeIcon } from "@heroicons/react/24/outline";
-import { EyeSlashIcon } from "@heroicons/react/24/outline";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
@@ -165,7 +163,6 @@ export default function AuthLayout(props: AuthLayoutProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<FieldError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -426,7 +423,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 label="Password"
                                 isLabelHidden
                                 placeholder="Enter your password"
-                                type={showPassword ? "text" : "password"}
+                                type="password"
                                 value={password}
                                 onChange={(v: string) => {
                                   setPassword(v);
@@ -444,26 +441,8 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                     : undefined
                                 }
                               />
-                              {/* Show/hide toggle left, forgot link right
-                                  (signin only). TextInput has no clickable
-                                  end slot, so the toggle lives here as a
-                                  ghost button rather than custom chrome. */}
-                              <HStack vAlign="center" justify="between" width="100%">
-                                <Button
-                                  label={showPassword ? "Hide" : "Show"}
-                                  variant="ghost"
-                                  size="sm"
-                                  icon={
-                                    <Icon
-                                      icon={showPassword ? EyeSlashIcon : EyeIcon}
-                                      size="sm"
-                                    />
-                                  }
-                                  onClick={() =>
-                                    setShowPassword((v) => !v)
-                                  }
-                                />
-                                {!isSignup && (
+                              {!isSignup && (
+                                <VStack hAlign="end">
                                   <Link
                                     href="/login"
                                     size="sm"
@@ -476,8 +455,8 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                   >
                                     Forgot your password?
                                   </Link>
-                                )}
-                              </HStack>
+                                </VStack>
+                              )}
                             </VStack>
                           </VStack>
 
