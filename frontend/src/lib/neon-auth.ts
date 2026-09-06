@@ -64,14 +64,17 @@ export async function apiLogout(): Promise<void> {
  * response). Failures throw SDK-shaped errors (see sdkMessage).
  */
 export async function linkGoogleAccount(): Promise<void> {
+  // /link-social validates callbackURL as an absolute URL server-side
+  // (relative "/new" → ERR_INVALID_URL), so build it from the origin.
+  const origin = window.location.origin;
   const res = await fetch(`${url.replace(/\/+$/, "")}/link-social`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       provider: "google",
-      callbackURL: "/new",
-      errorCallbackURL: "/new?error=linking-failed",
+      callbackURL: `${origin}/new`,
+      errorCallbackURL: `${origin}/new?error=linking-failed`,
     }),
   });
   let parsed: unknown = null;
