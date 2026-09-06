@@ -38,6 +38,13 @@ export default function AuthGate() {
   ) {
     return null;
   }
+  // Social re-login with an email that already owns a password account
+  // lands here as /new?error=account_not_linked (Neon refuses silent
+  // auto-linking). Name the actual fix instead of the generic prompt.
+  const linkError =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("error") ===
+      "account_not_linked";
   return (
     <Dialog
       isOpen
@@ -59,10 +66,13 @@ export default function AuthGate() {
                 </Text>
               </HStack>
               <VStack gap={1}>
-                <Heading level={2}>Log in to continue</Heading>
+                <Heading level={2}>
+                  {linkError ? "Use your password to log in" : "Log in to continue"}
+                </Heading>
                 <Text type="supporting" color="secondary">
-                  Create a PESDac account to study with your course
-                  material. It takes a minute.
+                  {linkError
+                    ? "This email is registered with a password, and Google isn't linked to it yet. Log in with your email and password instead."
+                    : "Create a PESDac account to study with your course material. It takes a minute."}
                 </Text>
               </VStack>
               <VStack gap={2} hAlign="stretch">
