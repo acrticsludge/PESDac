@@ -142,22 +142,31 @@ def create_app(validate: bool = True) -> FastAPI:
 
 
 app = None
-try:
-    # Import-time creation is skipped when env is absent (tests build their own
-    # app via create_app(validate=False) with an SQLite override).
-    if config.DATABASE_URL and config.FRONTEND_ORIGINS:
+# T16: production must fail fast on invalid configuration. We only build
+# the validated `app` when ENV is set, the required config is present,
+# AND the validate_startup call succeeds. Tests build their own via
+# create_app(validate=False) with SQLite + dummy env; nothing here
+# silently boots a half-configured server.
+if (
+    config.ENV != "test"
+    and config.DATABASE_URL
+    and config.FRONTEND_ORIGINS
+    and config.BETTER_AUTH_URL
+    and config.BETTER_AUTH_SECRET
+):
+    try:
         app = create_app(validate=True)
-    else:
-        # Unvalidated boot (tests, or env missing entirely). With no
-        # FRONTEND_ORIGINS every CORS preflight 400s — this warning is
-        # the signal, not silent breakage.
+    except RuntimeError:
+        # Re-raise so the process exits with a meaningful trace. The
+        # previous "unvalidated fallback" boot was silently masking
+        # missing-config deployments behind a 500-ing server.
+        raise
+else:
+    # No env / test env: no module-level app. Uvicorn entry-points
+    # must run from a script that calls create_app(validate=...) with
+    # full config — never the import-time `app`.
+    if config.ENV not in ("test", None) and not config.DATABASE_URL:
         logger.warning(
-            "PESDac API booting WITHOUT validated env "
-            "(DATABASE_URL=%s, ORIGINS=%s)",
-            bool(config.DATABASE_URL),
-            config.FRONTEND_ORIGINS,
+            "PESDac API not built: missing DATABASE_URL. "
+            "Set ENV=test for tests, or supply DATABASE_URL."
         )
-        app = create_app(validate=False)
-except RuntimeError:
-    logger.warning("PESDac API misconfigured; booting unvalidated fallback")
-    app = create_app(validate=False)

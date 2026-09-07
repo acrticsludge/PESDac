@@ -51,6 +51,19 @@ def test_me_401_uses_envelope():
     assert "message" in body["error"]
 
 
+def test_link_password_route_is_registered(client):
+    """Keep the frontend/backend contract from regressing to a 404.
+
+    The route is intentionally checked on the assembled FastAPI application,
+    not only through a dependency-overridden request test. This catches a
+    router-prefix or include_router regression before it reaches the browser.
+    """
+    # FastAPI 0.1x can retain included routers as deferred route objects in
+    # `app.routes`; the generated OpenAPI is the stable assembled-app view.
+    paths = client.app.openapi()["paths"]
+    assert "post" in paths["/api/v1/auth/link-password"]
+
+
 # --- link-password ----------------------------------------------------------
 #
 # This proxy route forwards to BetterAuth's serverOnly setPassword

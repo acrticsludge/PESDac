@@ -69,6 +69,9 @@ DATABASE_URL: str | None = _get("DATABASE_URL")
 # BetterAuth configuration
 BETTER_AUTH_URL: str | None = _get("BETTER_AUTH_URL")
 BETTER_AUTH_SECRET: str | None = _get("BETTER_AUTH_SECRET")
+# Optional audience for JWT verification (T17). When unset the JWT
+# verifier accepts the absence of aud (BetterAuth's current default).
+BETTER_AUTH_AUDIENCE: str | None = _get("BETTER_AUTH_AUDIENCE")
 
 # Google OAuth (for reference, BetterAuth handles the actual OAuth)
 GOOGLE_CLIENT_ID: str | None = _get("GOOGLE_CLIENT_ID")
@@ -85,19 +88,35 @@ COOKIE_SECURE: bool = _get_bool("COOKIE_SECURE", True)
 
 
 def validate_startup(require_db: bool = True) -> None:
-    """Called by the app factory (and alembic env). Raises on misconfiguration."""
+    """Called by the app factory (and alembic env). Raises on misconfiguration.
+
+    Test builds pass `require_db=False` and skip required checks, but
+    production (`validate=True`) cannot start with missing values. ENV
+    must be explicit (set to "test" to enter test mode); production
+    refuses to boot when env vars are missing or conflict.
+    """
     errors: list[str] = []
+    if ENV not in ("dev", "staging", "prod", "test"):
+        errors.append("ENV must be one of dev/staging/prod/test")
     if require_db and not DATABASE_URL:
         errors.append("DATABASE_URL is required")
     if not BETTER_AUTH_URL:
         errors.append("BETTER_AUTH_URL is required")
     if not BETTER_AUTH_SECRET:
         errors.append("BETTER_AUTH_SECRET is required")
+    if len(BETTER_AUTH_SECRET) < 32:
+        errors.append("BETTER_AUTH_SECRET must be at least 32 characters")
     if not FRONTEND_ORIGINS:
         errors.append("FRONTEND_ORIGINS must list at least one origin")
     if not COOKIE_SECURE and any(
         o.startswith("https://") for o in FRONTEND_ORIGINS
     ):
         errors.append("COOKIE_SECURE=false with https origins is forbidden")
+    if ENV == "prod":
+        if not COOKIE_SECURE:
+            errors.append("COOKIE_SECURE=true is required in prod")
+        if not all(o.startswith("https://") for o in FRONTEND_ORIGINS):
+            errors.append("FRONTEND_ORIGINS must be https in prod")
     if errors:
+        # Never log the secret values themselves — only the category names.
         raise RuntimeError("Backend misconfigured: " + "; ".join(errors))

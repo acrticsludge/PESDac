@@ -31,11 +31,12 @@ export type AuthUser = {
 /**
  * Server profile row (GET/PATCH /profiles/me return the full row).
  * Only the fields the UI reads or writes are listed; the server may
- * return more (structural typing ignores extras).
+ * return more (structural typing ignores extras). T20: displayName /
+ * email are BetterAuth-owned identity fields; the PESDac profile API
+ * does not return them. Read them from AuthUser (useProfile/useAuth)
+ * and mutate them through BetterAuth's updateUser.
  */
 export type ServerProfile = {
-  displayName: string;
-  email: string;
   institution: string;
   semester: string;
   branch: string;
@@ -134,6 +135,28 @@ export function toUserMessage(error: unknown, fallback: string): string {
 export const AUTH_REQUIRED_EVENT = "pesdac:auth-required";
 
 /**
+ * Monotonic epoch that bumps on logout, deletion, and explicit 401
+ * handling. Listeners can compare to invalidate cached promises/data
+ * that belong to a previous user — without this, a stale profile/account
+ * fetch resolving after logout can repaint a logged-out shell with
+ * authenticated data (T13/T28).
+ */
+let authEpoch = 0;
+export function getAuthEpoch(): number {
+  return authEpoch;
+}
+export function bumpAuthEpoch(): void {
+  authEpoch += 1;
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(new CustomEvent("pesdac:auth-epoch"));
+    } catch {
+      // SSR / no-window fallback (only test harness reaches here).
+    }
+  }
+}
+
+/**
  * Reads the JSON embedded by `<InitialSession />` on the server.
  * Used by useAuth() so the first render already knows guest vs
  * authenticated, without waiting for /api/auth/get-session.
@@ -173,6 +196,21 @@ function readInitialSession(): SessionUser | null {
     initialSessionCache = null;
   }
   return initialSessionCache;
+}
+
+// Let callers observe epoch changes (e.g. hook into a re-render or test).
+export function useAuthEpoch(): number {
+  const [epoch, setEpoch] = useState(getAuthEpoch());
+  useEffect(() => {
+    const handler = () => setEpoch(getAuthEpoch());
+    window.addEventListener(AUTH_REQUIRED_EVENT, handler);
+    window.addEventListener("pesdac:auth-epoch", handler);
+    return () => {
+      window.removeEventListener(AUTH_REQUIRED_EVENT, handler);
+      window.removeEventListener("pesdac:auth-epoch", handler);
+    };
+  }, []);
+  return epoch;
 }
 
 // ---- useAuth ---------------------------------------------------------------
@@ -518,6 +556,11 @@ const API_ROOT = API_BASE_URL.replace(/\/+$/, "");
 // Hung backend must not hang the UI with no feedback: abort the request
 // and let toUserMessage render the connection copy (AbortError branch).
 const API_TIMEOUT_MS = 15000;
+// Token mint shares the same budget but with its own shorter timeout
+// (T2): the auth endpoint is small and authenticated, so a stalled mint
+// is the BetterAuth server being unreachable — different problem from
+// a slow downstream API.
+const TOKEN_TIMEOUT_MS = 8000;
 
 // Service token for the FastAPI backend: GET /api/auth/token mints a
 // short-lived JWT (15m server-side default) for the current session.
@@ -529,28 +572,66 @@ const AUTH_BASE = (import.meta.env.PUBLIC_BETTER_AUTH_URL ?? "").replace(
 );
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 let cachedToken: { token: string; at: number } | null = null;
+// In-flight dedupe: many simultaneous apiFetch callers share one mint.
+// Captured promise so caller-A's rejection doesn't trip caller-B.
+let inFlightToken: Promise<TokenResult> | null = null;
 
-async function getBackendToken(): Promise<string | null> {
+/** Outcome categories for getBackendToken — distinct enough that callers
+ *  can tell "confirmed guest" from "auth service down" from "aborted".
+ *  Backend endpoints never see a token from a confused service, but the
+ *  type is also useful for tests (we assert on the reason, not a string). */
+export type TokenReason =
+  | "ok"
+  | "missing-config"
+  | "network"
+  | "timeout"
+  | "http"
+  | "malformed";
+
+export type TokenResult =
+  | { reason: "ok"; token: string }
+  | { reason: Exclude<TokenReason, "ok"> };
+
+async function getBackendToken(): Promise<TokenResult> {
   if (cachedToken && Date.now() - cachedToken.at < TOKEN_TTL_MS) {
-    return cachedToken.token;
+    return { reason: "ok", token: cachedToken.token };
   }
   cachedToken = null;
-  if (!AUTH_BASE) return null;
+  if (!AUTH_BASE) return { reason: "missing-config" };
+  if (inFlightToken) return inFlightToken;
+  inFlightToken = mintBackendToken();
+  try {
+    const result = await inFlightToken;
+    return result;
+  } finally {
+    inFlightToken = null;
+  }
+}
+
+async function mintBackendToken(): Promise<TokenResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOKEN_TIMEOUT_MS);
   try {
     const res = await fetch(`${AUTH_BASE}/api/auth/token`, {
       credentials: "include",
+      signal: controller.signal,
     });
-    if (!res.ok) return null;
-    const data: unknown = await res.json();
+    if (!res.ok) return { reason: "http" };
+    const data: unknown = await res.json().catch(() => null);
     const token =
       typeof data === "object" && data !== null
         ? (data as { token?: unknown }).token
         : null;
-    if (typeof token !== "string" || !token) return null;
+    if (typeof token !== "string" || !token) return { reason: "malformed" };
     cachedToken = { token, at: Date.now() };
-    return token;
-  } catch {
-    return null;
+    return { reason: "ok", token };
+  } catch (err) {
+    if (typeof DOMException !== "undefined" && err instanceof DOMException && err.name === "AbortError") {
+      return { reason: "timeout" };
+    }
+    return { reason: "network" };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -559,6 +640,7 @@ export function clearAuthCache(): void {
   cachedToken = null;
   mePromise = null;
   accountsPromise = null;
+  bumpAuthEpoch();
 }
 
 export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
@@ -569,8 +651,17 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   // The FastAPI backend verifies a BetterAuth JWT (see app/deps.py), not
   // the session cookie — attach it when a session exists. Guests send no
   // header and get the usual 401 envelope below.
-  const token = await getBackendToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const tokenResult = await getBackendToken();
+  if (tokenResult.reason === "ok") {
+    headers.Authorization = `Bearer ${tokenResult.token}`;
+  } else if (tokenResult.reason !== "missing-config") {
+    // Auth service outage / timeout / malformed: drop cached token and
+    // signal a soft auth-required so the shell can stop pretending the
+    // session is fresh. We don't crash a fetch on a transient BetterAuth
+    // stall — the user gets the same envelope as a guest would, and the
+    // server still answers authoritatively for unauthenticated reads.
+    clearAuthCache();
+  }
   const body =
     init.body === undefined ? undefined : JSON.stringify(init.body);
 
@@ -601,8 +692,18 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
       // the next call re-proves itself, then notify the shell so it can
       // route to re-login — the gate alone can't see this state.
       clearAuthCache();
+      // Dispatch deduplicated: many simultaneous 401s only navigate once.
+      // Per T13 the shell already guards against re-entry; this is the
+      // belt to that suspenders so test infra can mock the listener.
       if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
+        if (!(window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched) {
+          (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = true;
+          window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
+          // Reset on next tick so subsequent distinct sessions can fire.
+          setTimeout(() => {
+            (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = false;
+          }, 0);
+        }
       }
       throw new AuthRequiredError(body);
     }
@@ -630,25 +731,38 @@ function isErrorBody(v: unknown): v is ApiErrorBody {
 
 // ---- Logout / delete -------------------------------------------------------
 
+/** Outcome categories for apiLogout — honest about which side
+ *  completed. Local state is ALWAYS cleared (gate reopens on next visit
+ *  regardless). Server revocation may fail; we never claim full
+ *  revocation if the backend call failed, but we still navigate. */
+export type LogoutOutcome =
+  | { kind: "ok" }
+  | { kind: "server-failed"; message: string };
+
 /**
- * Sign out everywhere: drop cached auth material, tell the backend
- * (204 no-op), then clear the BetterAuth session cookie. Either call
- * failing still converges — useSession flips to null once the cookie is
- * gone, and a stale cookie just 401s into the re-login flow.
+ * Sign out everywhere: drop cached auth material, attempt backend logout,
+ * then clear the BetterAuth session cookie. Every step is best-effort —
+ * we always clear local state regardless of outcome so the user lands
+ * on /login with no stale session hanging around. Backend/BetterAuth
+ * failures are recorded in the returned outcome but never block the
+ * local cleanup (per slice 15 + audit C5).
  */
-export async function apiLogout(): Promise<void> {
+export async function apiLogout(): Promise<LogoutOutcome> {
   clearAuthCache();
+  let serverFailed = false;
+  let message = "";
   try {
     await apiFetch<void>("/auth/logout", { method: "POST" });
-  } catch {
-    // Network is irrelevant for logout; the session gate re-opens anyway.
-    // Swallow.
+  } catch (e) {
+    serverFailed = true;
+    message = toUserMessage(e, "Couldn't tell the server you logged out.");
   }
   try {
     await authClient.signOut();
   } catch {
     // Session already gone server-side — nothing left to clear.
   }
+  return serverFailed ? { kind: "server-failed", message } : { kind: "ok" };
 }
 
 /**

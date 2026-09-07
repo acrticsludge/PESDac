@@ -210,23 +210,59 @@ export default function AuthLayout(props: AuthLayoutProps) {
       : undefined;
   }
 
+  // Google sign-in (T10). Promise ownership: we AWAIT the OAuth call so
+  // any rejection (invalid_client, redirect mismatch, network failure,
+  // popup blocked, cancelled by user) lands in our local try/catch and
+  // surfaces a typed message — instead of escaping to the global
+  // unhandled-rejection safety net as a generic toast. BetterAuth's
+  // redirectPlugin usually navigates the browser before the promise
+  // settles; the finally still runs so re-entry is safe, but the
+  // loading flag also stays set via the redirect in flight.
   async function handleGoogleSignIn() {
-    if (isGoogleLoading) return;
+    if (isGoogleLoading || isLoading) return;
     setIsGoogleLoading(true);
     setError(null);
     try {
-      // BetterAuth's redirectPlugin sets window.location.href inside the
-      // fetch promise, so React never gets a paint between setIsLoading
-      // and navigation. We surface feedback via the same state for a
-      // brief moment, then the browser takes over. The finally always
-      // resets the flag so re-entry is safe if the popup is blocked.
-      void signInWithGoogle();
+      await signInWithGoogle();
+      // BetterAuth's redirectPlugin triggers window.location.href
+      // navigation before this line; if we reach it, the call settled
+      // without redirecting (rare — popup blocked, server misconfigured).
     } catch (e: unknown) {
-      setError({
-        field: "form",
-        message:
-          e instanceof Error ? e.message : "Google sign-in failed. Try again.",
-      });
+      const raw = e instanceof Error ? e.message : "";
+      const haystack = `${raw}`.toLowerCase();
+      let message = "Google sign-in failed. Try again.";
+      if (
+        haystack.includes("invalid_client") ||
+        haystack.includes("client_id") ||
+        haystack.includes("oauth_client")
+      ) {
+        message = "Google sign-in isn't set up. Contact support.";
+      } else if (
+        haystack.includes("redirect_uri") ||
+        haystack.includes("redirect_mismatch")
+      ) {
+        message = "Google sign-in redirect was blocked. Try again.";
+      } else if (
+        haystack.includes("access_denied") ||
+        haystack.includes("user_cancelled") ||
+        haystack.includes("canceled") ||
+        haystack.includes("cancelled")
+      ) {
+        message = "Google sign-in was cancelled. Try again when you're ready.";
+      } else if (
+        haystack.includes("state") ||
+        haystack.includes("invalid_request") ||
+        haystack.includes("expired")
+      ) {
+        message = "Google sign-in link expired. Try again.";
+      } else if (
+        haystack.includes("network") ||
+        haystack.includes("failed to fetch") ||
+        haystack.includes("timeout")
+      ) {
+        message = "Couldn't reach Google. Check your connection and try again.";
+      }
+      setError({ field: "form", message });
     } finally {
       setIsGoogleLoading(false);
     }

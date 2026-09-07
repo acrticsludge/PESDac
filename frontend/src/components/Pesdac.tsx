@@ -585,16 +585,26 @@ export default function ShellSideNav({
         ? authState.user.email
         : "";
   // Account row Logout: sign out, then leave the app routes — the gate
-  // re-opens next visit.
-  // Failure toasts (F1) and stays: navigating away would hide the error.
-  // Per slice-12: isLoggingOut drives the row's label + isDisabled
-  // so the user sees a "Logging out…" affordance during the round trip.
+// // re-opens next visit. Local state ALWAYS clears (gate reopens on next
+// // visit regardless). Backend/BetterAuth revocation failures are reported
+// // back, but never block navigation — the user's session is dead as
+// // far as the UI cares, even if a stale cookie lingered.
   const handleLogout = async () => {
     if (isLoggingOut) return;
     setIsLoggingOut(true);
     try {
-      await apiLogout();
+      const outcome = await apiLogout();
+      if (outcome.kind === "server-failed") {
+        // Honest warning (F1 / T14): local session is gone but the
+        // server didn't confirm revocation. User-visible, not a silent
+        // success.
+        toastRef.current?.({
+          body: `${outcome.message} You can keep using the app; sign back in to clear this warning.`,
+          type: "info",
+        });
+      }
     } catch (error) {
+      // Local logout still happened; only surface the message.
       setIsLoggingOut(false);
       toastRef.current?.({
         body: toUserMessage(error, "Couldn't log you out. Try again."),
@@ -602,8 +612,6 @@ export default function ShellSideNav({
       });
       return;
     }
-    // No `finally { setIsLoggingOut(false) }` — the navigate below
-    // unmounts this view; leaving the flag true is harmless.
     navigate("/login");
   };
   // Added interaction state; the existing welcome/composer state remains intact.

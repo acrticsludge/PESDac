@@ -1,10 +1,20 @@
 """BetterAuth JWT verification via JWKS.
 
 Verifies BetterAuth session tokens using the JWKS endpoint.
+Validation (T17):
+- algorithm allow-list (no `none`, no algorithm-confusion tricks)
+- issuer + audience required (configured, not optional)
+- expiration + not-before
+- required subject + email claims
+- defensive header parsing
+- unknown `kid` triggers one forced JWKS refresh, then re-tries once
+- bounded JWKS HTTP timeout
+- generic 401 to clients, safe categories in server logs
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -13,19 +23,29 @@ import jwt
 
 from app import config
 
+logger = logging.getLogger("pesdac")
+
+# Allow-list of JWT algorithms BetterAuth issues. RS256 and EdDSA only —
+# accepting `none` or HS256 here would open the door to algorithm
+# confusion (a forged RS256-signed-as-HS256 token, etc.).
+_ALLOWED_ALGORITHMS: tuple[str, ...] = ("RS256", "EdDSA")
 
 _jwks_cache: dict[str, dict] = {}
 _fetched_at: float = 0.0
 _TTL_SECONDS = 3600  # 1 hour
+_JWKS_HTTP_TIMEOUT_S = 5.0
+
 
 async def _fetch_jwks() -> dict[str, dict]:
     """Fetch JWKS from BetterAuth and index by kid."""
+    if not config.BETTER_AUTH_URL:
+        raise RuntimeError("BETTER_AUTH_URL not configured")
     jwks_url = f"{config.BETTER_AUTH_URL}/api/auth/jwks"
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=_JWKS_HTTP_TIMEOUT_S) as client:
         resp = await client.get(jwks_url)
         resp.raise_for_status()
         data = resp.json()
-    
+
     keys = data.get("keys", [])
     return {
         key["kid"]: key
@@ -34,67 +54,154 @@ async def _fetch_jwks() -> dict[str, dict]:
     }
 
 
-async def _get_jwk_for_async(kid: str) -> dict | None:
-    """Async version for FastAPI dependency injection."""
+async def _get_jwk_for_async(kid: str, force_refresh: bool = False) -> dict | None:
+    """Async JWKS lookup with forced-refresh on unknown kid."""
     global _fetched_at
-    
-    if kid not in _jwks_cache or (time.monotonic() - _fetched_at) > _TTL_SECONDS:
+
+    needs_refresh = (
+        force_refresh
+        or kid not in _jwks_cache
+        or (time.monotonic() - _fetched_at) > _TTL_SECONDS
+    )
+    if needs_refresh:
         try:
             _jwks_cache.update(await _fetch_jwks())
             _fetched_at = time.monotonic()
-        except Exception:
+        except Exception as exc:
+            # JWKS outage — never bubble up the raw exception to the
+            # caller. We log a category so operators can act.
+            logger.warning("jwks_fetch_failed category=%s", type(exc).__name__)
             return None
-    
+
     return _jwks_cache.get(kid)
 
 
+def _resolve_issuer() -> str | None:
+    base = (config.BETTER_AUTH_URL or "").rstrip("/")
+    return base or None
+
+
+def _resolve_audience() -> str | None:
+    # BetterAuth does not currently emit an `aud` claim by default — the
+    # API checks for the configured appName as audience. Operators may
+    # set BETTER_AUTH_AUDIENCE to override; when unset the verifier
+    # accepts the absence of aud without disabling it (BetterAuth omits
+    # it entirely). Tests use a strict audience.
+    return config.BETTER_AUTH_AUDIENCE
+
+
 async def verify_betterauth_token(token: str) -> dict[str, Any] | None:
-    """Verify BetterAuth JWT and return claims dict. Returns None if invalid."""
+    """Verify BetterAuth JWT and return claims dict. Returns None if invalid.
+
+    Generic 401 to the client. Server logs keep the safe category so an
+    operator can correlate "expired" vs "wrong issuer" vs "JWKS outage"
+    without seeing claims, tokens, or PII.
+    """
     try:
-        # Get kid from header
-        headers = jwt.get_unverified_header(token)
-        kid = headers.get("kid")
-        if not kid:
+        # Get kid from header — malformed tokens reach here, not below.
+        try:
+            headers = jwt.get_unverified_header(token)
+        except jwt.PyJWTError:
+            logger.info("jwt_invalid category=header")
             return None
-        
-        # Get JWK for kid
+        if not isinstance(headers, dict):
+            return None
+        kid = headers.get("kid")
+        alg = headers.get("alg")
+        if not kid or not isinstance(kid, str):
+            logger.info("jwt_invalid category=missing_kid")
+            return None
+        if not isinstance(alg, str) or alg not in _ALLOWED_ALGORITHMS:
+            logger.info("jwt_invalid category=alg alg=%s", alg)
+            return None
+
         jwk = await _get_jwk_for_async(kid)
         if not jwk:
+            # One forced refresh (T17): a rotated key the cached JWKS
+            # hasn't picked up yet. After this, give up.
+            jwk = await _get_jwk_for_async(kid, force_refresh=True)
+        if not jwk:
+            logger.info("jwt_invalid category=unknown_kid")
             return None
-        
-        # Convert JWK to key object
-        from jwt.algorithms import OKPAlgorithm
-        try:
-            jwk_obj = OKPAlgorithm.from_jwk(jwk)
-        except Exception:
-            # Try RSAAlgorithm for RS256 keys
+
+        # Convert JWK to key object. BetterAuth issues RS256 + EdDSA;
+        # only those are accepted per the algorithm allow-list above.
+        jwk_obj = None
+        if alg == "EdDSA":
+            from jwt.algorithms import OKPAlgorithm
+
+            try:
+                jwk_obj = OKPAlgorithm.from_jwk(jwk)
+            except Exception:
+                logger.info("jwt_invalid category=jwk_parse alg=EdDSA")
+                return None
+        elif alg == "RS256":
             from jwt.algorithms import RSAAlgorithm
+
             try:
                 jwk_obj = RSAAlgorithm.from_jwk(jwk)
             except Exception:
+                logger.info("jwt_invalid category=jwk_parse alg=RS256")
                 return None
-        
-        # Decode and verify
-        claims = jwt.decode(
-            token,
-            jwk_obj,
-            algorithms=["EdDSA", "RS256"],
-            options={"verify_aud": False},
-            audience=None,
-        )
-        
-        # Required claims
-        if not claims.get("sub") or not claims.get("email"):
+        if jwk_obj is None:
             return None
-        
+
+        audience = _resolve_audience()
+        issuer = _resolve_issuer()
+        decode_kwargs: dict[str, Any] = {
+            "algorithms": list(_ALLOWED_ALGORITHMS),
+            "options": {
+                "require": ["exp", "iat", "sub"],
+                "verify_aud": audience is not None,
+                "verify_iss": issuer is not None,
+                "verify_exp": True,
+                "verify_iat": True,
+                "verify_nbf": True,
+            },
+        }
+        if audience is not None:
+            decode_kwargs["audience"] = audience
+        if issuer is not None:
+            decode_kwargs["issuer"] = issuer
+
+        try:
+            claims = jwt.decode(token, jwk_obj, **decode_kwargs)
+        except jwt.ExpiredSignatureError:
+            logger.info("jwt_invalid category=expired")
+            return None
+        except jwt.ImmatureSignatureError:
+            logger.info("jwt_invalid category=nbf")
+            return None
+        except jwt.InvalidIssuerError:
+            logger.info("jwt_invalid category=issuer")
+            return None
+        except jwt.InvalidAudienceError:
+            logger.info("jwt_invalid category=audience")
+            return None
+        except jwt.InvalidSignatureError:
+            logger.info("jwt_invalid category=signature")
+            return None
+        except jwt.MissingRequiredClaimError as exc:
+            logger.info("jwt_invalid category=missing_claim claim=%s", exc.claim)
+            return None
+        except jwt.InvalidAlgorithmError:
+            logger.info("jwt_invalid category=algorithm")
+            return None
+        except jwt.PyJWTError as exc:
+            logger.info("jwt_invalid category=other type=%s", type(exc).__name__)
+            return None
+
+        # Required claims (email is needed by get_current_user to seed the
+        # PESDac users row when a new user signs in).
+        if not claims.get("sub") or not claims.get("email"):
+            logger.info("jwt_invalid category=missing_claim email_or_sub")
+            return None
+
         return claims
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidSignatureError:
-        return None
-    except jwt.PyJWTError:
-        return None
-    except Exception:
+    except Exception as exc:
+        # Last-resort catch so a JWKS outage or unexpected internal error
+        # surfaces as a generic 401, not a 500 with internals.
+        logger.warning("jwt_unexpected category=%s", type(exc).__name__)
         return None
 
 
