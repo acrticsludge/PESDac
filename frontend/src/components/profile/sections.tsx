@@ -27,7 +27,6 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
-import { Banner } from "@astryxdesign/core/Banner";
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Divider } from "@astryxdesign/core/Divider";
 import {
@@ -241,9 +240,10 @@ export function IdentitySection() {
   // Identity fields synced to the server row (auth audit G1/G11):
   // campus/semester/branch live in the backend profile; the local store
   // mirrors for instant UI. Writes go to the server first — on failure
-  // the local edit is reverted and a Banner names it, so the two can
-  // never silently diverge. Campus writes both `campus` and the legacy
-  // `institution` key to the same value so readers of either agree.
+  // the local edit is reverted and the inline saveError names it, so
+  // the two can never silently diverge. Campus writes both `campus` and
+  // the legacy `institution` key to the same value so readers of
+  // either agree.
   async function saveIdentity(
     patch: Record<string, string>,
     local: { institution?: string; semester?: string; branch?: string },
@@ -285,18 +285,10 @@ export function IdentitySection() {
         </VStack>
       </HStack>
       {deleteNotice != null && (
-        <Banner
-          status="error"
-          title="Account deletion"
-          description={deleteNotice}
-        />
+        <Text type="supporting">{deleteNotice}</Text>
       )}
       {saveError != null && (
-        <Banner
-          status="error"
-          title="Couldn't save your profile"
-          description={saveError}
-        />
+        <Text type="supporting">{saveError}</Text>
       )}
       <SettingsCard title="Identity">
         <CardRows>
@@ -1029,11 +1021,7 @@ export function PrivacySection() {
         </CardRows>
       </SettingsCard>
       {serverError != null && (
-        <Banner
-          status="error"
-          title="Couldn't reach the server"
-          description={serverError}
-        />
+        <Text type="supporting">{serverError}</Text>
       )}
       <SettingsCard title="Your data">
         <CardRows>
@@ -1186,6 +1174,16 @@ export function AuthenticationSection() {
   const [linkNewPassword, setLinkNewPassword] = useState("");
   const [linkConfirmPassword, setLinkConfirmPassword] = useState("");
   const [isLinkingPassword, setIsLinkingPassword] = useState(false);
+  // Inline status for the link form: the `New password` field shows
+  // the length error (per-field), the form-level Text shows the
+  // mismatch + server error (no specific field).
+  const [linkFieldError, setLinkFieldError] = useState<string | null>(null);
+  const [linkFormError, setLinkFormError] = useState<string | null>(null);
+  // Same split for the change-password form: `Current password` and
+  // `New password` can both carry field-level status, the form-level
+  // Text catches the server error.
+  const [changeFieldError, setChangeFieldError] = useState<string | null>(null);
+  const [changeFormError, setChangeFormError] = useState<string | null>(null);
   // Post-mutation override: the session cookie cache can lag the fresh
   // 2FA flag, so the UI trusts its own confirmed writes first.
   const [twoFactorOn, setTwoFactorOn] = useState<boolean | null>(null);
@@ -1297,18 +1295,19 @@ export function AuthenticationSection() {
 
   async function handleChangePassword() {
     if (isChangingPassword) return;
+    setChangeFieldError(null);
+    setChangeFormError(null);
     if (!currentPassword) {
-      setAuthError("Enter your current password.");
+      setChangeFieldError("Enter your current password.");
       return;
     }
     if (newPassword.length < MIN_PASSWORD_LENGTH) {
-      setAuthError(
+      setChangeFieldError(
         `The new password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
       );
       return;
     }
     setIsChangingPassword(true);
-    setAuthError(null);
     setPasswordDone(false);
     try {
       await changePassword(currentPassword, newPassword);
@@ -1317,7 +1316,7 @@ export function AuthenticationSection() {
       setShowPasswordForm(false);
       setPasswordDone(true);
     } catch (e) {
-      setAuthError(toUserMessage(e, "Couldn't change your password. Try again."));
+      setChangeFormError(toUserMessage(e, "Couldn't change your password. Try again."));
     } finally {
       setIsChangingPassword(false);
     }
@@ -1329,18 +1328,19 @@ export function AuthenticationSection() {
   // so a bad length never costs a round trip.
   async function handleLinkPassword() {
     if (isLinkingPassword) return;
+    setLinkFieldError(null);
+    setLinkFormError(null);
     if (linkNewPassword.length < MIN_PASSWORD_LENGTH) {
-      setAuthError(
+      setLinkFieldError(
         `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
       );
       return;
     }
     if (linkNewPassword !== linkConfirmPassword) {
-      setAuthError("Passwords don't match.");
+      setLinkFormError("Passwords don't match.");
       return;
     }
     setIsLinkingPassword(true);
-    setAuthError(null);
     try {
       await linkPassword(linkNewPassword);
       setLinkNewPassword("");
@@ -1348,7 +1348,7 @@ export function AuthenticationSection() {
       setShowLinkPasswordForm(false);
       toast({ body: "Email + password linked.", type: "info" });
     } catch (e) {
-      setAuthError(toUserMessage(e, "Couldn't link password. Try again."));
+      setLinkFormError(toUserMessage(e, "Couldn't link password. Try again."));
     } finally {
       setIsLinkingPassword(false);
     }
@@ -1439,7 +1439,8 @@ export function AuthenticationSection() {
                   isDisabled={anyPending}
                   onClick={() => {
                     setShowLinkPasswordForm((v) => !v);
-                    setAuthError(null);
+                    setLinkFieldError(null);
+                    setLinkFormError(null);
                   }}
                 />
               }
@@ -1458,7 +1459,8 @@ export function AuthenticationSection() {
                   isDisabled={anyPending}
                   onClick={() => {
                     setShowPasswordForm((v) => !v);
-                    setAuthError(null);
+                    setChangeFieldError(null);
+                    setChangeFormError(null);
                     setPasswordDone(false);
                   }}
                 />
@@ -1476,6 +1478,11 @@ export function AuthenticationSection() {
               placeholder="Your current password"
               value={currentPassword}
               onChange={setCurrentPassword}
+              status={
+                changeFieldError != null
+                  ? { type: "error", message: changeFieldError }
+                  : undefined
+              }
             />
             <TextInput
               label="New password"
@@ -1485,19 +1492,28 @@ export function AuthenticationSection() {
               value={newPassword}
               onChange={setNewPassword}
             />
+            {changeFormError != null && (
+              <Text type="supporting">{changeFormError}</Text>
+            )}
             <HStack gap={2}>
               <Button
                 label="Save new password"
                 variant="primary"
                 size="sm"
                 isLoading={isChangingPassword}
-                onClick={() => void handleChangePassword()}
+                isDisabled={isChangingPassword}
+                clickAction={() => void handleChangePassword()}
               />
               <Button
                 label="Cancel"
                 variant="secondary"
                 size="sm"
-                onClick={() => setShowPasswordForm(false)}
+                isDisabled={isChangingPassword}
+                onClick={() => {
+                  setShowPasswordForm(false);
+                  setChangeFieldError(null);
+                  setChangeFormError(null);
+                }}
               />
             </HStack>
           </VStack>
@@ -1517,6 +1533,11 @@ export function AuthenticationSection() {
               description={`At least ${MIN_PASSWORD_LENGTH} characters`}
               value={linkNewPassword}
               onChange={setLinkNewPassword}
+              status={
+                linkFieldError != null
+                  ? { type: "error", message: linkFieldError }
+                  : undefined
+              }
             />
             <TextInput
               label="Confirm new password"
@@ -1525,6 +1546,7 @@ export function AuthenticationSection() {
               value={linkConfirmPassword}
               onChange={setLinkConfirmPassword}
             />
+            {linkFormError != null && <Text type="supporting">{linkFormError}</Text>}
             <HStack gap={2}>
               <Button
                 label="Link password"
@@ -1532,7 +1554,7 @@ export function AuthenticationSection() {
                 size="sm"
                 isLoading={isLinkingPassword}
                 isDisabled={isLinkingPassword}
-                onClick={() => void handleLinkPassword()}
+                clickAction={() => void handleLinkPassword()}
               />
               <Button
                 label="Cancel"
@@ -1543,6 +1565,8 @@ export function AuthenticationSection() {
                   setShowLinkPasswordForm(false);
                   setLinkNewPassword("");
                   setLinkConfirmPassword("");
+                  setLinkFieldError(null);
+                  setLinkFormError(null);
                 }}
               />
             </HStack>
@@ -1598,7 +1622,7 @@ export function AuthenticationSection() {
         <Text type="body">Password changed.</Text>
       )}
       {authError != null && (
-        <Banner status="error" title="Authentication error" description={authError} />
+        <Text type="supporting">{authError}</Text>
       )}
       <Text type="supporting" color="secondary">
         Auth settings are powered by BetterAuth. Email + password sign-in works alongside Google.
