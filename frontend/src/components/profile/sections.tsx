@@ -29,7 +29,6 @@ import { CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Divider } from "@astryxdesign/core/Divider";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import {
   UserIcon,
   EnvelopeIcon,
@@ -66,6 +65,10 @@ import {
   CAMPUSES,
   SEMESTERS,
 } from "../../lib/profile-options";
+import {
+  SkeletonCard,
+  SkeletonIdentityHeader,
+} from "./SkeletonBlock";
 
 export type ProfileTab =
   | "profile"
@@ -291,6 +294,19 @@ export function IdentitySection() {
 
   return (
     <VStack gap={5}>
+      {/* Identity header + Identity card depend on the server /auth/me
+          fetch (or, while it loads, on the BetterAuth session). While
+          both are still resolving we render skeletons so the dialog
+          never flashes an empty avatar + "Your name" placeholder. */}
+      {auth.status === "loading" ||
+      serverProfile.status === "loading" ? (
+        <>
+          <SkeletonIdentityHeader />
+          <SkeletonCard title="Identity" rows={5} />
+          <SkeletonCard rows={1} />
+        </>
+      ) : (
+      <>
       <HStack gap={3} vAlign="center">
         <Avatar
           name={displayName || email || "?"}
@@ -512,6 +528,8 @@ export function IdentitySection() {
           }
         />
       </Dialog>
+      </>
+      )}
     </VStack>
   );
 }
@@ -1017,6 +1035,19 @@ export function PrivacySection() {
     if (loggedIn) toast({ body: "All chats deleted.", type: "info" });
   }
 
+  // Privacy depends on auth.status to decide between server export and
+  // local dump. During the loading window we don't know which to render
+  // — show a skeleton card so the export/clear buttons don't briefly
+  // appear, then disappear once auth resolves.
+  if (auth.status === "loading") {
+    return (
+      <VStack gap={5} aria-busy="true">
+        <SkeletonCard title="History" rows={1} />
+        <SkeletonCard title="Your data" rows={2} />
+      </VStack>
+    );
+  }
+
   return (
     <VStack gap={5}>
       <SettingsCard title="History">
@@ -1395,26 +1426,34 @@ export function AuthenticationSection() {
     }
   }
 
+  if (accounts.status === "loading") {
+    // While linked-accounts + 2FA flag are still resolving we don't
+    // know which rows apply (Google link, 2FA, credential password) —
+    // a fixed three-row skeleton keeps the dialog from flashing an
+    // "Unlink" button on a Google-only account or vice-versa.
+    return (
+      <VStack gap={5} aria-busy="true">
+        <SkeletonCard title="Authentication" rows={3} />
+      </VStack>
+    );
+  }
+
   return (
     <VStack gap={5}>
-      <SettingsCard title="Authentication">
+<SettingsCard title="Authentication">
         <CardRows>
           <SettingsRow
             title="Google account"
             description={
-              accounts.status === "loading"
-                ? "Checking linked sign-in methods..."
-                : googleAccount != null
+              googleAccount != null
                 ? "Signed in with Google."
                 : accounts.status === "error"
                   ? "Couldn't load link status."
                   : "Sign in and link with your Google account."
             }
             icon={GlobeAltIcon}
-            control={
-              accounts.status === "loading" ? (
-                <Skeleton width={96} height={32} />
-              ) : googleAccount != null ? (
+control={
+              googleAccount != null ? (
                 canUnlink ? (
                   <Button
                     label="Unlink"
