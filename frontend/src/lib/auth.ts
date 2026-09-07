@@ -95,22 +95,24 @@ export class AuthRequiredError extends ApiError {
  * nothing to users, so map it to connection copy. Same for an
  * AbortError from the apiFetch timeout below.
  *
- * 404 has its own copy: a stale backend (route not registered yet)
- * shows up as "Not Found", which is useless. Tell the user it's a
- * server-version thing they can fix by restarting it. 5xx gets a
- * generic "server hit an error" so the user doesn't get a stack
- * trace-shaped message.
+ * Status code mapping (per slice 15):
+ * - 404: the URL the frontend asked for doesn't exist on the server.
+ *   The user can't fix this and shouldn't be told to "restart the
+ *   server" (they don't have access). Tell them to try again later;
+ *   the operator's 404 surfaces in the server log.
+ * - 5xx: server error. Same user-safe copy. The ref ID is logged
+ *   server-side for the operator; the client never sees it.
+ * - Other 4xx: server-authored user-safe message if it has one,
+ *   else the fallback.
  */
 export function toUserMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.status === 404) {
-      return "That action isn't available. Restart the server and try again.";
+      return "That didn't work. Please try again later.";
     }
     if (error.status >= 500) {
-      return "The server hit an error. Try again in a moment.";
+      return "That didn't work on our end. Please try again later.";
     }
-    // 4xx (other than 401, which is AuthRequiredError): server's
-    // user-safe message if it has one, else the fallback.
     return error.message && error.message !== "Not Found"
       ? error.message
       : fallback;
