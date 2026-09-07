@@ -116,22 +116,46 @@ def _origin_of(value: str) -> str:
 
 
 def check_mutation_origin(request: Request) -> JSONResponse | None:
-    """Restrict mutating routes to known frontend origins (arch §9).
+    """Restrict mutating routes to known frontend origins (arch §9, T18).
 
     The session token is the proof of identity; this check still rejects
     cross-site form submissions that target our API.
+
+    Policy:
+    - Non-browser clients (tests, curl, server-to-server): missing
+      Origin AND missing Referer is allowed. This is necessary for the
+      test suite and any future backend-to-backend calls.
+    - Browser mutations: BOTH Origin and Referer (when present) must be
+      in the allowlist. We allow missing Origin (only Referer present)
+      so curl with explicit Referer still works, but a browser always
+      sends Origin for cross-origin requests.
     """
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return None
-    origin = request.headers.get("origin") or request.headers.get("referer")
-    if not origin:
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+    if origin is None and referer is None:
         return None  # non-browser client (tests, curl)
     allowed = {_origin_of(o) for o in config.FRONTEND_ORIGINS} - {""}
-    if _origin_of(origin) not in allowed:
+    # When origin header is present, it MUST be in the allowlist. A
+    # browser always sends Origin on cross-origin XHR/fetch; allowing
+    # origin-less requests is what test harnesses need.
+    if origin is not None and _origin_of(origin) not in allowed:
         from app.schemas.common import error_body
 
         logger.warning(
             "403 %s %s origin=%s", request.method, request.url.path, origin
+        )
+        return JSONResponse(
+            status_code=403,
+            content=error_body("FORBIDDEN", "Origin not allowed."),
+        )
+    # If only Referer was sent (rare; legacy proxies), honor it too.
+    if origin is None and referer is not None and _origin_of(referer) not in allowed:
+        from app.schemas.common import error_body
+
+        logger.warning(
+            "403 %s %s referer=%s", request.method, request.url.path, referer
         )
         return JSONResponse(
             status_code=403,

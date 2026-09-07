@@ -1,6 +1,7 @@
 "use client";
 
 import Pesdac from "../Pesdac";
+import AppErrorBoundary from "../AppErrorBoundary";
 
 export default function AppLayout({
   initialSubject,
@@ -12,10 +13,12 @@ export default function AppLayout({
   initialView?: "chat" | "profile";
 } = {}) {
   return (
-    <Pesdac
-      initialSubject={initialSubject}
-      initialCode={initialCode}
-      initialView={initialView}
-    />
+    <AppErrorBoundary>
+      <Pesdac
+        initialSubject={initialSubject}
+        initialCode={initialCode}
+        initialView={initialView}
+      />
+    </AppErrorBoundary>
   );
 }

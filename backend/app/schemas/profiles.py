@@ -22,8 +22,6 @@ def _text(max_len: int):
 
 
 class ProfileOut(BaseModel):
-    displayName: str = ""
-    email: str = ""
     institution: str = ""
     semester: str = ""
     branch: str = ""
@@ -50,8 +48,9 @@ class ProfileOut(BaseModel):
 class ProfilePatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    displayName: str | None = None
-    email: str | None = None
+    # T20: displayName + email are BetterAuth-owned identity fields.
+    # Removed from the PESDac profile schema — the frontend must use
+    # BetterAuth's updateUser for those, never PATCH /profiles/me.
     institution: str | None = None
     semester: str | None = None
     branch: str | None = None
@@ -74,8 +73,6 @@ class ProfilePatch(BaseModel):
     shortcutCancel: bool | None = None
     shortcutFocus: bool | None = None
 
-    _t80 = field_validator("displayName", mode="before")(lambda cls, v: v if v is None else _text(80)(cls, v))
-    _t254 = field_validator("email", mode="before")(lambda cls, v: v if v is None else _text(254)(cls, v))
     _t120a = field_validator("institution", "examMonth", mode="before")(
         lambda cls, v: v if v is None else _text(120)(cls, v)
     )
@@ -184,9 +181,8 @@ class ProfilePatch(BaseModel):
 
 
 # model field <-> API (camelCase) mapping; single source for to/out + patch apply.
+# T20: displayName + email intentionally omitted — BetterAuth owns identity.
 PROFILE_FIELDS: tuple[tuple[str, str], ...] = (
-    ("display_name", "displayName"),
-    ("email", "email"),
     ("institution", "institution"),
     ("semester", "semester"),
     ("branch", "branch"),
