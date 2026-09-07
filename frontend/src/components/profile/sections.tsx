@@ -1402,7 +1402,9 @@ export function AuthenticationSection() {
           <SettingsRow
             title="Google account"
             description={
-              googleAccount != null
+              accounts.status === "loading"
+                ? "Checking linked sign-in methods..."
+                : googleAccount != null
                 ? "Signed in with Google."
                 : accounts.status === "error"
                   ? "Couldn't load link status."
