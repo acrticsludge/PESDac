@@ -194,11 +194,10 @@ export function IdentitySection() {
   const auth = useAuth();
   const serverProfile = useProfile();
   const profile = getProfile();
+  const toast = useToast();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSavingIdentity, setIsSavingIdentity] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   // TODO(BetterAuth): email + displayName are account-owned — read-only
   // when authenticated. Logged out the local store remains editable.
   // Server row wins; while it loads, the session name/email stand in so
@@ -217,21 +216,26 @@ export function IdentitySection() {
   // /signup for a fresh start.
   async function handleDeleteAccount() {
     setIsDeleting(true);
-    setDeleteNotice(null);
     try {
       const { fallback } = await apiDeleteAccount();
       setIsDeleting(false);
       setConfirmingDelete(false);
       if (fallback) {
-        setDeleteNotice(
-          "Deletion was incomplete — your sign-in is gone but some " +
+        toast({
+          body:
+            "Deletion was incomplete — your sign-in is gone but some " +
             "PESDac data may remain. Contact support to finish deletion.",
-        );
+          type: "error",
+        });
         return;
       }
     } catch (error) {
       setIsDeleting(false);
-      setDeleteNotice(toUserMessage(error, "Couldn't delete your account. Try again."));
+      setConfirmingDelete(false);
+      toast({
+        body: toUserMessage(error, "Couldn't delete your account. Try again."),
+        type: "error",
+      });
       return;
     }
     navigate("/signup");
@@ -240,7 +244,7 @@ export function IdentitySection() {
   // Identity fields synced to the server row (auth audit G1/G11):
   // campus/semester/branch live in the backend profile; the local store
   // mirrors for instant UI. Writes go to the server first — on failure
-  // the local edit is reverted and the inline saveError names it, so
+  // the local edit is reverted and an error Toast names it, so
   // the two can never silently diverge. Campus writes both `campus` and
   // the legacy `institution` key to the same value so readers of
   // either agree.
@@ -251,7 +255,6 @@ export function IdentitySection() {
     if (isSavingIdentity) return;
     const prev = getProfile();
     updateProfile(local);
-    setSaveError(null);
     setIsSavingIdentity(true);
     try {
       await apiUpdateProfile(patch);
@@ -261,7 +264,10 @@ export function IdentitySection() {
         semester: prev.semester,
         branch: prev.branch,
       });
-      setSaveError(toUserMessage(error, "Couldn't save. Try again."));
+      toast({
+        body: toUserMessage(error, "Couldn't save. Try again."),
+        type: "error",
+      });
     } finally {
       setIsSavingIdentity(false);
     }
@@ -284,12 +290,6 @@ export function IdentitySection() {
           </Text>
         </VStack>
       </HStack>
-      {deleteNotice != null && (
-        <Text type="supporting">{deleteNotice}</Text>
-      )}
-      {saveError != null && (
-        <Text type="supporting">{saveError}</Text>
-      )}
       <SettingsCard title="Identity">
         <CardRows>
           <SettingsRow
@@ -943,7 +943,6 @@ export function PrivacySection() {
   const auth = useAuth();
   const profile = getProfile();
   const [confirmingClear, setConfirmingClear] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isClearingAll, setIsClearingAll] = useState(false);
   const loggedIn = auth.status === "authenticated";
@@ -954,10 +953,11 @@ export function PrivacySection() {
   // F2: server export when logged in, local dump when logged out.
   // Per slice-12 toast policy: one success Toast once the download
   // begins; the spinner sits on the button while the server is hit.
+  // Errors are toasts — the only stable state across the success/fail
+  // surface is the button's `isLoading` + `isDisabled`, not a card.
   async function handleExport() {
     if (isExporting) return;
     setIsExporting(true);
-    setServerError(null);
     try {
       const data = loggedIn
         ? await apiFetch<Record<string, unknown>>("/users/me/export")
@@ -965,7 +965,10 @@ export function PrivacySection() {
       downloadJson("pesdac-data.json", data);
       toast({ body: "Your data export is ready.", type: "info" });
     } catch (error) {
-      setServerError(toUserMessage(error, "Export failed. Try again."));
+      toast({
+        body: toUserMessage(error, "Export failed. Try again."),
+        type: "error",
+      });
     } finally {
       setIsExporting(false);
     }
@@ -980,14 +983,14 @@ export function PrivacySection() {
   async function handleClearAll() {
     if (isClearingAll) return;
     setIsClearingAll(true);
-    setServerError(null);
     if (loggedIn) {
       try {
         await apiFetch<unknown>("/chats", { method: "DELETE" });
       } catch (error) {
-        setServerError(
-          toUserMessage(error, "Couldn't delete chats. Try again."),
-        );
+        toast({
+          body: toUserMessage(error, "Couldn't delete chats. Try again."),
+          type: "error",
+        });
         setIsClearingAll(false);
         return;
       }
@@ -1020,9 +1023,6 @@ export function PrivacySection() {
           />
         </CardRows>
       </SettingsCard>
-      {serverError != null && (
-        <Text type="supporting">{serverError}</Text>
-      )}
       <SettingsCard title="Your data">
         <CardRows>
           <SettingsRow
@@ -1187,7 +1187,6 @@ export function AuthenticationSection() {
   // Post-mutation override: the session cookie cache can lag the fresh
   // 2FA flag, so the UI trusts its own confirmed writes first.
   const [twoFactorOn, setTwoFactorOn] = useState<boolean | null>(null);
-  const [authError, setAuthError] = useState<string | null>(null);
 
   const session2FA =
     auth.status === "authenticated" ? auth.user.twoFactorEnabled : false;
@@ -1224,11 +1223,13 @@ export function AuthenticationSection() {
 
   async function handleLinkGoogle() {
     setIsLinking(true);
-    setAuthError(null);
     try {
       await linkGoogle();
     } catch (e) {
-      setAuthError(toUserMessage(e, "Couldn't link Google. Try again."));
+      toast({
+        body: toUserMessage(e, "Couldn't link Google. Try again."),
+        type: "error",
+      });
     } finally {
       setIsLinking(false);
     }
@@ -1237,11 +1238,13 @@ export function AuthenticationSection() {
   async function handleUnlinkGoogle() {
     if (googleAccount == null) return;
     setIsUnlinking(true);
-    setAuthError(null);
     try {
       await unlinkAccount(googleAccount.id);
     } catch (e) {
-      setAuthError(toUserMessage(e, "Couldn't unlink Google. Try again."));
+      toast({
+        body: toUserMessage(e, "Couldn't unlink Google. Try again."),
+        type: "error",
+      });
     } finally {
       setIsUnlinking(false);
     }
@@ -1249,14 +1252,16 @@ export function AuthenticationSection() {
 
   async function handleStart2FA() {
     setIsStarting2FA(true);
-    setAuthError(null);
     try {
       const { totpURI, backupCodes } = await enableTwoFactor();
       const secret = parseTotpSecret(totpURI);
       setCode("");
       setSetup({ secret, backupCodes });
     } catch (e) {
-      setAuthError(toUserMessage(e, "Couldn't start 2FA setup. Try again."));
+      toast({
+        body: toUserMessage(e, "Couldn't start 2FA setup. Try again."),
+        type: "error",
+      });
     } finally {
       setIsStarting2FA(false);
     }
@@ -1264,17 +1269,22 @@ export function AuthenticationSection() {
 
   async function handleVerify2FA() {
     if (code.trim().length < 6) {
-      setAuthError("Enter the 6-digit code from your authenticator app.");
+      toast({
+        body: "Enter the 6-digit code from your authenticator app.",
+        type: "error",
+      });
       return;
     }
     setIsVerifying(true);
-    setAuthError(null);
     try {
       await verifyTwoFactorSetup(code);
       setSetup(null);
       setTwoFactorOn(true);
     } catch (e) {
-      setAuthError(toUserMessage(e, "That code didn't work. Try again."));
+      toast({
+        body: toUserMessage(e, "That code didn't work. Try again."),
+        type: "error",
+      });
     } finally {
       setIsVerifying(false);
     }
@@ -1282,12 +1292,14 @@ export function AuthenticationSection() {
 
   async function handleDisable2FA() {
     setIsDisabling2FA(true);
-    setAuthError(null);
     try {
       await disableTwoFactor();
       setTwoFactorOn(false);
     } catch (e) {
-      setAuthError(toUserMessage(e, "Couldn't turn off 2FA. Try again."));
+      toast({
+        body: toUserMessage(e, "Couldn't turn off 2FA. Try again."),
+        type: "error",
+      });
     } finally {
       setIsDisabling2FA(false);
     }
@@ -1620,9 +1632,6 @@ export function AuthenticationSection() {
       )}
       {passwordDone && (
         <Text type="body">Password changed.</Text>
-      )}
-      {authError != null && (
-        <Text type="supporting">{authError}</Text>
       )}
       <Text type="supporting" color="secondary">
         Auth settings are powered by BetterAuth. Email + password sign-in works alongside Google.
