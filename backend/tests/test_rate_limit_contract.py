@@ -18,11 +18,12 @@ def test_profiles_patch_rate_limited_after_60_per_minute(client):
 
 
 def test_delete_account_rate_limited_after_10_per_5min(client):
-    # Destructive route: 10 per 5 minutes. Each 202 deletes the user row,
+    # Destructive route: 10 per 5 minutes. Each 204 deletes the user row,
     # which /me recreates on the next call in dev-user mode.
+    # T22: idempotent (204 whether the row existed or not).
     for _ in range(10):
         r = client.delete("/api/v1/users/me")
-        assert r.status_code == 202, r.text
+        assert r.status_code == 204, r.text
     r = client.delete("/api/v1/users/me")
     assert r.status_code == 429
     assert r.json()["error"]["code"] == "RATE_LIMITED"

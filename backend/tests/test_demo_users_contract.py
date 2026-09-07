@@ -33,7 +33,7 @@ def test_export_shape_and_delete_account_cascade(client, dbsession):
     assert "exportedAt" in body
     old_id = uuid.UUID(client.get("/api/v1/auth/me").json()["user"]["id"])
     r = client.delete("/api/v1/users/me")
-    assert r.status_code == 202
+    assert r.status_code == 204  # T22: idempotent
     # Orphan check against the OLD row id: /me recreates the dev user on
     # the next call, so re-querying through the API can never prove the
     # cascade — assert directly on the tables.

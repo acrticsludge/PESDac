@@ -97,6 +97,7 @@ import type { IconType } from "@astryxdesign/core/Icon";
 
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Spinner } from "@astryxdesign/core/Spinner";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 
 import {
   ChatComposer,
@@ -1116,7 +1117,30 @@ export default function ShellSideNav({
                     </VStack>
                   </HStack>
                 )}
-                <SideNavItem label="Settings" icon={Cog6ToothIcon} href="#" />
+                {authState.status === "loading" && (
+                  <HStack
+                    gap={2}
+                    vAlign="center"
+                    padding={1}
+                    aria-busy="true"
+                    aria-label="Loading account"
+                  >
+                    <Skeleton width={32} height={32} radius="rounded" />
+                    <VStack gap={0.5}>
+                      <Skeleton width={96} height={12} />
+                      <Skeleton width={128} height={10} />
+                    </VStack>
+                  </HStack>
+                )}
+                <SideNavItem
+                  label="Settings"
+                  icon={Cog6ToothIcon}
+                  href="#"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    openProfile("profile");
+                  }}
+                />
 
                 <SideNavItem
                   label="My Profile"
@@ -1179,7 +1203,20 @@ export default function ShellSideNav({
                 }}
               />
 
-              <SideNavItem label="Study Library" icon={BookOpenIcon} href="#" />
+              {/* T23: Study Library is on the planned-feature boundary — keep
+                  the visual entry point but mark it explicitly disabled
+                  with a "Coming soon" affordance so the user knows it
+                  isn't a live route. Toggling or removing would be a
+                  redesign; this is the smallest honest change. */}
+              <SideNavItem
+                label="Study Library"
+                icon={BookOpenIcon}
+                href="#"
+                isDisabled
+                onClick={(event) => {
+                  event.preventDefault();
+                }}
+              />
             </SideNavSection>
 
             {isSearchOpen && (
