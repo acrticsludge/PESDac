@@ -1174,15 +1174,17 @@ export function AuthenticationSection() {
   const [linkNewPassword, setLinkNewPassword] = useState("");
   const [linkConfirmPassword, setLinkConfirmPassword] = useState("");
   const [isLinkingPassword, setIsLinkingPassword] = useState(false);
-  // Inline status for the link form: the `New password` field shows
-  // the length error (per-field), the form-level Text shows the
-  // mismatch + server error (no specific field).
+  // Inline status for the link form: each error paints on the field
+  // that produced it, matching the auth page pattern. `linkFormError`
+  // is reserved for "no specific field" cases — only the server error
+  // uses it, since it can't be attributed to a single input.
   const [linkFieldError, setLinkFieldError] = useState<string | null>(null);
+  const [linkConfirmError, setLinkConfirmError] = useState<string | null>(null);
   const [linkFormError, setLinkFormError] = useState<string | null>(null);
-  // Same split for the change-password form: `Current password` and
-  // `New password` can both carry field-level status, the form-level
-  // Text catches the server error.
-  const [changeFieldError, setChangeFieldError] = useState<string | null>(null);
+  // Same split for the change-password form: every field carries its
+  // own status, `changeFormError` is reserved for server-side errors.
+  const [changeCurrentError, setChangeCurrentError] = useState<string | null>(null);
+  const [changeNewError, setChangeNewError] = useState<string | null>(null);
   const [changeFormError, setChangeFormError] = useState<string | null>(null);
   // Post-mutation override: the session cookie cache can lag the fresh
   // 2FA flag, so the UI trusts its own confirmed writes first.
@@ -1307,15 +1309,16 @@ export function AuthenticationSection() {
 
   async function handleChangePassword() {
     if (isChangingPassword) return;
-    setChangeFieldError(null);
+    setChangeCurrentError(null);
+    setChangeNewError(null);
     setChangeFormError(null);
     if (!currentPassword) {
-      setChangeFieldError("Enter your current password.");
+      setChangeCurrentError("Enter your current password.");
       return;
     }
     if (newPassword.length < MIN_PASSWORD_LENGTH) {
-      setChangeFieldError(
-        `The new password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+      setChangeNewError(
+        `Must be at least ${MIN_PASSWORD_LENGTH} characters.`,
       );
       return;
     }
@@ -1336,11 +1339,12 @@ export function AuthenticationSection() {
 
   // Link a credential password to the current user. Google-only accounts
   // have no password to verify against, so the form asks for new +
-  // confirm only. Server enforces the same 8/128 length; we mirror it
-  // so a bad length never costs a round trip.
+  // confirm only. Each validation failure paints on the field it
+  // belongs to; only the server error is form-level. Per slice 14.
   async function handleLinkPassword() {
     if (isLinkingPassword) return;
     setLinkFieldError(null);
+    setLinkConfirmError(null);
     setLinkFormError(null);
     if (linkNewPassword.length < MIN_PASSWORD_LENGTH) {
       setLinkFieldError(
@@ -1349,7 +1353,11 @@ export function AuthenticationSection() {
       return;
     }
     if (linkNewPassword !== linkConfirmPassword) {
-      setLinkFormError("Passwords don't match.");
+      // Mismatch is attributed to the Confirm field — it's the most
+      // recently typed one, and the user can fix it without touching
+      // the first field. Matches the auth page's "Email + password"
+      // pattern.
+      setLinkConfirmError("Doesn't match the password above.");
       return;
     }
     setIsLinkingPassword(true);
@@ -1452,6 +1460,7 @@ export function AuthenticationSection() {
                   onClick={() => {
                     setShowLinkPasswordForm((v) => !v);
                     setLinkFieldError(null);
+                    setLinkConfirmError(null);
                     setLinkFormError(null);
                   }}
                 />
@@ -1471,7 +1480,8 @@ export function AuthenticationSection() {
                   isDisabled={anyPending}
                   onClick={() => {
                     setShowPasswordForm((v) => !v);
-                    setChangeFieldError(null);
+                    setChangeCurrentError(null);
+                    setChangeNewError(null);
                     setChangeFormError(null);
                     setPasswordDone(false);
                   }}
@@ -1491,8 +1501,8 @@ export function AuthenticationSection() {
               value={currentPassword}
               onChange={setCurrentPassword}
               status={
-                changeFieldError != null
-                  ? { type: "error", message: changeFieldError }
+                changeCurrentError != null
+                  ? { type: "error", message: changeCurrentError }
                   : undefined
               }
             />
@@ -1503,6 +1513,14 @@ export function AuthenticationSection() {
               description={`At least ${MIN_PASSWORD_LENGTH} characters`}
               value={newPassword}
               onChange={setNewPassword}
+              status={
+                changeNewError != null
+                  ? { type: "error", message: changeNewError }
+                  : undefined
+              }
+              onEnter={() => {
+                void handleChangePassword();
+              }}
             />
             {changeFormError != null && (
               <Text type="supporting">{changeFormError}</Text>
@@ -1523,7 +1541,8 @@ export function AuthenticationSection() {
                 isDisabled={isChangingPassword}
                 onClick={() => {
                   setShowPasswordForm(false);
-                  setChangeFieldError(null);
+                  setChangeCurrentError(null);
+                  setChangeNewError(null);
                   setChangeFormError(null);
                 }}
               />
@@ -1557,6 +1576,14 @@ export function AuthenticationSection() {
               placeholder="Type the password again"
               value={linkConfirmPassword}
               onChange={setLinkConfirmPassword}
+              status={
+                linkConfirmError != null
+                  ? { type: "error", message: linkConfirmError }
+                  : undefined
+              }
+              onEnter={() => {
+                void handleLinkPassword();
+              }}
             />
             {linkFormError != null && <Text type="supporting">{linkFormError}</Text>}
             <HStack gap={2}>
@@ -1578,6 +1605,7 @@ export function AuthenticationSection() {
                   setLinkNewPassword("");
                   setLinkConfirmPassword("");
                   setLinkFieldError(null);
+                  setLinkConfirmError(null);
                   setLinkFormError(null);
                 }}
               />
