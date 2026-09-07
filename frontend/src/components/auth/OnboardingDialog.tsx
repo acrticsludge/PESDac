@@ -33,6 +33,7 @@ import {
   apiGetMe,
   apiGetProfile,
   apiUpdateProfile,
+  refreshProfile,
   toUserMessage,
 } from "../../lib/auth";
 import { updateProfile as updateLocalProfile } from "../../lib/session";
@@ -63,7 +64,7 @@ export default function OnboardingDialog({
   onActiveChange?: (active: boolean) => void;
 }) {
   const auth = useAuth();
-  const [phase, setPhase] = useState<"checking" | "open" | "done">(
+  const [phase, setPhase] = useState<"checking" | "open" | "done" | "error">(
     "checking",
   );
   const [campus, setCampus] = useState("");
@@ -76,7 +77,7 @@ export default function OnboardingDialog({
   // Mounts only once the server confirms onboarding is needed:
   // checking/done render nothing, so refreshes never flash a loader.
   // The open Dialog already dims + blurs the window behind it.
-  const open = phase === "open";
+  const open = phase === "open" || phase === "error";
   useEffect(() => {
     onActiveChange?.(open);
   }, [open, onActiveChange]);
@@ -89,6 +90,10 @@ export default function OnboardingDialog({
 
   // Resolve once per session: needs onboarding? Prefill from the server
   // row so returning users see their saved picks, not a blank form.
+  // A failed check used to resolve to `done` and leave the user
+  // permanently un-onboarded with no signal (audit G4) — it now opens
+  // an error state with a retry instead.
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (auth.status !== "authenticated") return;
     let cancelled = false;
@@ -114,18 +119,67 @@ export default function OnboardingDialog({
             : [],
         );
         setPhase("open");
-      } catch {
-        // Unknown state (network down): stay closed rather than block
-        // the app on a guess. The next mount re-checks.
-        if (!cancelled) setPhase("done");
+      } catch (error) {
+        if (!cancelled) {
+          setFailure(
+            toUserMessage(error, "Couldn't load your profile. Try again."),
+          );
+          setPhase("error");
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [auth.status]);
+  }, [auth.status, attempt]);
 
-  if (auth.status !== "authenticated" || !open) return null;
+  if (auth.status !== "authenticated" || phase === "done" || phase === "checking") return null;
+
+  if (phase === "error") {
+    return (
+      <Dialog
+        isOpen
+        onOpenChange={() => {}}
+        purpose="required"
+        aria-label="Couldn't load your profile"
+        width="min(440px, calc(100vw - 2rem))"
+      >
+        <Layout
+          content={
+            <LayoutContent>
+              <VStack gap={4}>
+                <VStack gap={1}>
+                  <Heading level={2}>Couldn't load your profile</Heading>
+                  <Text type="supporting" color="secondary">
+                    We couldn't reach the server to check your setup. Nothing
+                    was lost — try again.
+                  </Text>
+                </VStack>
+                {failure != null && (
+                  <Banner
+                    status="error"
+                    title="Connection failed"
+                    description={failure}
+                  />
+                )}
+                <VStack hAlign="stretch">
+                  <Button
+                    label="Try again"
+                    variant="primary"
+                    onClick={() => {
+                      setFailure(null);
+                      setPhase("checking");
+                      setAttempt((a) => a + 1);
+                    }}
+                  />
+                </VStack>
+              </VStack>
+            </LayoutContent>
+          }
+        />
+      </Dialog>
+    );
+  }
 
   // validateCampus allows blank (PATCH accepts it); the wizard
   // requires an actual pick, hence the separate campus !== "".
@@ -158,6 +212,9 @@ export default function OnboardingDialog({
         branch,
         subjects,
       });
+      // The cached /auth/me still says onboardingDone:false — drop it so
+      // the next reader sees the saved state instead of a stale flag.
+      refreshProfile();
       setPhase("done");
     } catch (error) {
       setFailure(toUserMessage(error, "Couldn't save. Try again."));

@@ -1,7 +1,6 @@
-"""Auth schemas (v6 — Neon Auth).
+"""Auth schemas (BetterAuth migration placeholder).
 
-The v5 signup/login/password/reset schemas are gone. Auth is Neon-owned;
-our API only verifies the JWT and shapes the /me response.
+Our API only shapes the /me response.
 """
 
 from __future__ import annotations

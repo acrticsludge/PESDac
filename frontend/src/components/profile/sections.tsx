@@ -2,7 +2,13 @@
 
 import { useState, type ReactNode, type ComponentType, type SVGProps } from "react";
 
-import { VStack, HStack } from "@astryxdesign/core/Layout";
+import {
+  VStack,
+  HStack,
+  Layout,
+  LayoutContent,
+  LayoutFooter,
+} from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Kbd } from "@astryxdesign/core/Kbd";
@@ -14,6 +20,7 @@ import {
 } from "@astryxdesign/core/SegmentedControl";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Button } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Card } from "@astryxdesign/core/Card";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
@@ -41,6 +48,8 @@ import {
   MagnifyingGlassIcon,
   LanguageIcon,
   GlobeAltIcon,
+  KeyIcon,
+  ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import {
   clearAllChats,
@@ -49,8 +58,7 @@ import {
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
-import { useAuth, apiDeleteAccount, apiFetch, toUserMessage } from "../../lib/auth";
-import { linkGoogleAccount, sdkMessage } from "../../lib/neon-auth";
+import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, apiDeleteAccount, apiFetch, apiUpdateProfile, toUserMessage, MIN_PASSWORD_LENGTH } from "../../lib/auth";
 import { navigate } from "astro:transitions/client";
 import {
   BRANCHES,
@@ -60,6 +68,7 @@ import {
 
 export type ProfileTab =
   | "profile"
+  | "authentication"
   | "study"
   | "assistant"
   | "shortcuts"
@@ -69,6 +78,7 @@ export type ProfileTab =
 
 export const TABS: { value: ProfileTab; label: string }[] = [
   { value: "profile", label: "Profile" },
+  { value: "authentication", label: "Authentication" },
   { value: "study", label: "Study" },
   { value: "assistant", label: "Assistant" },
   { value: "shortcuts", label: "Shortcuts" },
@@ -182,56 +192,78 @@ function CardRows({ children }: { children: ReactNode }) {
 export function IdentitySection() {
   useSessionVersion();
   const auth = useAuth();
+  const serverProfile = useProfile();
   const profile = getProfile();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
-  const [isLinking, setIsLinking] = useState(false);
-  const [linkError, setLinkError] = useState<string | null>(null);
-  // Plan item 23: email + displayName are Neon-owned — read-only when
-  // authenticated. Logged out (unreachable behind the gate, kept for
-  // honesty) the local store remains editable.
-  const neonUser = auth.status === "authenticated" ? auth.user : null;
-  const displayName = neonUser?.displayName || profile.displayName;
-  const email = neonUser?.email || profile.email;
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingIdentity, setIsSavingIdentity] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // TODO(BetterAuth): email + displayName are account-owned — read-only
+  // when authenticated. Logged out the local store remains editable.
+  // Server row wins; while it loads, the session name/email stand in so
+  // the rows stay read-only instead of flickering to editable inputs.
+  const serverUser =
+    serverProfile.status === "ready"
+      ? serverProfile.user
+      : auth.status === "authenticated"
+        ? { displayName: auth.user.name, email: auth.user.email }
+        : null;
+  const authUser = serverUser;
+  const displayName = authUser?.displayName || profile.displayName;
+  const email = authUser?.email || profile.email;
 
-  // F4: our rows first (users + profile + chats), then the Neon user
-  // record. Full success → /signup for a fresh start. SDK fallback
-  // (signed out, Neon record remains) → banner and stay: navigating
-  // would hide the support message, and closing the dialog lands on
-  // the gate, which routes to signup/login anyway.
+  // Delete the PESDac identity (users + profile + chats), then route to
+  // /signup for a fresh start.
   async function handleDeleteAccount() {
-    setConfirmingDelete(false);
+    setIsDeleting(true);
     setDeleteNotice(null);
     try {
       const { fallback } = await apiDeleteAccount();
+      setIsDeleting(false);
+      setConfirmingDelete(false);
       if (fallback) {
         setDeleteNotice(
-          "Signed out. Contact support to finish deletion.",
+          "Deletion was incomplete — your sign-in is gone but some " +
+            "PESDac data may remain. Contact support to finish deletion.",
         );
         return;
       }
     } catch (error) {
+      setIsDeleting(false);
       setDeleteNotice(toUserMessage(error, "Couldn't delete your account. Try again."));
       return;
     }
     navigate("/signup");
   }
 
-  // Link Google to the signed-in account (fixes account_not_linked for
-  // password-first users): requires a live session, redirects to Google
-  // and back on success. Already-linked returns with no URL — either
-  // way a return without redirect means reset the button.
-  async function handleLinkGoogle() {
-    if (isLinking) return;
-    setIsLinking(true);
-    setLinkError(null);
+  // Identity fields synced to the server row (auth audit G1/G11):
+  // campus/semester/branch live in the backend profile; the local store
+  // mirrors for instant UI. Writes go to the server first — on failure
+  // the local edit is reverted and a Banner names it, so the two can
+  // never silently diverge. Campus writes both `campus` and the legacy
+  // `institution` key to the same value so readers of either agree.
+  async function saveIdentity(
+    patch: Record<string, string>,
+    local: { institution?: string; semester?: string; branch?: string },
+  ) {
+    if (isSavingIdentity) return;
+    const prev = getProfile();
+    updateProfile(local);
+    setSaveError(null);
+    setIsSavingIdentity(true);
     try {
-      await linkGoogleAccount();
+      await apiUpdateProfile(patch);
     } catch (error) {
-      setLinkError(sdkMessage(error, "Couldn't link Google. Try again."));
+      updateProfile({
+        institution: prev.institution,
+        semester: prev.semester,
+        branch: prev.branch,
+      });
+      setSaveError(toUserMessage(error, "Couldn't save. Try again."));
+    } finally {
+      setIsSavingIdentity(false);
     }
-    setIsLinking(false);
-    // A real redirect unloads the page, so reaching here means stay.
   }
 
   return (
@@ -258,11 +290,11 @@ export function IdentitySection() {
           description={deleteNotice}
         />
       )}
-      {linkError != null && (
+      {saveError != null && (
         <Banner
           status="error"
-          title="Google linking"
-          description={linkError}
+          title="Couldn't save your profile"
+          description={saveError}
         />
       )}
       <SettingsCard title="Identity">
@@ -270,13 +302,13 @@ export function IdentitySection() {
           <SettingsRow
             title="Display name"
             description={
-              neonUser != null
-                ? "Managed by your sign-in provider."
+              authUser != null
+                ? "Managed by your account."
                 : "Shown across PESDac."
             }
             icon={UserIcon}
             control={
-              neonUser != null ? (
+              authUser != null ? (
                 <Text type="body" maxLines={1}>
                   {displayName || "—"}
                 </Text>
@@ -296,13 +328,13 @@ export function IdentitySection() {
           <SettingsRow
             title="Email"
             description={
-              neonUser != null
-                ? "Managed by your sign-in provider."
+              authUser != null
+                ? "Managed by your account."
                 : "Where account notices are sent."
             }
             icon={EnvelopeIcon}
             control={
-              neonUser != null ? (
+              authUser != null ? (
                 <Text type="body" maxLines={1}>
                   {email || "—"}
                 </Text>
@@ -319,22 +351,6 @@ export function IdentitySection() {
               )
             }
           />
-          {neonUser != null && (
-            <SettingsRow
-              title="Google account"
-              description="Link Google to sign in with one click next time."
-              icon={GlobeAltIcon}
-              control={
-                <Button
-                  label={isLinking ? "Linking…" : "Link Google account"}
-                  variant="secondary"
-                  isLoading={isLinking}
-                  isDisabled={isLinking}
-                  onClick={() => void handleLinkGoogle()}
-                />
-              }
-            />
-          )}
           <SettingsRow
             title="Campus"
             description="Your PES University campus."
@@ -348,7 +364,14 @@ export function IdentitySection() {
                 hasClear
                 options={CAMPUSES}
                 value={profile.institution || null}
-                onChange={(value) => updateProfile({ institution: value ?? "" })}
+                isLoading={isSavingIdentity}
+                isDisabled={isSavingIdentity}
+                onChange={(value) =>
+                  void saveIdentity(
+                    { campus: value ?? "", institution: value ?? "" },
+                    { institution: value ?? "" },
+                  )
+                }
               />
             }
           />
@@ -365,7 +388,14 @@ export function IdentitySection() {
                 hasClear
                 options={SEMESTERS}
                 value={profile.semester || null}
-                onChange={(value) => updateProfile({ semester: value ?? "" })}
+                isLoading={isSavingIdentity}
+                isDisabled={isSavingIdentity}
+                onChange={(value) =>
+                  void saveIdentity(
+                    { semester: value ?? "" },
+                    { semester: value ?? "" },
+                  )
+                }
               />
             }
           />
@@ -382,7 +412,14 @@ export function IdentitySection() {
                 hasClear
                 options={BRANCHES}
                 value={profile.branch || null}
-                onChange={(value) => updateProfile({ branch: value ?? "" })}
+                isLoading={isSavingIdentity}
+                isDisabled={isSavingIdentity}
+                onChange={(value) =>
+                  void saveIdentity(
+                    { branch: value ?? "" },
+                    { branch: value ?? "" },
+                  )
+                }
               />
             }
           />
@@ -408,18 +445,64 @@ export function IdentitySection() {
         </CardRows>
       </SettingsCard>
       <Text type="supporting" color="secondary">
-        Sign in and account management are handled by our auth provider.
+        Account management will be handled by BetterAuth.
       </Text>
-      <AlertDialog
+      <Dialog
         isOpen={confirmingDelete}
         onOpenChange={(open) => {
-          if (!open) setConfirmingDelete(false);
+          if (!open) {
+            setConfirmingDelete(false);
+            setIsDeleting(false);
+          }
         }}
-        title="Delete your account?"
-        description="Everything you did on PESDac is permanently erased. This cannot be undone."
-        actionLabel="Delete"
-        onAction={() => void handleDeleteAccount()}
-      />
+        purpose="form"
+      >
+        <Layout
+          header={
+            <DialogHeader
+              title="Delete your account?"
+              hasDivider
+              onOpenChange={(open) => {
+                if (!open) {
+                  setConfirmingDelete(false);
+                  setIsDeleting(false);
+                }
+              }}
+            />
+          }
+          content={
+            <LayoutContent>
+              <VStack gap={3}>
+                <Text type="body" color="secondary">
+                  Everything you did on PESDac is permanently erased. This
+                  cannot be undone.
+                </Text>
+              </VStack>
+            </LayoutContent>
+          }
+          footer={
+            <LayoutFooter hasDivider>
+              <HStack gap={2}>
+                <Button
+                  label="Cancel"
+                  variant="ghost"
+                  onClick={() => {
+                    setConfirmingDelete(false);
+                    setIsDeleting(false);
+                  }}
+                />
+                <Button
+                  label="Delete"
+                  variant="destructive"
+                  isLoading={isDeleting}
+                  isDisabled={isDeleting}
+                  onClick={() => void handleDeleteAccount()}
+                />
+              </HStack>
+            </LayoutFooter>
+          }
+        />
+      </Dialog>
     </VStack>
   );
 }
@@ -1046,4 +1129,359 @@ export function LegalSection() {
       </VStack>
     </VStack>
   );
+}
+
+export function AuthenticationSection() {
+  const auth = useAuth();
+  const accounts = useAccounts();
+  const [isLinking, setIsLinking] = useState(false);
+  const [isUnlinking, setIsUnlinking] = useState(false);
+  // TOTP setup wizard: null (idle) or the freshly minted key material.
+  // The secret is parsed out of the otpauth URI for manual entry — no
+  // QR dependency. Backup codes show once, at setup time only.
+  const [setup, setSetup] = useState<{
+    secret: string;
+    backupCodes: string[];
+  } | null>(null);
+  const [isStarting2FA, setIsStarting2FA] = useState(false);
+  const [code, setCode] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isDisabling2FA, setIsDisabling2FA] = useState(false);
+  // Change-password form (credential accounts only): current + new.
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordDone, setPasswordDone] = useState(false);
+  // Post-mutation override: the session cookie cache can lag the fresh
+  // 2FA flag, so the UI trusts its own confirmed writes first.
+  const [twoFactorOn, setTwoFactorOn] = useState<boolean | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const session2FA =
+    auth.status === "authenticated" ? auth.user.twoFactorEnabled : false;
+  const enabled2FA = twoFactorOn ?? session2FA;
+  // Any in-flight BetterAuth mutation; lets the other buttons stay
+  // clickable visually but reject re-entry until the round-trip lands
+  // (avoids a concurrent write racing the active one).
+  const anyPending =
+    isLinking ||
+    isUnlinking ||
+    isStarting2FA ||
+    isVerifying ||
+    isDisabling2FA ||
+    isChangingPassword;
+
+  const linked =
+    accounts.status === "ready" ? accounts.accounts : null;
+  const googleAccount =
+    linked?.find((a) => a.providerId === "google") ?? null;
+  // The server refuses to unlink the last remaining method, so Unlink is
+  // only offered when another way back in exists.
+  const canUnlink =
+    googleAccount != null && linked != null && linked.length > 1;
+  // Credential (email + password) sign-in exists only for users who
+  // signed up with a password. Google-only users have none — and there
+  // is no client path to set a first one (the server's setPassword is
+  // serverOnly in BetterAuth 1.7.3, and reset emails need a sender we
+  // don't have) — so the Password row renders only when a credential
+  // account is linked. Gated on ready so it never flickers in.
+  const hasCredential =
+    accounts.status === "ready" &&
+    (linked?.some((a) => a.providerId === "credential") ?? false);
+
+  async function handleLinkGoogle() {
+    setIsLinking(true);
+    setAuthError(null);
+    try {
+      await linkGoogle();
+    } catch (e) {
+      setAuthError(toUserMessage(e, "Couldn't link Google. Try again."));
+    } finally {
+      setIsLinking(false);
+    }
+  }
+
+  async function handleUnlinkGoogle() {
+    if (googleAccount == null) return;
+    setIsUnlinking(true);
+    setAuthError(null);
+    try {
+      await unlinkAccount(googleAccount.id);
+    } catch (e) {
+      setAuthError(toUserMessage(e, "Couldn't unlink Google. Try again."));
+    } finally {
+      setIsUnlinking(false);
+    }
+  }
+
+  async function handleStart2FA() {
+    setIsStarting2FA(true);
+    setAuthError(null);
+    try {
+      const { totpURI, backupCodes } = await enableTwoFactor();
+      const secret = parseTotpSecret(totpURI);
+      setCode("");
+      setSetup({ secret, backupCodes });
+    } catch (e) {
+      setAuthError(toUserMessage(e, "Couldn't start 2FA setup. Try again."));
+    } finally {
+      setIsStarting2FA(false);
+    }
+  }
+
+  async function handleVerify2FA() {
+    if (code.trim().length < 6) {
+      setAuthError("Enter the 6-digit code from your authenticator app.");
+      return;
+    }
+    setIsVerifying(true);
+    setAuthError(null);
+    try {
+      await verifyTwoFactorSetup(code);
+      setSetup(null);
+      setTwoFactorOn(true);
+    } catch (e) {
+      setAuthError(toUserMessage(e, "That code didn't work. Try again."));
+    } finally {
+      setIsVerifying(false);
+    }
+  }
+
+  async function handleDisable2FA() {
+    setIsDisabling2FA(true);
+    setAuthError(null);
+    try {
+      await disableTwoFactor();
+      setTwoFactorOn(false);
+    } catch (e) {
+      setAuthError(toUserMessage(e, "Couldn't turn off 2FA. Try again."));
+    } finally {
+      setIsDisabling2FA(false);
+    }
+  }
+
+  async function handleChangePassword() {
+    if (isChangingPassword) return;
+    if (!currentPassword) {
+      setAuthError("Enter your current password.");
+      return;
+    }
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      setAuthError(
+        `The new password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+      );
+      return;
+    }
+    setIsChangingPassword(true);
+    setAuthError(null);
+    setPasswordDone(false);
+    try {
+      await changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setShowPasswordForm(false);
+      setPasswordDone(true);
+    } catch (e) {
+      setAuthError(toUserMessage(e, "Couldn't change your password. Try again."));
+    } finally {
+      setIsChangingPassword(false);
+    }
+  }
+
+  return (
+    <VStack gap={5}>
+      <SettingsCard title="Authentication">
+        <CardRows>
+          <SettingsRow
+            title="Google account"
+            description={
+              googleAccount != null
+                ? "Signed in with Google."
+                : accounts.status === "error"
+                  ? "Couldn't load link status."
+                  : "Sign in and link with your Google account."
+            }
+            icon={GlobeAltIcon}
+            control={
+              googleAccount != null ? (
+                canUnlink ? (
+                  <Button
+                    label="Unlink"
+                    variant="secondary"
+                    size="sm"
+                    isLoading={isUnlinking}
+                    isDisabled={anyPending}
+                    onClick={() => void handleUnlinkGoogle()}
+                  />
+                ) : (
+                  <Text type="body" weight="semibold">
+                    Linked
+                  </Text>
+                )
+              ) : (
+                <Button
+                  label="Link Google"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={isLinking}
+                  isDisabled={anyPending}
+                  onClick={() => void handleLinkGoogle()}
+                />
+              )
+            }
+          />
+          <SettingsRow
+            title="Two-factor authentication"
+            description={
+              enabled2FA
+                ? "On — signing in asks for an authenticator code."
+                : "Add an extra layer of security with TOTP."
+            }
+            icon={ShieldCheckIcon}
+            control={
+              enabled2FA ? (
+                <Button
+                  label="Disable 2FA"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={isDisabling2FA}
+                  isDisabled={anyPending}
+                  onClick={() => void handleDisable2FA()}
+                />
+              ) : (
+                <Button
+                  label="Enable 2FA"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={isStarting2FA}
+                  isDisabled={anyPending}
+                  onClick={() => void handleStart2FA()}
+                />
+              )
+            }
+          />
+          {hasCredential && (
+            <SettingsRow
+              title="Password"
+              description="Change the password you sign in with."
+              icon={KeyIcon}
+              control={
+                <Button
+                  label="Change"
+                  variant="secondary"
+                  size="sm"
+                  isDisabled={anyPending}
+                  onClick={() => {
+                    setShowPasswordForm((v) => !v);
+                    setAuthError(null);
+                    setPasswordDone(false);
+                  }}
+                />
+              }
+            />
+          )}
+        </CardRows>
+      </SettingsCard>
+      {hasCredential && showPasswordForm && (
+        <SettingsCard title="Change your password">
+          <VStack padding={4} gap={3}>
+            <TextInput
+              label="Current password"
+              type="password"
+              placeholder="Your current password"
+              value={currentPassword}
+              onChange={setCurrentPassword}
+            />
+            <TextInput
+              label="New password"
+              type="password"
+              placeholder="Choose a new password"
+              description={`At least ${MIN_PASSWORD_LENGTH} characters`}
+              value={newPassword}
+              onChange={setNewPassword}
+            />
+            <HStack gap={2}>
+              <Button
+                label="Save new password"
+                variant="primary"
+                size="sm"
+                isLoading={isChangingPassword}
+                onClick={() => void handleChangePassword()}
+              />
+              <Button
+                label="Cancel"
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowPasswordForm(false)}
+              />
+            </HStack>
+          </VStack>
+        </SettingsCard>
+      )}
+      {setup != null && !enabled2FA && (
+        <SettingsCard title="Set up your authenticator">
+          <VStack padding={4} gap={3}>
+            <Text type="body">
+              Enter this key in your authenticator app, then type the
+              6-digit code it shows.
+            </Text>
+            <VStack gap={1}>
+              <Text type="label">Setup key</Text>
+              <Text type="body" weight="semibold" maxLines={3}>
+                {setup.secret || "Couldn't read the key — start over."}
+              </Text>
+            </VStack>
+            <VStack gap={1}>
+              <Text type="label">Backup codes (save these now)</Text>
+              <Text type="supporting" color="secondary">
+                {setup.backupCodes.length > 0
+                  ? setup.backupCodes.join("  ")
+                  : "None issued."}
+              </Text>
+            </VStack>
+            <TextInput
+              label="Authenticator code"
+              placeholder="6-digit code"
+              value={code}
+              onChange={setCode}
+            />
+            <HStack gap={2}>
+              <Button
+                label="Verify and enable"
+                variant="primary"
+                size="sm"
+                isLoading={isVerifying}
+                onClick={() => void handleVerify2FA()}
+              />
+              <Button
+                label="Cancel"
+                variant="secondary"
+                size="sm"
+                onClick={() => setSetup(null)}
+              />
+            </HStack>
+          </VStack>
+        </SettingsCard>
+      )}
+      {passwordDone && (
+        <Text type="body">Password changed.</Text>
+      )}
+      {authError != null && (
+        <Banner status="error" title="Authentication error" description={authError} />
+      )}
+      <Text type="supporting" color="secondary">
+        Auth settings are powered by BetterAuth. Email + password sign-in works alongside Google.
+      </Text>
+    </VStack>
+  );
+}
+
+/** Pull the manual-entry secret out of an otpauth:// URI. "" when absent. */
+function parseTotpSecret(totpURI: string): string {
+  try {
+    return new URL(totpURI).searchParams.get("secret") ?? "";
+  } catch {
+    return "";
+  }
 }

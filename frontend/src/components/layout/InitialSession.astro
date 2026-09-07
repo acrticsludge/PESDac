@@ -1,0 +1,33 @@
+---
+// Embeds the session the middleware already loaded, so the client
+// React island renders as "guest" or "authenticated" on first paint
+// instead of waiting for a `/api/auth/get-session` round-trip.
+//
+// The page's <head> reads `Astro.locals.session / .user` (set by
+// middleware/auth.ts). We serialize a JSON-safe subset: id, email,
+// name, twoFactorEnabled. Anything else the React app needs is
+// fetched lazily via useProfile() / apiGetMe() after hydration.
+//
+// The `client:load` islands on the page hydrate AFTER this script
+// has been parsed (script tags are blocking; the React island is
+// loaded async by `client:load`). On read, the client must handle
+// the case where the script is absent (auth pages, transit
+// navigation that re-runs only the islands, dev HMR).
+---
+<script
+  is:inline
+  type="application/json"
+  id="pesdac:initial-session"
+  set:html={JSON.stringify(
+    Astro.locals.session && Astro.locals.user
+      ? {
+          id: Astro.locals.user.id,
+          email: Astro.locals.user.email,
+          name: Astro.locals.user.name,
+          twoFactorEnabled:
+            (Astro.locals.user as { twoFactorEnabled?: boolean })
+              .twoFactorEnabled === true,
+        }
+      : null,
+  )}
+/>

@@ -1,8 +1,9 @@
-"""In-memory sliding-window rate limiter for auth/abuse-prone routes (arch §9).
+"""In-memory sliding-window rate limiter for abuse-prone routes (arch §9).
 
 No extra dependency for v1. Limits are per (route-key, client-ip). Emits 429
 with Retry-After. A Redis-backed limiter can replace this module without
-touching routers (same `limit()` dependency signature).
+touching routers (same `check()` call signature). Wired into the mutation
+routes via the same walrus pattern as `check_mutation_origin`.
 """
 
 from __future__ import annotations

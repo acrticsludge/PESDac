@@ -1,8 +1,5 @@
-"""Security primitives (v6 — Neon Auth).
+"""Security primitives.
 
-- No password hashing (Neon owns passwords).
-- No JWT minting (we only verify the Neon JWT).
-- No opaque refresh tokens (Neon owns sessions).
 - Kept here: chat-code generation, title cleaning, and the
   email normalization/validation used by the profile PATCH.
 """

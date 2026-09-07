@@ -44,6 +44,15 @@ def create_app(validate: bool = True) -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # HSTS only on https deployments (browsers ignore it over http,
+        # so gating on COOKIE_SECURE keeps local dev untouched). No
+        # Content-Security-Policy here by intent: /api/docs (Swagger UI)
+        # needs inline + CDN scripts, and this API serves no HTML of its
+        # own — CSP belongs on the frontend host, not these JSON routes.
+        if config.COOKIE_SECURE:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
         return response
 
     @app.exception_handler(RequestValidationError)
@@ -90,7 +99,7 @@ app = None
 try:
     # Import-time creation is skipped when env is absent (tests build their own
     # app via create_app(validate=False) with an SQLite override).
-    if config.DATABASE_URL and config.NEON_AUTH_JWKS_URL and config.FRONTEND_ORIGINS:
+    if config.DATABASE_URL and config.FRONTEND_ORIGINS:
         app = create_app(validate=True)
     else:
         # Unvalidated boot (tests, or env missing entirely). With no
@@ -98,9 +107,8 @@ try:
         # the signal, not silent breakage.
         logger.warning(
             "PESDac API booting WITHOUT validated env "
-            "(DATABASE_URL=%s, JWKS=%s, ORIGINS=%s)",
+            "(DATABASE_URL=%s, ORIGINS=%s)",
             bool(config.DATABASE_URL),
-            bool(config.NEON_AUTH_JWKS_URL),
             config.FRONTEND_ORIGINS,
         )
         app = create_app(validate=False)

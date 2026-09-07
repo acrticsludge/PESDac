@@ -10,17 +10,14 @@
 //   | div.login-split-image > Card(transparent) > img(cover)]
 //
 // The form itself is Astryx primitives (TextInput / Button /
-// Divider / Link / EmptyState), exactly like the reference — NOT
-// the SDK's <AuthView>. AuthView is a shadcn-styled form; hosting
-// it inside our Astryx card produced double chrome, double titles,
-// foreign proportions, and validation errors firing on load. The
-// Astryx controls below are wired to the Neon SDK directly:
-// sign-in → authClient.signIn.email, sign-up →
-// authClient.signUp.email, Google → authClient.signIn.social.
-// Forgot-password calls authClient.forgetPassword and swaps the
-// form to a confirmation EmptyState.
+// Link / EmptyState), exactly like the reference.
 //
-// D1: Google + email only (no Apple button). D4: no legal line.
+// Email + password (BetterAuth sign-in/sign-up) sits above the Google
+// button. No email-based forgot-password: the server has no email sender
+// configured, so password changes live in My Profile > Authentication
+// instead.
+//
+// D1: Google + email (no Apple button). D4: no legal line.
 // D5: muted cover (see COVER_IMAGE_URL).
 
 import { useEffect, useState, type CSSProperties } from "react";
@@ -31,8 +28,6 @@ import { Card } from "@astryxdesign/core/Card";
 import { Section } from "@astryxdesign/core/Section";
 import { Text } from "@astryxdesign/core/Text";
 import { Icon } from "@astryxdesign/core/Icon";
-import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { CheckCircleIcon } from "@heroicons/react/24/outline";
 import { SparklesIcon } from "@heroicons/react/24/outline";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Button } from "@astryxdesign/core/Button";
@@ -40,19 +35,22 @@ import { Link } from "@astryxdesign/core/Link";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Theme } from "@astryxdesign/core/theme";
 import { PESDacMockupTheme } from "../../theme/PESDacMockupTheme";
-
-import { authClient, sdkMessage } from "../../lib/neon-auth";
+import { navigate } from "astro:transitions/client";
+import {
+  useAuth,
+  signIn,
+  signUp,
+  signInWithGoogle,
+  verifySignInTwoFactor,
+  toUserMessage,
+  MIN_PASSWORD_LENGTH,
+} from "../../lib/auth";
 
 // Grid emits minmax(MIN, 1fr) where MIN is a hard floor, so MIN plus
 // the grid inset and page padding must fit the narrowest phone or
 // the column is clipped. 320 − 2×24 (page) − 2×16 (stacked inset)
 // = 240.
 const COLUMN_MIN_WIDTH = 240;
-
-// Mirrors Better Auth's default password minimum. The server is the
-// source of truth (its PASSWORD_TOO_SHORT still renders); this only
-// states the rule upfront and saves a round trip.
-const MIN_PASSWORD_LENGTH = 8;
 // repeat:'fit' (auto-fit) collapses the two columns to one —
 // expanding to fill — below 2×MIN + 32(gap) = 512px. The container
 // query reorders the image and tightens the inset at that same
@@ -85,27 +83,26 @@ const coverImage: CSSProperties = {
 // same path to swap without touching layout (object-fit:cover).
 const COVER_IMAGE_URL = "/template-assets/light-working-vertical-1.svg";
 
-// Google "G" (same four-color mark the Neon SDK renders on its own
-// Google button), inlined so the Astryx secondary button needs no
-// external asset. 16×16 like the reference social buttons.
-function GoogleMark() {
+// Google "G" brand logo — matches the Playground reference. Only Astryx primitives + inline SVG.
+function GoogleLogo() {
   return (
-    <svg width={16} height={16} viewBox="0 0 256 262" aria-hidden="true">
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+      <circle cx="12" cy="12" r="11" fill="#fff" />
       <path
-        d="M255.878 133.451c0-10.734-.871-18.567-2.756-26.69H130.55v48.448h71.947c-1.45 12.04-9.283 30.172-26.69 42.356l-.244 1.622 38.755 30.023 2.685.268c24.659-22.774 38.875-56.282 38.875-96.027"
-        fill="#4285f4"
+        d="M21.8 12.22c0-.68-.06-1.35-.18-2h-8.82v3.8h5.04c-.22 1.2-.88 2.2-1.88 2.88v2.34h3.04c1.78-1.64 2.8-4.06 2.8-6.92z"
+        fill="#4285F4"
       />
       <path
-        d="M130.55 261.1c35.248 0 64.839-11.605 86.453-31.622l-41.196-31.913c-11.024 7.688-25.82 13.055-45.257 13.055-34.523 0-63.824-22.773-74.269-54.25l-1.531.13-40.298 31.187-.527 1.465C35.393 231.798 79.49 261.1 130.55 261.1"
-        fill="#34a853"
+        d="M12.82 21.42c2.54 0 4.68-.84 6.24-2.28l-3.04-2.34c-.84.56-1.92.9-3.2.9-2.46 0-4.54-1.66-5.28-3.9H4.38v2.46c1.58 3.12 4.82 5.16 8.44 5.16z"
+        fill="#34A853"
       />
       <path
-        d="M56.281 156.37c-2.756-8.123-4.351-16.827-4.351-25.82 0-8.994 1.595-17.697 4.206-25.82l-.073-1.73L15.26 71.312l-1.335.635C5.077 89.644 0 109.517 0 130.55s5.077 40.905 13.925 58.602z"
-        fill="#fbbc05"
+        d="M7.54 13.8c-.38-.84-.6-1.78-.6-2.78s.22-1.94.6-2.78V5.78H4.38c-.9 1.82-1.42 3.86-1.42 6.22 0 2.36.52 4.4 1.42 6.22l3.16-2.46z"
+        fill="#FBBC05"
       />
       <path
-        d="M130.55 50.479c24.514 0 41.05 10.589 50.479 19.438l36.844-35.974C195.245 12.91 165.798 0 130.55 0 79.49 0 35.393 29.301 13.925 71.947l42.211 32.783c10.59-31.477 39.891-54.251 74.414-54.251"
-        fill="#eb4335"
+        d="M12.82 7.66c1.38 0 2.64.48 3.62 1.42l2.7-2.7C17.1 4.88 15.08 4 12.82 4c-3.62 0-6.86 2.04-8.44 5.16l3.16 2.46c.74-2.24 2.82-3.9 5.28-3.9z"
+        fill="#EA4335"
       />
     </svg>
   );
@@ -154,9 +151,30 @@ export type AuthLayoutProps = {
 };
 
 type FieldError = {
-  field: "name" | "email" | "password";
+  field: "name" | "email" | "password" | "code" | "form";
   message: string;
 };
+
+/**
+ * Server failure → user-safe copy. Sign-in stays non-enumerating (the
+ * server answers the same INVALID_EMAIL_OR_PASSWORD for unknown email
+ * and wrong password, and the copy never distinguishes them). Sign-up
+ * names the already-registered case because the server itself reveals
+ * it — and "log in instead" is the fix.
+ */
+function toEmailAuthMessage(error: unknown, isSignup: boolean): string {
+  let haystack = "";
+  if (typeof error === "object" && error !== null) {
+    const e = error as { code?: unknown; message?: unknown };
+    haystack = `${String(e.code ?? "")} ${String(e.message ?? "")}`;
+  }
+  if (isSignup && (/EXISTS/.test(haystack) || /already/i.test(haystack))) {
+    return "That email is already registered. Log in instead.";
+  }
+  return isSignup
+    ? "Couldn't create your account. Try again."
+    : "Couldn't sign in with those details. Check your email and password and try again.";
+}
 
 export default function AuthLayout(props: AuthLayoutProps) {
   const isSignup = props.pathname === "sign-up";
@@ -165,172 +183,111 @@ export default function AuthLayout(props: AuthLayoutProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<FieldError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  // Signup can end in "verify your email" instead of a session —
-  // the success card then says check-your-inbox and we do NOT
-  // navigate. Forgot-password reuses the same success slot.
-  const [success, setSuccess] = useState({
-    title: "You're signed in",
-    description: "Redirecting to your dashboard…",
-  });
+  // Second step when the account has 2FA on: email sign-in answers
+  // twoFactorRedirect instead of a session, and this code finishes it.
+  const [needsTwoFactor, setNeedsTwoFactor] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
 
-  // Spec §B: logged-in users bounce to /new on mount.
+  const auth = useAuth();
+
+  // Logged-in users don't need this page.
   useEffect(() => {
-    let cancelled = false;
-    void authClient.getSession().then((res) => {
-      if (cancelled) return;
-      if (res?.data) window.location.assign("/new");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (auth.status === "authenticated") navigate("/new");
+  }, [auth.status]);
 
-  function succeed(title: string, description: string, navigate: boolean) {
-    setSuccess({ title, description });
-    setIsSuccess(true);
-    if (navigate) {
-      window.setTimeout(() => {
-        window.location.assign("/new");
-      }, 800);
-    }
+  // Field-level failures paint the field itself (Astryx renders the
+  // message box from status.message); server failures have no single
+  // field, so they render as plain copy under the form instead.
+  function statusFor(field: FieldError["field"]) {
+    return error?.field === field
+      ? { type: "error" as const, message: error.message }
+      : undefined;
   }
 
-  async function handleSubmit() {
-    if (isLoading || isSuccess) return;
-    if (isSignup && !name.trim()) {
-      setError({ field: "name", message: "Enter your name." });
-      return;
-    }
-    if (!email.trim()) {
-      setError({ field: "email", message: "Enter your email." });
-      return;
-    }
-    if (!password) {
-      setError({ field: "password", message: "Enter your password." });
-      return;
-    }
-    // Neon rejects short passwords server-side (PASSWORD_TOO_SHORT) —
-    // state the rule upfront and enforce it here so signup never burns
-    // a round trip to learn it. 8 matches Better Auth's default minimum;
-    // if the project ever raises it, the server message still renders.
-    if (isSignup && password.length < MIN_PASSWORD_LENGTH) {
-      setError({
-        field: "password",
-        message: `Use at least ${MIN_PASSWORD_LENGTH} characters.`,
-      });
-      return;
-    }
+  async function handleGoogleSignIn() {
+    if (isLoading) return;
     setIsLoading(true);
     setError(null);
+    console.log("[AuthLayout] Calling signInWithGoogle...");
     try {
-      if (isSignup) {
-        const res = await authClient.signUp.email({
-          email: email.trim(),
-          password,
-          name: name.trim(),
-        });
-        if (res?.error) {
-          setError({
-            field: "password",
-            message:
-              typeof res.error.message === "string" && res.error.message
-                ? res.error.message
-                : "Couldn't create your account. Try again.",
-          });
-          return;
-        }
-        // Some configs require email verification before a session
-        // exists — check before deciding to navigate.
-        const session = await authClient.getSession();
-        if (session?.data) {
-          succeed("You're signed in", "Redirecting to your dashboard…", true);
-        } else {
-          succeed(
-            "Check your inbox",
-            `We sent a verification link to ${email.trim()}.`,
-            false,
-          );
-        }
-      } else {
-        const res = await authClient.signIn.email({
-          email: email.trim(),
-          password,
-        });
-        if (res?.error) {
-          setError({
-            field: "password",
-            message:
-              typeof res.error.message === "string" && res.error.message
-                ? res.error.message
-                : "Incorrect password. Try again.",
-          });
-          return;
-        }
-        succeed("You're signed in", "Redirecting to your dashboard…", true);
-      }
-    } catch (error) {
+      void signInWithGoogle();
+    } catch (e: unknown) {
+      console.error("[AuthLayout] Google sign-in failed:", e);
       setError({
         field: "password",
-        message: sdkMessage(error, "Something went wrong. Try again."),
+        message: (e instanceof Error ? e.message : "Google sign-in failed. Try again."),
       });
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function handleGoogle() {
-    if (isLoading || isGoogleLoading || isSuccess) return;
-    setIsGoogleLoading(true);
-    setError(null);
-    try {
-      await authClient.signIn.social({
-        provider: "google",
-        callbackURL: "/new",
-      });
-    } catch (error) {
+  async function handleEmailAuth() {
+    if (isLoading) return;
+    const cleanEmail = email.trim();
+    if (isSignup && !name.trim()) {
+      setError({ field: "name", message: "Enter your name." });
+      return;
+    }
+    if (!/.+@.+\..+/.test(cleanEmail)) {
+      setError({ field: "email", message: "Enter a valid email address." });
+      return;
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
       setError({
         field: "password",
-        message: sdkMessage(error, "Google sign-in failed. Try again."),
+        message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
       });
-      setIsGoogleLoading(false);
-    }
-    // On success the SDK redirects away, so no reset here.
-  }
-
-  async function handleForgot() {
-    if (isLoading || isSuccess) return;
-    if (!email.trim()) {
-      setError({ field: "email", message: "Enter your email first." });
       return;
     }
     setIsLoading(true);
     setError(null);
     try {
-      const res = await authClient.requestPasswordReset({
-        email: email.trim(),
-        redirectTo: "/login",
-      });
-      if (res?.error) {
-        setError({
-          field: "password",
-          message:
-            typeof res.error.message === "string" && res.error.message
-              ? res.error.message
-              : "Couldn't send the reset email. Try again.",
-        });
+      const res = isSignup
+        ? await signUp(cleanEmail, password, name.trim())
+        : await signIn(cleanEmail, password);
+      if (res.error) {
+        setError({ field: "form", message: toEmailAuthMessage(res.error, isSignup) });
         return;
       }
-      succeed(
-        "Check your inbox",
-        `We sent a reset link to ${email.trim()}.`,
-        false,
-      );
-    } catch (error) {
+      if (
+        res.data != null &&
+        typeof res.data === "object" &&
+        (res.data as { twoFactorRedirect?: unknown }).twoFactorRedirect === true
+      ) {
+        setTotpCode("");
+        setNeedsTwoFactor(true);
+        return;
+      }
+      navigate("/new");
+    } catch (e: unknown) {
       setError({
-        field: "password",
-        message: sdkMessage(error, "Couldn't send the reset email. Try again."),
+        field: "form",
+        message: toUserMessage(e, "Something went wrong. Try again."),
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleVerifySecondFactor() {
+    if (isLoading) return;
+    if (totpCode.trim().length < 6) {
+      setError({
+        field: "code",
+        message: "Enter the 6-digit code from your authenticator app.",
+      });
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      await verifySignInTwoFactor(totpCode);
+      navigate("/new");
+    } catch (e: unknown) {
+      setError({
+        field: "code",
+        message: toUserMessage(e, "That code didn't work. Try again."),
       });
     } finally {
       setIsLoading(false);
@@ -365,14 +322,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
 
                   <StackItem size="fill">
                     <Center axis="vertical" height="100%">
-                      {isSuccess ? (
-                        <EmptyState
-                          title={success.title}
-                          description={success.description}
-                          icon={<Icon icon={CheckCircleIcon} size="lg" />}
-                        />
-                      ) : (
-                        <VStack gap={4} hAlign="stretch" width="100%">
+                      <VStack gap={4} hAlign="stretch" width="100%">
                           <VStack gap={1}>
                             <Text type="display-1" as="h2">
                               {props.title}
@@ -382,119 +332,123 @@ export default function AuthLayout(props: AuthLayoutProps) {
                             </Text>
                           </VStack>
 
-                          <VStack gap={2}>
-                            {isSignup && (
+                          {needsTwoFactor ? (
+                            <VStack gap={2}>
+                              <Text type="body" color="secondary" size="sm">
+                                This account uses two-factor authentication.
+                                Enter the 6-digit code from your authenticator
+                                app.
+                              </Text>
+                              <TextInput
+                                label="Authenticator code"
+                                placeholder="6-digit code"
+                                value={totpCode}
+                                onChange={setTotpCode}
+                                status={statusFor("code")}
+                                onEnter={() => {
+                                  void handleVerifySecondFactor();
+                                }}
+                              />
+                              {error?.field === "form" && (
+                                <Text type="supporting">{error.message}</Text>
+                              )}
+                              <Button
+                                label="Verify and log in"
+                                variant="primary"
+                                size="lg"
+                                isLoading={isLoading}
+                                onClick={() => {
+                                  void handleVerifySecondFactor();
+                                }}
+                              />
+                              <Button
+                                label="Back"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => {
+                                  setNeedsTwoFactor(false);
+                                  setError(null);
+                                }}
+                              />
+                            </VStack>
+                          ) : (
+                            <VStack gap={2}>
+                              {isSignup && (
                               <TextInput
                                 label="Name"
                                 isLabelHidden
-                                placeholder="Name"
+                                placeholder="Your name"
                                 value={name}
-                                onChange={(v: string) => {
-                                  setName(v);
-                                  setError(null);
-                                }}
+                                onChange={setName}
+                                status={statusFor("name")}
                                 size="lg"
-                                status={
-                                  error?.field === "name"
-                                    ? { type: "error", message: error.message }
-                                    : undefined
-                                }
                               />
-                            )}
-                            <TextInput
-                              label="Email"
-                              isLabelHidden
-                              type="email"
-                              placeholder="name@company.com"
-                              value={email}
-                              onChange={(v: string) => {
-                                setEmail(v);
-                                setError(null);
-                              }}
-                              size="lg"
-                              status={
-                                error?.field === "email"
-                                  ? { type: "error", message: error.message }
-                                  : undefined
-                              }
-                            />
-                            <VStack gap={1}>
+                              )}
+                              <TextInput
+                                label="Email"
+                                isLabelHidden
+                                type="email"
+                                placeholder="name@college.com"
+                                value={email}
+                                onChange={setEmail}
+                                status={statusFor("email")}
+                                size="lg"
+                              />
                               <TextInput
                                 label="Password"
                                 isLabelHidden
-                                placeholder="Enter your password"
                                 type="password"
-                                value={password}
-                                onChange={(v: string) => {
-                                  setPassword(v);
-                                  setError(null);
-                                }}
-                                size="lg"
+                                placeholder={
+                                  isSignup ? "Choose your password" : "Enter your password"
+                                }
                                 description={
                                   isSignup
-                                    ? `At least ${MIN_PASSWORD_LENGTH} characters.`
+                                    ? `At least ${MIN_PASSWORD_LENGTH} characters`
                                     : undefined
                                 }
-                                status={
-                                  error?.field === "password"
-                                    ? { type: "error", message: error.message }
-                                    : undefined
-                                }
+                                value={password}
+                                onChange={setPassword}
+                                status={statusFor("password")}
+                                onEnter={() => {
+                                  void handleEmailAuth();
+                                }}
+                                size="lg"
                               />
-                              {!isSignup && (
-                                <VStack hAlign="end">
-                                  <Link
-                                    href="/login"
-                                    size="sm"
-                                    color="secondary"
-                                    type="supporting"
-                                    onClick={(e: React.MouseEvent) => {
-                                      e.preventDefault();
-                                      void handleForgot();
-                                    }}
-                                  >
-                                    Forgot your password?
-                                  </Link>
-                                </VStack>
+                              {error?.field === "form" && (
+                                <Text type="supporting">{error.message}</Text>
                               )}
+                              <Button
+                                label={isSignup ? "Create account" : "Log in"}
+                                variant="primary"
+                                size="lg"
+                                isLoading={isLoading}
+                                onClick={() => {
+                                  void handleEmailAuth();
+                                }}
+                              />
+                              <Divider label="Or continue with" />
+                              <Button
+                                label="Google"
+                                variant="secondary"
+                                size="lg"
+                                isLoading={isLoading}
+                                icon={<GoogleLogo />}
+                                onClick={() => {
+                                  void handleGoogleSignIn();
+                                }}
+                              />
                             </VStack>
-                          </VStack>
-
-                          <Button
-                            label={isSignup ? "Create an account" : "Login"}
-                            variant="primary"
-                            size="lg"
-                            isLoading={isLoading}
-                            onClick={() => {
-                              void handleSubmit();
-                            }}
-                          />
-
-                          <Divider label="Or continue with" />
-
-                          <Button
-                            label="Google"
-                            variant="secondary"
-                            icon={<GoogleMark />}
-                            size="lg"
-                            isLoading={isGoogleLoading}
-                            onClick={() => {
-                              void handleGoogle();
-                            }}
-                          />
+                          )}
                         </VStack>
-                      )}
                     </Center>
                   </StackItem>
 
-                  {!isSuccess && (
-                    <Text type="supporting" color="secondary">
-                      {props.swapLabel}{" "}
-                      <Link href={props.swapHref} type="supporting">
-                        {props.swapHref === "/login" ? "Log in" : "Sign up"}
-                      </Link>
-                    </Text>
-                  )}
+                  <Text type="supporting" color="secondary">
+                    {props.swapLabel}{" "}
+                    <Link href={props.swapHref} type="supporting">
+                      {props.swapHref === "/login" ? "Log in" : "Sign up"}
+                    </Link>
+                  </Text>
                 </VStack>
               </Section>
 

@@ -16,10 +16,10 @@
     "@astryxdesign/core": "^0.5.2",
     "@astryxdesign/theme-neutral": "^0.5.2",
     "@heroicons/react": "^2.2.0",
-    "@neondatabase/auth": "^0.5.0-beta",
-    "@neondatabase/auth-ui": "^0.3.0-beta",
     "@stylexjs/stylex": "^0.19.0",
     "astro": "^6.0.0",
+    "better-auth": "^1.7.3",
+    "cobe": "^2.0.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -31,7 +31,11 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
+    "@astrojs/node": "^10.0.2",
     "@astryxdesign/cli": "^0.5.2",
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
     "typescript": "^5.9.3"
   }
 }

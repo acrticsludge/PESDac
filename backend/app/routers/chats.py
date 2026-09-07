@@ -8,14 +8,15 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import security
+from app import rate_limit, security
 from app.db import get_db
-from app.deps import check_mutation_origin, get_current_user_from_neon
+from app.deps import check_mutation_origin, get_current_user
 from app.models.chats import Chat
-from app.schemas.chats import ChatCreate, ChatOut, ChatPatch
+from app.models.users import User
+from app.schemas.chats import ChatCreate, ChatPatch
 from app.schemas.common import error_body
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -39,8 +40,8 @@ def _get_owned(db: Session, user_id, code: str) -> Chat | None:
 
 
 @router.get("")
-def list_chats(
-    result=Depends(get_current_user_from_neon),
+async def list_chats(
+    result: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     archived: bool = False,
     subject: str | None = None,
@@ -48,8 +49,6 @@ def list_chats(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    if isinstance(result, JSONResponse):
-        return result
     stmt = select(Chat).where(Chat.user_id == result.id, Chat.is_archived.is_(archived))
     if subject:
         stmt = stmt.where(Chat.subject == subject)
@@ -63,11 +62,11 @@ def list_chats(
 
 
 @router.post("", status_code=201)
-def create_chat(body: ChatCreate, request: Request, result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
-    if isinstance(result, JSONResponse):
-        return result
+async def create_chat(body: ChatCreate, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
+    if limited := rate_limit.check("chats-create", request, 60, 60):
+        return limited
     for _ in range(5):
         code = security.gen_chat_code()
         if _get_owned(db, result.id, code) is None and db.scalar(select(Chat).where(Chat.code == code)) is None:
@@ -84,9 +83,7 @@ def create_chat(body: ChatCreate, request: Request, result=Depends(get_current_u
 
 
 @router.patch("/{code}")
-def patch_chat(code: str, body: ChatPatch, request: Request, result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
-    if isinstance(result, JSONResponse):
-        return result
+async def patch_chat(code: str, body: ChatPatch, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     chat = _get_owned(db, result.id, code)
@@ -108,9 +105,7 @@ def patch_chat(code: str, body: ChatPatch, request: Request, result=Depends(get_
 
 
 @router.delete("/{code}", status_code=204)
-def delete_chat(code: str, request: Request, result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
-    if isinstance(result, JSONResponse):
-        return result
+async def delete_chat(code: str, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     chat = _get_owned(db, result.id, code)
@@ -122,12 +117,12 @@ def delete_chat(code: str, request: Request, result=Depends(get_current_user_fro
 
 
 @router.delete("", status_code=200)
-def clear_chats(request: Request, result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
+async def clear_chats(request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Delete-all (mirrors clearAllChats): chats only, profile/demo kept."""
-    if isinstance(result, JSONResponse):
-        return result
     if denied := check_mutation_origin(request):
         return denied
+    if limited := rate_limit.check("chats-clear", request, 10, 300):
+        return limited
     count = db.query(Chat).filter(Chat.user_id == result.id).delete()
     db.commit()
     return {"deleted": count}

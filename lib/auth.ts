@@ -1,23 +1,23 @@
 import { betterAuth } from "better-auth";
-import { twoFactor } from "better-auth/plugins";
+import { twoFactor, jwt } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "./db";
+import * as schema from "./db/schema";
+
+// Same dual-source rule as lib/db/index.ts: Astro 6 dev SSR exposes
+// .env through import.meta.env, not process.env.
+const serverEnv = (k: string): string | undefined =>
+  process.env[k] ??
+  (import.meta.env as Record<string, string | undefined>)[k];
 
 export const auth = betterAuth({
   appName: "PESDac",
-  baseURL: process.env.BETTER_AUTH_URL || "http://localhost:4321",
-  secret: process.env.BETTER_AUTH_SECRET!,
+  baseURL: serverEnv("BETTER_AUTH_URL") || "http://localhost:4321",
+  secret: serverEnv("BETTER_AUTH_SECRET")!,
   
   database: drizzleAdapter(db, {
     provider: "pg",
-    schema: {
-      user: "user",
-      session: "session",
-      account: "account",
-      verification: "verification",
-      twoFactor: "two_factor",
-      passkey: "passkey",
-    },
+    schema,
   }),
   
   emailAndPassword: {
@@ -29,14 +29,22 @@ export const auth = betterAuth({
   
   socialProviders: {
     google: {
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      redirectURI: `${process.env.BETTER_AUTH_URL}/api/auth/callback/google`,
+      clientId: serverEnv("GOOGLE_CLIENT_ID")!,
+      clientSecret: serverEnv("GOOGLE_CLIENT_SECRET")!,
     },
   },
   
   plugins: [
-    twoFactor({ issuer: "PESDac" }),
+    // allowPasswordless: Google-only users have no credential password,
+    // so password-gated 2FA flows must not demand one. Users WITH a
+    // password still have to provide it (BetterAuth checks the credential
+    // account when one exists).
+    twoFactor({ issuer: "PESDac", allowPasswordless: true }),
+    // Issues short-lived JWTs (GET /api/auth/token) and serves the JWKS
+    // (GET /api/auth/jwks) the FastAPI backend verifies against. The
+    // token payload is the session user (sub = user id, incl. email),
+    // which is exactly what backend/app/auth/betterauth.py requires.
+    jwt(),
   ],
 
   session: {
@@ -45,10 +53,13 @@ export const auth = betterAuth({
       maxAge: 60 * 60 * 24 * 7, // 7 days
     },
   },
-  
-  advanced: {
-    crossSubDomainCookies: {
-      enabled: false,
+
+  // Account deletion is a first-class flow (profile Danger zone): direct
+  // delete gated by a fresh session (no email verification step — the app
+  // has no email provider). See apiDeleteAccount in the frontend facade.
+  user: {
+    deleteUser: {
+      enabled: true,
     },
   },
 });

@@ -2,6 +2,7 @@
 import "../styles/global.css";
 import { ClientRouter } from "astro:transitions";
 import AppLayout from "../components/layout/AppLayout";
+import InitialSession from "../components/layout/InitialSession.astro";
 ---
 
 <html lang="en">
@@ -18,6 +19,7 @@ import AppLayout from "../components/layout/AppLayout";
   </head>
 
   <body>
+    <InitialSession />
     <AppLayout client:load transition:persist="pesdac-shell" initialView="profile" />
   </body>
 </html>
