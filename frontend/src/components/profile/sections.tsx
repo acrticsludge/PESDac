@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode, type ComponentType, type SVGProps } from "react";
+import { useToast } from "@astryxdesign/core/Toast";
 
 import {
   VStack,
@@ -951,27 +952,42 @@ export function PrivacySection() {
   const profile = getProfile();
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
   const loggedIn = auth.status === "authenticated";
+  // Toast viewport: PrivacySection lives inside ProfileDialog which is
+  // rendered under the shell's LayerProvider, so useToast() works here.
+  const toast = useToast();
 
   // F2: server export when logged in, local dump when logged out.
+  // Per slice-12 toast policy: one success Toast once the download
+  // begins; the spinner sits on the button while the server is hit.
   async function handleExport() {
+    if (isExporting) return;
+    setIsExporting(true);
     setServerError(null);
     try {
       const data = loggedIn
         ? await apiFetch<Record<string, unknown>>("/users/me/export")
         : dumpStore();
       downloadJson("pesdac-data.json", data);
+      toast({ body: "Your data export is ready.", type: "info" });
     } catch (error) {
       setServerError(toUserMessage(error, "Export failed. Try again."));
+    } finally {
+      setIsExporting(false);
     }
   }
 
-  // F3: server delete-all + local wipe when logged in (overlays still
-  // live in memory until the messages slice — clearAllChats covers the
-  // in-memory customs keys too, so no ghosts remain); local-only path
-  // unchanged when logged out. Keeps the existing confirm dialog.
+  // F3: server delete-all + local wipe when logged in. Per slice-12:
+  // do NOT clear the local store until the server request succeeds
+  // when authenticated — otherwise a failed server call leaves the
+  // server with chats the user can't see, and a successful one that
+  // races the clear is still consistent (server is the source of
+  // truth). Local-only path (logged out) is unchanged.
   async function handleClearAll() {
-    setConfirmingClear(false);
+    if (isClearingAll) return;
+    setIsClearingAll(true);
     setServerError(null);
     if (loggedIn) {
       try {
@@ -980,10 +996,14 @@ export function PrivacySection() {
         setServerError(
           toUserMessage(error, "Couldn't delete chats. Try again."),
         );
+        setIsClearingAll(false);
         return;
       }
     }
     clearAllChats();
+    setIsClearingAll(false);
+    setConfirmingClear(false);
+    if (loggedIn) toast({ body: "All chats deleted.", type: "info" });
   }
 
   return (
@@ -1026,7 +1046,11 @@ export function PrivacySection() {
                 label="Export my data"
                 variant="secondary"
                 size="sm"
-                onClick={() => void handleExport()}
+                isLoading={isExporting}
+                isDisabled={isExporting}
+                clickAction={() => {
+                  void handleExport();
+                }}
               >
                 Export
               </Button>
@@ -1064,6 +1088,7 @@ export function PrivacySection() {
         title="Delete all chats?"
         description="Every chat and its messages will be permanently removed. This cannot be undone."
         actionLabel="Delete"
+        isActionLoading={isClearingAll}
         onAction={() => void handleClearAll()}
       />
     </VStack>

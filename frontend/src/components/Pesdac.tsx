@@ -545,6 +545,10 @@ export default function ShellSideNav({
   // route to re-login. Guarded against reentrancy — apiLogout's
   // own backend call 401s too and would re-fire this event.
   const authExpiredRef = useRef(false);
+  // Per slice-12: the Logout row needs a visible pending state so
+  // the user sees feedback during the round-trip. Re-entry guard
+  // matches the row's isDisabled.
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   useEffect(() => {
     const onAuthRequired = () => {
       if (authExpiredRef.current) return;
@@ -583,16 +587,23 @@ export default function ShellSideNav({
   // Account row Logout: sign out, then leave the app routes — the gate
   // re-opens next visit.
   // Failure toasts (F1) and stays: navigating away would hide the error.
+  // Per slice-12: isLoggingOut drives the row's label + isDisabled
+  // so the user sees a "Logging out…" affordance during the round trip.
   const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
     try {
       await apiLogout();
     } catch (error) {
+      setIsLoggingOut(false);
       toastRef.current?.({
         body: toUserMessage(error, "Couldn't log you out. Try again."),
         type: "error",
       });
       return;
     }
+    // No `finally { setIsLoggingOut(false) }` — the navigate below
+    // unmounts this view; leaving the flag true is harmless.
     navigate("/login");
   };
   // Added interaction state; the existing welcome/composer state remains intact.
@@ -1107,11 +1118,13 @@ export default function ShellSideNav({
                 />
                 {authState.status === "authenticated" ? (
                   <SideNavItem
-                    label="Logout"
+                    label={isLoggingOut ? "Logging out…" : "Logout"}
                     icon={ArrowLeftStartOnRectangleIcon}
                     href="#"
+                    isDisabled={isLoggingOut}
                     onClick={(event) => {
                       event.preventDefault();
+                      if (isLoggingOut) return;
                       void handleLogout();
                     }}
                   />
@@ -1486,14 +1499,6 @@ export default function ShellSideNav({
                                 // Study tab, opened over the chat.
                                 openProfile("study");
                               },
-                            },
-                            {
-                              label: "Knowledge sources",
-                              onClick: () => {},
-                            },
-                            {
-                              label: "About PESDac",
-                              onClick: () => {},
                             },
                           ]}
                         />
