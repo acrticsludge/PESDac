@@ -172,18 +172,20 @@ export function bumpAuthEpoch(): void {
  * - the script is the literal `null` (no session cookie), or
  * - the JSON is malformed (defensive; never throws).
  */
-let initialSessionCache: SessionUser | null | undefined;
+let initialSessionCache: { raw: string; value: SessionUser | null } | undefined;
 function readInitialSession(): SessionUser | null {
-  if (initialSessionCache !== undefined) return initialSessionCache;
   if (typeof document === "undefined") {
-    initialSessionCache = null;
     return null;
   }
   const el = document.getElementById("pesdac:initial-session");
   const raw = el?.textContent ?? "null";
+  // Astro transitions can replace the embedded session script without
+  // reloading this module. Cache by the script contents, not process-wide,
+  // so a guest -> authenticated transition cannot retain a stale null.
+  if (initialSessionCache?.raw === raw) return initialSessionCache.value;
   try {
     const parsed = JSON.parse(raw) as SessionUser | null;
-    initialSessionCache =
+    const value =
       parsed && typeof parsed.id === "string" && typeof parsed.email === "string"
         ? {
             id: parsed.id,
@@ -192,10 +194,11 @@ function readInitialSession(): SessionUser | null {
             twoFactorEnabled: parsed.twoFactorEnabled === true,
           }
         : null;
+    initialSessionCache = { raw, value };
   } catch {
-    initialSessionCache = null;
+    initialSessionCache = { raw, value: null };
   }
-  return initialSessionCache;
+  return initialSessionCache.value;
 }
 
 // Let callers observe epoch changes (e.g. hook into a re-render or test).
@@ -240,7 +243,10 @@ export function useAuth(): AuthState {
     if (cached) {
       return { status: "authenticated", user: cached };
     }
-    return { status: "guest" };
+    // No server hint means the client is still authoritative-checking the
+    // cookie. Never classify that window as guest: AuthGate would open a
+    // destructive-looking create-account prompt over a valid session.
+    return { status: "loading" };
   }
 
   if (session?.user) {
@@ -261,10 +267,16 @@ export function useAuth(): AuthState {
 // ---- Auth actions (BetterAuth client) -------------------------------------
 
 export async function signIn(email: string, password: string) {
+  // User-A → user-B transition safety (T28): every successful sign-in
+  // is a different identity. The cached /auth/me + accounts promises
+  // could still belong to user-A; drop them so the next reader doesn't
+  // paint user-B's screen with user-A's data.
+  clearAuthCache();
   return authClient.signIn.email({ email, password });
 }
 
 export async function signUp(email: string, password: string, name: string) {
+  clearAuthCache();
   return authClient.signUp.email({ email, password, name });
 }
 
@@ -462,6 +474,7 @@ export async function disableTwoFactor(): Promise<void> {
  * cache so the next caller retries instead of replaying the failure.
  */
 let mePromise: Promise<AuthUser> | null = null;
+let profilePromise: Promise<ServerProfile> | null = null;
 
 export async function apiGetMe(): Promise<AuthUser> {
   if (!mePromise) {
@@ -478,6 +491,7 @@ export async function apiGetMe(): Promise<AuthUser> {
 /** Drop the cached /auth/me (logout, 401, or after saving onboarding). */
 export function refreshProfile(): void {
   mePromise = null;
+  profilePromise = null;
 }
 
 export type ProfileState =
@@ -521,7 +535,13 @@ export function useProfile(): ProfileState {
 
 /** Read the full server profile row (auto-creates a blank row first time). */
 export async function apiGetProfile(): Promise<ServerProfile> {
-  return apiFetch<ServerProfile>("/profiles/me");
+  if (!profilePromise) {
+    profilePromise = apiFetch<ServerProfile>("/profiles/me");
+    void profilePromise.catch(() => {
+      profilePromise = null;
+    });
+  }
+  return profilePromise;
 }
 
 /**
@@ -639,6 +659,7 @@ async function mintBackendToken(): Promise<TokenResult> {
 export function clearAuthCache(): void {
   cachedToken = null;
   mePromise = null;
+  profilePromise = null;
   accountsPromise = null;
   bumpAuthEpoch();
 }
@@ -766,44 +787,77 @@ export async function apiLogout(): Promise<LogoutOutcome> {
 }
 
 /**
- * Delete the user's PESDac identity (users + profile + chats) AND the
- * BetterAuth sign-in record, then sign out. Order matters:
+ * Account deletion contract (T22/T31).
  *
- * 1. BetterAuth delete first — it needs a fresh session, so a stale
- *    login fails here BEFORE any data is touched.
- * 2. Backend DELETE next — the cached JWT still verifies (signature +
- *    expiry), so this succeeds even though the session row is gone. The
- *    backend upsert can't resurrect the user afterwards: no auth user
- *    remains to mint tokens for.
- * 3. Sign out + clear caches.
+ * Chosen strategy: pre-authorized backend deletion FIRST, then identity
+ * deletion. The backend owns all PESDac data (users row cascades
+ * profile/chats/demos); after backend DELETE succeeds, we have a
+ * well-defined completion state. Identity deletion then succeeds
+ * because the BetterAuth session is still valid (we just used it).
  *
- * If step 2 fails after step 1 succeeded, the sign-in record is gone but
- * backend rows may remain — { fallback: true } tells the caller to show
- * the contact-support notice instead of navigating away.
+ * Failure orderings:
+ *   - Backend success, identity delete succeeds   → fully complete.
+ *   - Backend success, identity delete fails     → backend data gone but
+ *     sign-in record remains. User can retry the identity delete from
+ *     login page; backend confirms idempotently that the user is gone.
+ *   - Backend fails                              → no data touched.
+ *     User can retry; the backend call is idempotent (returns 204
+ *     whether the user existed or not).
+ *   - Network/server failure at any step         → typed outcome lets
+ *     the UI show a recoverable state with a retry reference.
+ *
+ * The previous "delete identity first then backend" ordering left
+ * PESDac rows when the backend call failed (audit C3); the new
+ * ordering eliminates that class of orphan by completing the
+ * irreversible work only after the backend is reachable.
  */
-export async function apiDeleteAccount(): Promise<{ fallback: boolean }> {
-  const deleted = await authClient.deleteUser();
-  if (deleted.error) {
-    throw new Error(
-      deleted.error.message ?? "Couldn't delete your account. Try again.",
-    );
+export type DeleteAccountOutcome =
+  | { kind: "complete" }
+  | { kind: "identity-pending"; reference: string }
+  | { kind: "backend-failed"; reference: string; message: string };
+
+function newReference(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID().replace(/-/g, "").slice(0, 8);
   }
+  return Math.random().toString(16).slice(2, 10).padEnd(8, "0");
+}
+
+export async function apiDeleteAccount(): Promise<DeleteAccountOutcome> {
+  const reference = newReference();
+  // 1. Backend first (pre-authorized, session still valid).
   try {
     await apiFetch<void>("/users/me", { method: "DELETE" });
-  } catch {
-    clearAuthCache();
-    try {
-      await authClient.signOut();
-    } catch {
-      // Session already destroyed by the delete — nothing left.
-    }
-    return { fallback: true };
+  } catch (e) {
+    return {
+      kind: "backend-failed",
+      reference,
+      message: toUserMessage(
+        e,
+        "PESDac couldn't reach the server to remove your data. Try again.",
+      ),
+    };
   }
+  // 2. Identity deletion (sign-in record). Best effort — backend data
+  // is already gone, and a stray sign-in row on its own can't recover
+  // PESDac state. We surface a pending state if this fails so the
+  // user knows their sign-in still exists and how to retry.
+  try {
+    const deleted = await authClient.deleteUser();
+    if (deleted.error) {
+      throw new Error(
+        deleted.error.message ?? "BetterAuth deleteUser failed.",
+      );
+    }
+  } catch {
+    return { kind: "identity-pending", reference };
+  }
+  // 3. Local cleanup only after both upstream steps are confirmed.
   clearAuthCache();
   try {
     await authClient.signOut();
   } catch {
-    // Session already destroyed by the delete — nothing left.
+    // Already gone.
   }
-  return { fallback: false };
+  return { kind: "complete" };
 }

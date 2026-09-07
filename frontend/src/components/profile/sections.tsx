@@ -29,6 +29,7 @@ import { CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Divider } from "@astryxdesign/core/Divider";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import {
   UserIcon,
   EnvelopeIcon,
@@ -212,22 +213,39 @@ export function IdentitySection() {
   const displayName = authUser?.displayName || profile.displayName;
   const email = authUser?.email || profile.email;
 
-  // Delete the PESDac identity (users + profile + chats), then route to
-  // /signup for a fresh start.
+  // Delete the PESDac identity (users + profile + chats), then the
+  // BetterAuth sign-in record. T22/T31: backend-first ordering — the
+  // backend is the source of truth for PESDac data; deleting it before
+  // the BetterAuth identity means we never leave sign-in alive over an
+  // orphaned users row. The backend call is idempotent (204 whether
+  // the user existed or not), so retrying a partial deletion is safe.
   async function handleDeleteAccount() {
     setIsDeleting(true);
     try {
-      const { fallback } = await apiDeleteAccount();
+      const outcome = await apiDeleteAccount();
       setIsDeleting(false);
       setConfirmingDelete(false);
-      if (fallback) {
-        toast({
-          body:
-            "Deletion was incomplete — your sign-in is gone but some " +
-            "PESDac data may remain. Contact support to finish deletion.",
-          type: "error",
-        });
-        return;
+      switch (outcome.kind) {
+        case "complete":
+          navigate("/signup");
+          return;
+        case "identity-pending":
+          // Backend data is gone but the sign-in record remains. Tell
+          // the user the partial state and how to retry — never claim
+          // full success in this case.
+          toast({
+            body:
+              "Your PESDac data was removed. Sign-in still works; " +
+              `sign out and back in to finish (ref ${outcome.reference}).`,
+            type: "info",
+          });
+          return;
+        case "backend-failed":
+          toast({
+            body: `${outcome.message} (ref ${outcome.reference})`,
+            type: "error",
+          });
+          return;
       }
     } catch (error) {
       setIsDeleting(false);
@@ -236,9 +254,7 @@ export function IdentitySection() {
         body: toUserMessage(error, "Couldn't delete your account. Try again."),
         type: "error",
       });
-      return;
     }
-    navigate("/signup");
   }
 
   // Identity fields synced to the server row (auth audit G1/G11):
@@ -1394,7 +1410,9 @@ export function AuthenticationSection() {
             }
             icon={GlobeAltIcon}
             control={
-              googleAccount != null ? (
+              accounts.status === "loading" ? (
+                <Skeleton width={96} height={32} />
+              ) : googleAccount != null ? (
                 canUnlink ? (
                   <Button
                     label="Unlink"

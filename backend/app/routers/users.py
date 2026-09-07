@@ -1,10 +1,19 @@
-"""Self-service data (arch §7.5): server-side export + delete-account cascade."""
+"""Self-service data (arch §7.5): server-side export + delete-account cascade.
+
+T22/T31 idempotency:
+- export is read-only and always returns the user's current rows.
+- DELETE /users/me is idempotent — a 204 is returned whether the user
+  existed or not. This makes the chosen "backend first, then identity"
+  deletion contract (frontend/src/lib/auth.ts: apiDeleteAccount) safe to
+  retry: if the identity delete succeeds but the frontend retries the
+  backend call before clearing caches, we still answer 204.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -36,14 +45,18 @@ async def export_me(result: User = Depends(get_current_user), db: Session = Depe
     }
 
 
-@router.delete("/me", status_code=202)
+@router.delete("/me", status_code=204)
 async def delete_me(request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     if limited := rate_limit.check("users-delete", request, 10, 300):
         return limited
+    # T22 idempotency: missing row is the same as "already deleted" — 204
+    # either way, so the frontend retry-after-partial-delete contract is
+    # safe. The current user_id here is the JWT subject (verified), not
+    # a path param, so cross-user access is impossible.
     user = db.get(User, result.id)
-    assert user is not None
-    db.delete(user)  # cascades: profile, chats, demo_state
-    db.commit()
-    return JSONResponse(status_code=202, content={})
+    if user is not None:
+        db.delete(user)  # cascades: profile, chats, demo_state
+        db.commit()
+    return Response(status_code=204)
