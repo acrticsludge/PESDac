@@ -94,8 +94,27 @@ export class AuthRequiredError extends ApiError {
  * (DNS/refused/offline) — the browser's "Failed to fetch" means
  * nothing to users, so map it to connection copy. Same for an
  * AbortError from the apiFetch timeout below.
+ *
+ * 404 has its own copy: a stale backend (route not registered yet)
+ * shows up as "Not Found", which is useless. Tell the user it's a
+ * server-version thing they can fix by restarting it. 5xx gets a
+ * generic "server hit an error" so the user doesn't get a stack
+ * trace-shaped message.
  */
 export function toUserMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return "That action isn't available. Restart the server and try again.";
+    }
+    if (error.status >= 500) {
+      return "The server hit an error. Try again in a moment.";
+    }
+    // 4xx (other than 401, which is AuthRequiredError): server's
+    // user-safe message if it has one, else the fallback.
+    return error.message && error.message !== "Not Found"
+      ? error.message
+      : fallback;
+  }
   if (error instanceof TypeError) {
     return "Couldn't reach the server. Check your connection and try again.";
   }
