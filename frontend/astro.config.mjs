@@ -28,6 +28,11 @@ export default defineConfig({
     // runtimes (which produces a proper ESM wrapper) so the import
     // resolves to a real function in the dev server.
     optimizeDeps: {
+      // Astryx exposes many subpath entrypoints. When the dependency graph
+      // or Vite config changes, an old optimized-deps manifest can make the
+      // dev server return 504 "Outdated Optimize Dep" responses. Rebuild the
+      // dev cache on startup so stale browser URLs cannot poison hydration.
+      force: true,
       include: [
         "react",
         "react-dom",

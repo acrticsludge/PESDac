@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import config
 from app.routers import auth, chats, demo_state, health, profiles, users
@@ -103,6 +104,14 @@ def create_app(validate: bool = True) -> FastAPI:
             content=error_body(code, message),
             headers=exc.headers,
         )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _starlette_http_exception(request: Request, exc: StarletteHTTPException):
+        # Starlette's router raises its own HTTPException for unmatched
+        # paths (404) and disallowed methods (405). FastAPI's handler
+        # only catches FastAPI's variant, so a 404 on `/api/v1/nope` would
+        # still ship as `{detail: "Not Found"}`. Re-wrap here.
+        return await _http_exception(request, exc)  # type: ignore[arg-type]
 
     @app.exception_handler(Exception)
     async def _internal(request: Request, exc: Exception):

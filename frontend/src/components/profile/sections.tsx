@@ -1175,17 +1175,16 @@ export function AuthenticationSection() {
   const [linkConfirmPassword, setLinkConfirmPassword] = useState("");
   const [isLinkingPassword, setIsLinkingPassword] = useState(false);
   // Inline status for the link form: each error paints on the field
-  // that produced it, matching the auth page pattern. `linkFormError`
-  // is reserved for "no specific field" cases — only the server error
-  // uses it, since it can't be attributed to a single input.
+  // that produced it, matching the auth page pattern. Server errors
+  // go straight to a toast (slice 15) — they have no field, and the
+  // form-level Text we used to use was invisible in the default text
+  // color anyway.
   const [linkFieldError, setLinkFieldError] = useState<string | null>(null);
   const [linkConfirmError, setLinkConfirmError] = useState<string | null>(null);
-  const [linkFormError, setLinkFormError] = useState<string | null>(null);
   // Same split for the change-password form: every field carries its
-  // own status, `changeFormError` is reserved for server-side errors.
+  // own status. Server errors go to a toast.
   const [changeCurrentError, setChangeCurrentError] = useState<string | null>(null);
   const [changeNewError, setChangeNewError] = useState<string | null>(null);
-  const [changeFormError, setChangeFormError] = useState<string | null>(null);
   // Post-mutation override: the session cookie cache can lag the fresh
   // 2FA flag, so the UI trusts its own confirmed writes first.
   const [twoFactorOn, setTwoFactorOn] = useState<boolean | null>(null);
@@ -1311,7 +1310,6 @@ export function AuthenticationSection() {
     if (isChangingPassword) return;
     setChangeCurrentError(null);
     setChangeNewError(null);
-    setChangeFormError(null);
     if (!currentPassword) {
       setChangeCurrentError("Enter your current password.");
       return;
@@ -1331,7 +1329,10 @@ export function AuthenticationSection() {
       setShowPasswordForm(false);
       setPasswordDone(true);
     } catch (e) {
-      setChangeFormError(toUserMessage(e, "Couldn't change your password. Try again."));
+      toast({
+        body: toUserMessage(e, "Couldn't change your password. Try again."),
+        type: "error",
+      });
     } finally {
       setIsChangingPassword(false);
     }
@@ -1340,12 +1341,13 @@ export function AuthenticationSection() {
   // Link a credential password to the current user. Google-only accounts
   // have no password to verify against, so the form asks for new +
   // confirm only. Each validation failure paints on the field it
-  // belongs to; only the server error is form-level. Per slice 14.
+  // belongs to; server errors go straight to a toast (slice 15) so
+  // the user sees them in the top-right instead of guessing whether
+  // some text in default color is an error.
   async function handleLinkPassword() {
     if (isLinkingPassword) return;
     setLinkFieldError(null);
     setLinkConfirmError(null);
-    setLinkFormError(null);
     if (linkNewPassword.length < MIN_PASSWORD_LENGTH) {
       setLinkFieldError(
         `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
@@ -1368,7 +1370,10 @@ export function AuthenticationSection() {
       setShowLinkPasswordForm(false);
       toast({ body: "Email + password linked.", type: "info" });
     } catch (e) {
-      setLinkFormError(toUserMessage(e, "Couldn't link password. Try again."));
+      toast({
+        body: toUserMessage(e, "Couldn't link password. Try again."),
+        type: "error",
+      });
     } finally {
       setIsLinkingPassword(false);
     }
@@ -1461,7 +1466,6 @@ export function AuthenticationSection() {
                     setShowLinkPasswordForm((v) => !v);
                     setLinkFieldError(null);
                     setLinkConfirmError(null);
-                    setLinkFormError(null);
                   }}
                 />
               }
@@ -1482,7 +1486,6 @@ export function AuthenticationSection() {
                     setShowPasswordForm((v) => !v);
                     setChangeCurrentError(null);
                     setChangeNewError(null);
-                    setChangeFormError(null);
                     setPasswordDone(false);
                   }}
                 />
@@ -1522,9 +1525,6 @@ export function AuthenticationSection() {
                 void handleChangePassword();
               }}
             />
-            {changeFormError != null && (
-              <Text type="supporting">{changeFormError}</Text>
-            )}
             <HStack gap={2}>
               <Button
                 label="Save new password"
@@ -1543,7 +1543,6 @@ export function AuthenticationSection() {
                   setShowPasswordForm(false);
                   setChangeCurrentError(null);
                   setChangeNewError(null);
-                  setChangeFormError(null);
                 }}
               />
             </HStack>
@@ -1585,7 +1584,6 @@ export function AuthenticationSection() {
                 void handleLinkPassword();
               }}
             />
-            {linkFormError != null && <Text type="supporting">{linkFormError}</Text>}
             <HStack gap={2}>
               <Button
                 label="Link password"
@@ -1606,7 +1604,6 @@ export function AuthenticationSection() {
                   setLinkConfirmPassword("");
                   setLinkFieldError(null);
                   setLinkConfirmError(null);
-                  setLinkFormError(null);
                 }}
               />
             </HStack>
