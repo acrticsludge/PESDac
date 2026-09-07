@@ -7,15 +7,15 @@
 // Selectors + Subjects CheckboxList with Select-all. Save PATCHes
 // /profiles/me with onboardingDone:true and mirrors the picks into the
 // local session store (reads are local-only; fetch-without-seed would
-// leave every consumer blank). Failure keeps the dialog open with a
-// Banner. Triple lock: purpose="required" + controlled-open ignores
+// leave every consumer blank). Failure keeps the dialog open and
+// surfaces the message inline under the form.
+// Triple lock: purpose="required" + controlled-open ignores
 // closes + Pesdac Esc yields while active (via onActiveChange).
 
 import { useEffect, useState } from "react";
 
 import { Dialog } from "@astryxdesign/core/Dialog";
 import { Button } from "@astryxdesign/core/Button";
-import { Banner } from "@astryxdesign/core/Banner";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Layout, LayoutContent, VStack } from "@astryxdesign/core/Layout";
 import {
@@ -155,13 +155,7 @@ export default function OnboardingDialog({
                     was lost — try again.
                   </Text>
                 </VStack>
-                {failure != null && (
-                  <Banner
-                    status="error"
-                    title="Connection failed"
-                    description={failure}
-                  />
-                )}
+                {failure != null && <Text type="supporting">{failure}</Text>}
                 <VStack hAlign="stretch">
                   <Button
                     label="Try again"
@@ -242,13 +236,7 @@ export default function OnboardingDialog({
                   Three quick picks so PESDac scopes answers to your course.
                 </Text>
               </VStack>
-              {failure != null && (
-                <Banner
-                  status="error"
-                  title="Couldn't save your profile"
-                  description={failure}
-                />
-              )}
+              {failure != null && <Text type="supporting">{failure}</Text>}
               <VStack gap={1}>
                 <Text type="label">Campus</Text>
                 <SegmentedControl

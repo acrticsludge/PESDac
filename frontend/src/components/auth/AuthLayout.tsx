@@ -428,7 +428,15 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 <Text type="supporting">{error.message}</Text>
                               )}
                               <Button
-                                label={isSignup ? "Create account" : "Log in"}
+                                label={
+                                  isLoading
+                                    ? isSignup
+                                      ? "Creating account…"
+                                      : "Signing in…"
+                                    : isSignup
+                                      ? "Create account"
+                                      : "Log in"
+                                }
                                 variant="primary"
                                 size="lg"
                                 isLoading={isLoading}
@@ -449,6 +457,11 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                   void handleGoogleSignIn();
                                 }}
                               />
+                              {isGoogleLoading && (
+                                <Text type="supporting" color="secondary">
+                                  Redirecting to Google…
+                                </Text>
+                              )}
                             </VStack>
                           )}
                         </VStack>
