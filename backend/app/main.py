@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -15,6 +15,22 @@ from fastapi.responses import JSONResponse
 from app import config
 from app.routers import auth, chats, demo_state, health, profiles, users
 from app.schemas.common import error_body
+
+# Map HTTP status → error code used in the standard envelope. Covers
+# every status our routers raise (via HTTPException or via the
+# check_mutation_origin / rate_limit JSONResponse paths). 404 has no
+# generic code here because each router constructs its own
+# NOT_FOUND payload.
+_HTTP_CODE_BY_STATUS: dict[int, str] = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    409: "CONFLICT",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMITED",
+}
 
 # Server-side visibility (the user only ever sees the generic envelope
 # below). Stdlib logging, no deps: uvicorn configures the root handler,
@@ -65,6 +81,27 @@ def create_app(validate: bool = True) -> FastAPI:
         return JSONResponse(
             status_code=422,
             content=error_body("VALIDATION_ERROR", "Invalid request.", details=details),
+        )
+
+    @app.exception_handler(HTTPException)
+    async def _http_exception(request: Request, exc: HTTPException):
+        # FastAPI's default HTTPException body is {detail: ...}; every
+        # other error in this app uses {error: {code, message}}.
+        # Translate here so the consumer parses one shape regardless
+        # of which dependency or route produced the failure.
+        #
+        # Detail may be a string (most calls) or any other JSON-serializable
+        # value (rare). Coerce to a string message; preserve the status.
+        detail = exc.detail
+        if isinstance(detail, str):
+            message = detail
+        else:
+            message = str(detail) if detail is not None else "Request failed."
+        code = _HTTP_CODE_BY_STATUS.get(exc.status_code, "ERROR")
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=error_body(code, message),
+            headers=exc.headers,
         )
 
     @app.exception_handler(Exception)

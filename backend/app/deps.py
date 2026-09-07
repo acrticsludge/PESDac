@@ -69,22 +69,27 @@ async def get_current_user(
 
     Extracts Bearer token, verifies via BetterAuth JWKS,
     and upserts our users row by the verified provider id.
+
+    401s raised here are translated to the standard error envelope
+    by the global HTTPException handler registered in app/main.py —
+    so every 401 in the app has the same shape regardless of which
+    dependency or route produced it.
     """
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="Authentication required.")
     token = authorization.split(" ", 1)[1].strip()
     if not token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
     claims = await verify_betterauth_token(token)
     if not claims:
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
-    
+        raise HTTPException(status_code=401, detail="Invalid or expired session.")
+
     sub = claims.get("sub")
     email = claims.get("email")
     name = claims.get("name") or ""
     if not sub or not email:
-        raise HTTPException(status_code=401, detail="Invalid session claims")
+        raise HTTPException(status_code=401, detail="Invalid session claims.")
     
     user = _insert_or_select(
         db,

@@ -58,8 +58,28 @@ def test_chats_delete_and_clear_keep_profile(client):
     _create(client, title="one")
     _create(client, title="two")
     r = client.delete("/api/v1/chats")
-    assert r.json()["deleted"] == 2
+    # Slice 13: clear_chats now returns the standard {data, pagination}
+    # envelope (was {deleted: N}). The frontend consumer in lib/auth.ts
+    # already accepts a generic T for apiFetch, so the consumer side
+    # picks up `body.data.deleted` here.
+    body = r.json()
+    assert body["data"]["deleted"] == 2
+    assert body["pagination"]["total"] == 2
     assert client.get("/api/v1/profiles/me").status_code == 200
+
+
+def test_chats_list_pagination_typed(client):
+    # Slice 13: the response's pagination field is now a typed
+    # Pydantic model (Pagination: {limit, offset, total}), not a
+    # bare dict. OpenAPI documents it and the consumer can rely on
+    # the exact shape.
+    _create(client, title="one")
+    r = client.get("/api/v1/chats", params={"limit": 5, "offset": 0})
+    p = r.json()["pagination"]
+    assert set(p.keys()) == {"limit", "offset", "total"}
+    assert p["limit"] == 5
+    assert p["offset"] == 0
+    assert p["total"] == 1
 
 
 def test_chats_single_dev_user_sees_own_chats(client):
