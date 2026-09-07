@@ -1052,8 +1052,11 @@ export default function ShellSideNav({
 
   return (
     <Theme theme={PESDacMockupTheme} mode="dark">
-      {/* Layer host for toasts (F7): useToast() SSR-throws without it. */}
-      <LayerProvider>
+      {/* Layer host for toasts (F7): useToast() SSR-throws without it.
+          Toast viewport is anchored top-right with a 3-toast cap, so
+          transient errors (slice 12E / 15) and success notices land
+          where the eye is, not in a bottom-left fallback. */}
+      <LayerProvider toast={{ position: "topEnd", maxVisible: 3 }}>
       <AppShell
         contentPadding={0}
         /* ================================================================== */
