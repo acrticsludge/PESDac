@@ -349,9 +349,7 @@ export async function verifySignInTwoFactor(code: string): Promise<void> {
 /**
  * Change the credential password (current + new). Google-only users have
  * no credential account — the server answers CREDENTIAL_ACCOUNT_NOT_FOUND,
- * surfaced below. There is no client path to SET a first password: the
- * server's setPassword endpoint is serverOnly in BetterAuth 1.7.3, and
- * the reset-email flow needs a mail sender we don't have.
+ * surfaced below.
  */
 export async function changePassword(
   currentPassword: string,
@@ -366,6 +364,25 @@ export async function changePassword(
       res.error.message ?? "Couldn't change your password. Try again.",
     );
   }
+}
+
+/**
+ * Attach an email+password credential to the current user. Google-only
+ * users have no credential account — there is no client-callable setPassword
+ * in BetterAuth 1.7.3, so we proxy to a server route that holds the
+ * session cookie and calls `auth.api.setPassword` server-side. On
+ * success the BetterAuth account row is added; `refreshAccounts()` drops
+ * the cached list so the new credential surfaces immediately in the UI.
+ */
+export async function linkPassword(newPassword: string): Promise<void> {
+  const res = await apiFetch<{ ok: true }>("/auth/link-password", {
+    method: "POST",
+    body: { newPassword },
+  });
+  if (!res?.ok) {
+    throw new Error("Couldn't link password. Try again.");
+  }
+  refreshAccounts();
 }
 
 /** Turn TOTP off (no password prompt for Google-only users). */

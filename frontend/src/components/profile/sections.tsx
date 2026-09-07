@@ -59,7 +59,7 @@ import {
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
-import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, apiDeleteAccount, apiFetch, apiUpdateProfile, toUserMessage, MIN_PASSWORD_LENGTH } from "../../lib/auth";
+import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, linkPassword, apiDeleteAccount, apiFetch, apiUpdateProfile, toUserMessage, MIN_PASSWORD_LENGTH } from "../../lib/auth";
 import { navigate } from "astro:transitions/client";
 import {
   BRANCHES,
@@ -1159,6 +1159,7 @@ export function LegalSection() {
 export function AuthenticationSection() {
   const auth = useAuth();
   const accounts = useAccounts();
+  const toast = useToast();
   const [isLinking, setIsLinking] = useState(false);
   const [isUnlinking, setIsUnlinking] = useState(false);
   // TOTP setup wizard: null (idle) or the freshly minted key material.
@@ -1178,6 +1179,13 @@ export function AuthenticationSection() {
   const [newPassword, setNewPassword] = useState("");
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [passwordDone, setPasswordDone] = useState(false);
+  // Link-password form (Google-only accounts only): new + confirm. No
+  // "current" because the user has no password yet. Shown when the
+  // Link row's "Add password" toggle is on; cleared on success.
+  const [showLinkPasswordForm, setShowLinkPasswordForm] = useState(false);
+  const [linkNewPassword, setLinkNewPassword] = useState("");
+  const [linkConfirmPassword, setLinkConfirmPassword] = useState("");
+  const [isLinkingPassword, setIsLinkingPassword] = useState(false);
   // Post-mutation override: the session cookie cache can lag the fresh
   // 2FA flag, so the UI trusts its own confirmed writes first.
   const [twoFactorOn, setTwoFactorOn] = useState<boolean | null>(null);
@@ -1195,7 +1203,8 @@ export function AuthenticationSection() {
     isStarting2FA ||
     isVerifying ||
     isDisabling2FA ||
-    isChangingPassword;
+    isChangingPassword ||
+    isLinkingPassword;
 
   const linked =
     accounts.status === "ready" ? accounts.accounts : null;
@@ -1206,14 +1215,14 @@ export function AuthenticationSection() {
   const canUnlink =
     googleAccount != null && linked != null && linked.length > 1;
   // Credential (email + password) sign-in exists only for users who
-  // signed up with a password. Google-only users have none — and there
-  // is no client path to set a first one (the server's setPassword is
-  // serverOnly in BetterAuth 1.7.3, and reset emails need a sender we
-  // don't have) — so the Password row renders only when a credential
-  // account is linked. Gated on ready so it never flickers in.
+  // signed up with a password. Gated on ready so it never flickers in.
+  // The inverse (no credential yet) is the trigger for the "Add a
+  // password" row — a Google-only user sees it, a credential user
+  // sees the Change row below instead.
   const hasCredential =
     accounts.status === "ready" &&
     (linked?.some((a) => a.providerId === "credential") ?? false);
+  const canLinkCredential = accounts.status === "ready" && !hasCredential;
 
   async function handleLinkGoogle() {
     setIsLinking(true);
@@ -1314,6 +1323,37 @@ export function AuthenticationSection() {
     }
   }
 
+  // Link a credential password to the current user. Google-only accounts
+  // have no password to verify against, so the form asks for new +
+  // confirm only. Server enforces the same 8/128 length; we mirror it
+  // so a bad length never costs a round trip.
+  async function handleLinkPassword() {
+    if (isLinkingPassword) return;
+    if (linkNewPassword.length < MIN_PASSWORD_LENGTH) {
+      setAuthError(
+        `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+      );
+      return;
+    }
+    if (linkNewPassword !== linkConfirmPassword) {
+      setAuthError("Passwords don't match.");
+      return;
+    }
+    setIsLinkingPassword(true);
+    setAuthError(null);
+    try {
+      await linkPassword(linkNewPassword);
+      setLinkNewPassword("");
+      setLinkConfirmPassword("");
+      setShowLinkPasswordForm(false);
+      toast({ body: "Email + password linked.", type: "info" });
+    } catch (e) {
+      setAuthError(toUserMessage(e, "Couldn't link password. Try again."));
+    } finally {
+      setIsLinkingPassword(false);
+    }
+  }
+
   return (
     <VStack gap={5}>
       <SettingsCard title="Authentication">
@@ -1386,6 +1426,25 @@ export function AuthenticationSection() {
               )
             }
           />
+          {canLinkCredential && (
+            <SettingsRow
+              title="Email + password"
+              description="Add a password so you can also sign in with email."
+              icon={KeyIcon}
+              control={
+                <Button
+                  label="Add"
+                  variant="secondary"
+                  size="sm"
+                  isDisabled={anyPending}
+                  onClick={() => {
+                    setShowLinkPasswordForm((v) => !v);
+                    setAuthError(null);
+                  }}
+                />
+              }
+            />
+          )}
           {hasCredential && (
             <SettingsRow
               title="Password"
@@ -1439,6 +1498,52 @@ export function AuthenticationSection() {
                 variant="secondary"
                 size="sm"
                 onClick={() => setShowPasswordForm(false)}
+              />
+            </HStack>
+          </VStack>
+        </SettingsCard>
+      )}
+      {canLinkCredential && showLinkPasswordForm && (
+        <SettingsCard title="Link a password">
+          <VStack padding={4} gap={3}>
+            <Text type="body" color="secondary">
+              You sign in with Google today. Adding a password gives you
+              a second way in.
+            </Text>
+            <TextInput
+              label="New password"
+              type="password"
+              placeholder="Choose a password"
+              description={`At least ${MIN_PASSWORD_LENGTH} characters`}
+              value={linkNewPassword}
+              onChange={setLinkNewPassword}
+            />
+            <TextInput
+              label="Confirm new password"
+              type="password"
+              placeholder="Type the password again"
+              value={linkConfirmPassword}
+              onChange={setLinkConfirmPassword}
+            />
+            <HStack gap={2}>
+              <Button
+                label="Link password"
+                variant="primary"
+                size="sm"
+                isLoading={isLinkingPassword}
+                isDisabled={isLinkingPassword}
+                onClick={() => void handleLinkPassword()}
+              />
+              <Button
+                label="Cancel"
+                variant="secondary"
+                size="sm"
+                isDisabled={isLinkingPassword}
+                onClick={() => {
+                  setShowLinkPasswordForm(false);
+                  setLinkNewPassword("");
+                  setLinkConfirmPassword("");
+                }}
               />
             </HStack>
           </VStack>
