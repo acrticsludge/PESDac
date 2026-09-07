@@ -8,10 +8,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import rate_limit
 from app.db import get_db
-from app.deps import check_mutation_origin, get_current_user_from_neon
+from app.deps import check_mutation_origin, get_current_user
 from app.models.chats import DEMO_LABELS, DemoState
-from app.schemas.chats import DemoOut, DemoPut
+from app.models.users import User
+from app.schemas.chats import DemoPut
 from app.schemas.common import error_body
 
 router = APIRouter(prefix="/demo-state", tags=["demo-state"])
@@ -25,19 +27,17 @@ def _out(row: DemoState) -> dict:
 
 
 @router.get("")
-def list_demo(    result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
-    if isinstance(result, JSONResponse):
-        return result
+async def list_demo(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(DemoState).where(DemoState.user_id == result.id)).all()
     return {"overrides": [_out(r) for r in rows]}
 
 
 @router.put("/{label}")
-def put_demo(label: str, body: DemoPut, request: Request,     result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
-    if isinstance(result, JSONResponse):
-        return result
+async def put_demo(label: str, body: DemoPut, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
+    if limited := rate_limit.check("demo-put", request, 60, 60):
+        return limited
     if label not in DEMO_LABELS:
         return JSONResponse(status_code=422, content=error_body("VALIDATION_ERROR", "Unknown demo conversation."))
     row = db.get(DemoState, (result.id, label))

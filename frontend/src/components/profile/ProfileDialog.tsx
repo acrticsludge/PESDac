@@ -33,6 +33,7 @@ import {
 import {
   TABS,
   IdentitySection,
+  AuthenticationSection,
   StudySection,
   AssistantSection,
   ShortcutsSection,
@@ -52,7 +53,10 @@ const NAV_GROUPS: {
 }[] = [
   {
     label: "Account",
-    tabs: [{ value: "profile", label: "Profile", icon: UserCircleIcon }],
+    tabs: [
+      { value: "profile", label: "Profile", icon: UserCircleIcon },
+      { value: "authentication", label: "Authentication", icon: ShieldCheckIcon },
+    ],
   },
   {
     label: "Preferences",
@@ -77,6 +81,10 @@ const PANEL_META: Record<ProfileTab, { heading: string; description: string }> =
     profile: {
       heading: "Profile",
       description: "How you appear across PESDac.",
+    },
+    authentication: {
+      heading: "Authentication",
+      description: "Google account, 2FA, and account security.",
     },
     study: {
       heading: "Study",
@@ -115,6 +123,7 @@ function ActivePane({ tab }: { tab: ProfileTab }) {
         </Text>
       </VStack>
       {tab === "profile" && <IdentitySection />}
+      {tab === "authentication" && <AuthenticationSection />}
       {tab === "study" && <StudySection />}
       {tab === "assistant" && <AssistantSection />}
       {tab === "shortcuts" && <ShortcutsSection />}

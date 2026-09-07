@@ -30,7 +30,7 @@ const AUTH_PATHS = new Set(["/login", "/signup"]);
 export default function AuthGate() {
   const auth = useAuth();
   // In-flight sessions render the shell as-is — no flash of gate while
-  // the Neon session is still resolving.
+  // the session is still resolving.
   if (auth.status !== "guest") return null;
   if (
     typeof window !== "undefined" &&
@@ -38,17 +38,6 @@ export default function AuthGate() {
   ) {
     return null;
   }
-  // Social re-login with an email that already owns a password account
-  // lands here as /new?error=account_not_linked (Neon refuses silent
-  // auto-linking). A failed link round-trip lands as
-  // /new?error=linking-failed. Name the actual fix instead of the
-  // generic prompt.
-  const urlError =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("error")
-      : null;
-  const linkError = urlError === "account_not_linked";
-  const linkFailed = urlError === "linking-failed";
   return (
     <Dialog
       isOpen
@@ -70,17 +59,9 @@ export default function AuthGate() {
                 </Text>
               </HStack>
               <VStack gap={1}>
-                <Heading level={2}>
-                  {linkError || linkFailed
-                    ? "Use your password to log in"
-                    : "Log in to continue"}
-                </Heading>
+                <Heading level={2}>Log in to continue</Heading>
                 <Text type="supporting" color="secondary">
-                  {linkError
-                    ? "This email is registered with a password, and Google isn't linked to it yet. Log in with your email and password instead."
-                    : linkFailed
-                      ? "Google linking didn't finish. Log in with your email and password, then retry from My Profile."
-                      : "Create a PESDac account to study with your course material. It takes a minute."}
+                  Create a PESDac account to study with your course material. It takes a minute.
                 </Text>
               </VStack>
               <VStack gap={2} hAlign="stretch">

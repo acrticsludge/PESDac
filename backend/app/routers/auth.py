@@ -1,37 +1,27 @@
-"""Auth router (v6 — Neon Auth). Stateless about identity.
+"""Auth router (BetterAuth integration).
 
-- `GET /me` verifies the Neon JWT (via get_current_user_from_neon), upserts
-  our `users` row by `neon_user_id` (the JWT `sub`), and returns the
-  resulting user + onboarding state.
-- `POST /logout` is a 204 no-op on our side; the frontend calls
-  `authClient.signOut()` to clear the Neon session.
-
-No password / refresh / OAuth / reset endpoints — those live in Neon.
+- `GET /me` returns the current user + onboarding state.
+- `POST /logout` is a 204 no-op on our side.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_current_user_from_neon, get_or_create_profile
+from app.deps import get_current_user, get_or_create_profile
 from app.models.users import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.get("/me")
-def me(
-    result=Depends(get_current_user_from_neon),
+async def me(
+    result: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Verify the Neon JWT, upsert our users row, return user + onboardingDone."""
-    from fastapi.responses import JSONResponse as JR
-
-    if isinstance(result, JR):
-        return result
+    """Return the current user + onboardingDone."""
     user: User = result
     profile = get_or_create_profile(db, user)
     return {
@@ -46,7 +36,7 @@ def me(
 
 @router.post("/logout", status_code=204)
 def logout():
-    """No-op on our side. The frontend SDK invalidates the Neon session."""
+    """No-op on our side. The frontend clears its session state."""
     return Response(status_code=204)
 
 

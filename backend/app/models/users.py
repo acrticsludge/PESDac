@@ -25,8 +25,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    # Neon JWT `sub` claim, verified against NEON_AUTH_JWKS_URL.
-    neon_user_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    # External auth user id (verified `sub` claim from the auth provider).
+    # TODO(BetterAuth): this holds the BetterAuth user id.
+    auth_user_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(254), nullable=False)
     display_name: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)

@@ -1,7 +1,8 @@
-"""Fail-fast environment configuration (v6 — Neon Auth).
+"""Fail-fast environment configuration (BetterAuth migration).
 
-Only these vars are read. Missing/invalid required values raise at
-import so the process never boots half-configured. No secrets are logged.
+Neon Auth was removed; Neon is now database-only. Only these vars are
+read. Missing/invalid required values raise at import so the process
+never boots half-configured. No secrets are logged.
 """
 
 from __future__ import annotations
@@ -61,25 +62,17 @@ def _get_bool(name: str, default: bool) -> bool:
     return raw.lower() in ("1", "true", "yes", "on")
 
 
-def _get_int(name: str, default: int) -> int:
-    raw = _get(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
 ENV: str = _get("ENV", "dev") or "dev"
 
 DATABASE_URL: str | None = _get("DATABASE_URL")
 
-# Neon Auth (Managed Better Auth in our Neon project). v6 backend is
-# stateless about identity: we verify the access_token JWT against JWKS
-# on every protected request.
-NEON_AUTH_BASE_URL: str | None = _get("NEON_AUTH_BASE_URL")
-NEON_AUTH_JWKS_URL: str | None = _get("NEON_AUTH_JWKS_URL")
+# BetterAuth configuration
+BETTER_AUTH_URL: str | None = _get("BETTER_AUTH_URL")
+BETTER_AUTH_SECRET: str | None = _get("BETTER_AUTH_SECRET")
+
+# Google OAuth (for reference, BetterAuth handles the actual OAuth)
+GOOGLE_CLIENT_ID: str | None = _get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET: str | None = _get("GOOGLE_CLIENT_SECRET")
 
 _raw_origins: str | None = _get("FRONTEND_ORIGINS")
 FRONTEND_ORIGINS: list[str] = (
@@ -90,22 +83,16 @@ FRONTEND_ORIGINS: list[str] = (
 
 COOKIE_SECURE: bool = _get_bool("COOKIE_SECURE", True)
 
-# Auth-class rate limiting is Neon-owned; the remaining values are
-# reserved for future per-IP abuse protection on our chat/profile
-# routes. Read from env so .env.example stays truthful.
-RATE_LIMIT_LOGIN: int = _get_int("RATE_LIMIT_LOGIN", 10)
-RATE_LIMIT_SIGNUP: int = _get_int("RATE_LIMIT_SIGNUP", 5)
-
 
 def validate_startup(require_db: bool = True) -> None:
     """Called by the app factory (and alembic env). Raises on misconfiguration."""
     errors: list[str] = []
     if require_db and not DATABASE_URL:
         errors.append("DATABASE_URL is required")
-    if not NEON_AUTH_BASE_URL:
-        errors.append("NEON_AUTH_BASE_URL is required")
-    if not NEON_AUTH_JWKS_URL:
-        errors.append("NEON_AUTH_JWKS_URL is required")
+    if not BETTER_AUTH_URL:
+        errors.append("BETTER_AUTH_URL is required")
+    if not BETTER_AUTH_SECRET:
+        errors.append("BETTER_AUTH_SECRET is required")
     if not FRONTEND_ORIGINS:
         errors.append("FRONTEND_ORIGINS must list at least one origin")
     if not COOKIE_SECURE and any(

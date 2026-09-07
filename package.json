@@ -1,0 +1,30 @@
+{
+  "name": "pesdac",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/acrticsludge/PESDac#readme",
+  "bugs": {
+    "url": "https://github.com/acrticsludge/PESDac/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/acrticsludge/PESDac.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "^1.7.3",
+    "better-auth": "^1.7.3",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0"
+  }
+}

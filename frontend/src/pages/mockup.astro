@@ -1,0 +1,19 @@
+---
+import "../styles/global.css";
+import { Theme } from "@astryxdesign/core/theme";
+import { PESDacMockupTheme } from "../theme/PESDacMockupTheme";
+import MockupGallery from "../components/mockup/MockupGallery";
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>PESDac — Brand directions</title>
+  </head>
+  <body>
+    <Theme theme={PESDacMockupTheme} mode="dark">
+      <MockupGallery client:load />
+    </Theme>
+  </body>
+</html>

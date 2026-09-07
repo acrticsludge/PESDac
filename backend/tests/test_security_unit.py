@@ -1,4 +1,4 @@
-"""Unit contract (v6): codegen, titles, email. Passwords + JWT removed (Neon-owned)."""
+"""Unit contract: codegen, titles, email."""
 
 import re
 

@@ -1,10 +1,6 @@
-"""Auth + health (v6 — Neon Auth).
+"""Auth + health (BetterAuth migration placeholder).
 
-The v5 signup/login/refresh/password/reset/OAuth surface is gone; only
-`/auth/me` and `/auth/logout` remain. Behavior is covered in
-`test_neon_auth_contract.py`. This file keeps the health probe and
-the unauthenticated `/me` envelope test so the health route stays
-covered.
+TODO(BetterAuth): re-add session/JWT contract tests here.
 """
 
 from __future__ import annotations
@@ -13,6 +9,12 @@ from __future__ import annotations
 def test_health_and_ready(client):
     assert client.get("/api/v1/health").json() == {"ok": True}
     assert client.get("/api/v1/ready").json() == {"ok": True}
+
+
+def test_me_returns_dev_user(client):
+    r = client.get("/api/v1/auth/me")
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["email"] == "test@example.com"
 
 
 def test_logout_is_204_for_anonymous(client):

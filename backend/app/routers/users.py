@@ -9,9 +9,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config
+from app import rate_limit
 from app.db import get_db
-from app.deps import check_mutation_origin, get_current_user_from_neon
+from app.deps import check_mutation_origin, get_current_user
 from app.models.chats import Chat, DemoState
 from app.models.profiles import Profile
 from app.models.users import User
@@ -23,10 +23,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.get("/me/export")
-def export_me(    result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
-    if isinstance(result, JSONResponse):
-        return result
-    assert isinstance(result, User)
+async def export_me(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     profile = db.get(Profile, result.id)
     chats = db.scalars(select(Chat).where(Chat.user_id == result.id).order_by(Chat.created_at)).all()
     demos = db.scalars(select(DemoState).where(DemoState.user_id == result.id)).all()
@@ -40,11 +37,11 @@ def export_me(    result=Depends(get_current_user_from_neon), db: Session = Depe
 
 
 @router.delete("/me", status_code=202)
-def delete_me(request: Request,     result=Depends(get_current_user_from_neon), db: Session = Depends(get_db)):
-    if isinstance(result, JSONResponse):
-        return result
+async def delete_me(request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
+    if limited := rate_limit.check("users-delete", request, 10, 300):
+        return limited
     user = db.get(User, result.id)
     assert user is not None
     db.delete(user)  # cascades: profile, chats, demo_state

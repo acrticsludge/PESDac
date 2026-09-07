@@ -1,20 +1,19 @@
 """SQLite-backed TestClient. Fresh schema per test; rate-limit buckets reset.
 
-v6 (Neon Auth): env defaults include NEON_AUTH_JWKS_URL placeholder so
-the app factory can boot with validate=False. Real JWKS is monkeypatched
-in individual tests via `app.auth.neon._set_loader` / `_add_to_cache`.
+BetterAuth migration: Tests mock BetterAuth JWT verification via dependency override.
 """
 
 from __future__ import annotations
 
 import os
+import uuid
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
-os.environ.setdefault("NEON_AUTH_BASE_URL", "https://test.invalid/auth")
-os.environ.setdefault("NEON_AUTH_JWKS_URL", "https://test.invalid/jwks")
 os.environ.setdefault("FRONTEND_ORIGINS", "http://testserver")
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("ENV", "test")
+os.environ.setdefault("BETTER_AUTH_URL", "http://localhost:4321")
+os.environ.setdefault("BETTER_AUTH_SECRET", "test-secret-32-characters-long!!")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,8 +24,10 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app import rate_limit
 from app.db import Base, get_db
+from app.deps import get_current_user
 from app.main import create_app
 from app.models.catalog import SUBJECT_SEEDS, Subject
+from app.models.users import User
 
 _engine = create_engine(
     "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -55,6 +56,27 @@ def client():
 
     app = create_app(validate=False)
     app.dependency_overrides[get_db] = _override_db
+    # Override get_current_user to return a test user
+    from fastapi import Depends
+    test_user_id = uuid.uuid4()
+    test_auth_user_id = "test-auth-user-id"
+    
+    def _override_get_current_user(db=Depends(get_db)):
+        user = db.query(User).filter(User.auth_user_id == test_auth_user_id).first()
+        if not user:
+            user = User(
+                id=test_user_id,
+                auth_user_id=test_auth_user_id,
+                email="test@example.com",
+                display_name="Test User",
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        return user
+    
+    app.dependency_overrides[get_current_user] = _override_get_current_user
+    
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -69,78 +91,13 @@ def dbsession():
         db.close()
 
 
-# ---------- v6: Neon JWT helpers (TDD seam) ----------
-
-import time as _time
-import uuid as _uuid
-from base64 import urlsafe_b64encode as _b64u
-from typing import Any as _Any
-
-import jwt as _pyjwt
-from cryptography.hazmat.primitives import serialization as _ser
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey as _EdPriv,
-    Ed25519PublicKey as _EdPub,
-)
-
-from app import config as _config
-from app.auth import neon as _neon
-
-
-@pytest.fixture(scope="session")
-def _ed_keypair():
-    priv = _EdPriv.generate()
-    pub_der = priv.public_key().public_bytes(
-        encoding=_ser.Encoding.DER,
-        format=_ser.PublicFormat.SubjectPublicKeyInfo,
-    )
-    return priv, pub_der
-
-
-def _jwk_for_ed25519(pub_der: bytes, kid: str = "test-kid") -> dict:
-    pub = _ser.load_der_public_key(pub_der)
-    assert isinstance(pub, _EdPub)
-    raw = pub.public_bytes(
-        encoding=_ser.Encoding.Raw, format=_ser.PublicFormat.Raw
-    )
-    return {
-        "kty": "OKP",
-        "crv": "Ed25519",
-        "kid": kid,
-        "alg": "EdDSA",
-        "x": _b64u(raw).rstrip(b"=").decode(),
-    }
-
-
 @pytest.fixture()
-def jwks_seeded(_ed_keypair, monkeypatch):
-    priv, pub_der = _ed_keypair
-    jwk = _jwk_for_ed25519(pub_der, kid="test-kid")
-    monkeypatch.setattr(_config, "NEON_AUTH_JWKS_URL", "https://test.invalid/jwks", raising=False)
-    _neon.reset_cache()
-    _neon._add_to_cache({"test-kid": jwk})
-    _neon._set_loader(lambda url: {"test-kid": jwk})
-    yield priv
-    _neon.reset_cache()
+def auth_header():
+    """Returns a function that makes auth headers for the test user.
 
-
-def make_jwt(priv, *, sub: str | None = None, email: str = "user@example.com",
-             name: str = "User", kid: str = "test-kid") -> str:
-    return _pyjwt.encode(
-        {
-            "sub": sub or ("neon-sub-" + _uuid.uuid4().hex[:8]),
-            "email": email,
-            "name": name,
-            "iat": int(_time.time()),
-            "exp": int(_time.time()) + 3600,
-        },
-        priv, algorithm="EdDSA", headers={"kid": kid},
-    )
-
-
-@pytest.fixture()
-def auth_header(jwks_seeded):
-    """Returns a function: (sub=..., email=...) -> {'Authorization': 'Bearer ...'}."""
-    def _make(sub: str | None = None, email: str = "user@example.com", name: str = "User") -> dict[str, str]:
-        return {"Authorization": f"Bearer {make_jwt(jwks_seeded, sub=sub, email=email, name=name)}"}
+    Since we override get_current_user, the Authorization header is not
+    actually validated - it's just for test shape compatibility.
+    """
+    def _make(sub: str | None = None, email: str = "test@example.com", name: str = "Test User") -> dict[str, str]:
+        return {"Authorization": "Bearer test-token"}
     return _make

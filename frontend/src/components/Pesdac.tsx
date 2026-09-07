@@ -29,9 +29,9 @@ import ProfileDialog, { type ProfileTab } from "./profile/ProfileDialog";
 import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
 import AppToasts, { type ShowToastFn } from "./AppToasts";
-import { apiLogout, useAuth } from "../lib/auth";
-import { sdkMessage } from "../lib/neon-auth";
+import { apiLogout, apiGetProfile, useAuth, useProfile, AUTH_REQUIRED_EVENT, toUserMessage } from "../lib/auth";
 import { tabFromHash } from "./profile/sections";
+import { isCampus } from "../lib/profile-options";
 import AttachButton from "./chat/AttachButton";
 import { getThread } from "../content/threads";
 import {
@@ -54,6 +54,7 @@ import {
   readDraft,
   writeDraft,
   getProfile,
+  updateProfile as updateLocalProfile,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../lib/session";
@@ -95,6 +96,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import type { IconType } from "@astryxdesign/core/Icon";
 
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import { Spinner } from "@astryxdesign/core/Spinner";
 
 import {
   ChatComposer,
@@ -423,12 +425,14 @@ function ConversationItem({
   onClick,
   menu,
   icon,
+  isPending,
 }: {
   label: string;
   isSelected?: boolean;
   onClick?: () => void;
   menu: ChatMenuItem[];
   icon?: ReactNode | IconType;
+  isPending?: boolean;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -444,8 +448,12 @@ function ConversationItem({
         label={label}
         href="#"
         isSelected={isSelected}
-        icon={icon}
+        icon={isPending ? <Spinner size="sm" /> : icon}
         onClick={(event) => {
+          if (isPending) {
+            event.preventDefault();
+            return;
+          }
           event.preventDefault();
           onClick?.();
         }}
@@ -500,27 +508,87 @@ export default function ShellSideNav({
   const toastRef = useRef<ShowToastFn | null>(null);
   // Session gate (slice 2.4, spec §A): guests on app routes get the
   // required-purpose AuthGate dialog. Loading sessions render the shell
-  // as-is — no flash of gate while Neon is still resolving.
+  // as-is — no flash of gate while the session is still resolving.
   const authState = useAuth();
+  const serverProfile = useProfile();
   const isGateOpen = authState.status === "guest";
+  // Server→local hydration (auth audit G2): the session store is
+  // memory-only and wiped on reload, so seed the onboarding fields from
+  // the server row once per authenticated session. Without this, a saved
+  // onboarding (server onboardingDone=true) is invisible after reload —
+  // the wizard stays closed and the Profile tab renders blanks.
+  // OnboardingDialog mirrors on save; this covers every reload after.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (authState.status !== "authenticated" || hydratedRef.current) return;
+    let cancelled = false;
+    void apiGetProfile()
+      .then((server) => {
+        if (cancelled) return;
+        updateLocalProfile({
+          institution: isCampus(server.campus) ? server.campus : "",
+          semester: typeof server.semester === "string" ? server.semester : "",
+          branch: typeof server.branch === "string" ? server.branch : "",
+          subjects: Array.isArray(server.subjects) ? server.subjects : [],
+        });
+        hydratedRef.current = true;
+      })
+      .catch(() => {
+        // Offline/backend down: keep local defaults. The flag stays
+        // false so the next mount (or remount) retries.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authState.status]);
+  // Backend rejected our session (expired/invalid): clear it and
+  // route to re-login. Guarded against reentrancy — apiLogout's
+  // own backend call 401s too and would re-fire this event.
+  const authExpiredRef = useRef(false);
+  useEffect(() => {
+    const onAuthRequired = () => {
+      if (authExpiredRef.current) return;
+      authExpiredRef.current = true;
+      toastRef.current?.({
+        body: "Your session expired. Please log in again.",
+        type: "error",
+      });
+      void apiLogout().finally(() => {
+        navigate("/login");
+      });
+    };
+    window.addEventListener(AUTH_REQUIRED_EVENT, onAuthRequired);
+    return () => window.removeEventListener(AUTH_REQUIRED_EVENT, onAuthRequired);
+  }, []);
   // Onboarding wizard (slice 3.1): required while the server says the
   // profile isn't set up. Same Esc yield as the gate.
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   // F1: first name = displayName up to the first space; empty when
-  // logged out (or when Neon carries no display name) → generic heading.
-  const firstName =
-    authState.status === "authenticated"
-      ? authState.user.displayName.split(/\s/, 1)[0]
-      : "";
-  // Account row Logout (plan item 24): sign out of Neon + notify our
-  // backend, then leave the app routes — the gate re-opens next visit.
+  // logged out → generic heading. Server row wins; the session name
+  // covers the fetch window so the heading never flickers generic.
+  const displayName =
+    serverProfile.status === "ready"
+      ? serverProfile.user.displayName
+      : authState.status === "authenticated"
+        ? authState.user.name
+        : "";
+  const firstName = displayName.split(/\s/, 1)[0];
+  // Sidebar account row: same source as the greeting.
+  const accountEmail =
+    serverProfile.status === "ready"
+      ? serverProfile.user.email
+      : authState.status === "authenticated"
+        ? authState.user.email
+        : "";
+  // Account row Logout: sign out, then leave the app routes — the gate
+  // re-opens next visit.
   // Failure toasts (F1) and stays: navigating away would hide the error.
   const handleLogout = async () => {
     try {
       await apiLogout();
     } catch (error) {
       toastRef.current?.({
-        body: sdkMessage(error, "Couldn't log you out. Try again."),
+        body: toUserMessage(error, "Couldn't log you out. Try again."),
         type: "error",
       });
       return;
@@ -543,11 +611,28 @@ export default function ShellSideNav({
     { kind: "custom"; code: string } | { kind: "demo"; label: string } | null
   >(null);
   const [renameValue, setRenameValue] = useState("");
+  const [isRenaming, setIsRenaming] = useState(false);
   // Delete confirmation: customs delete permanently; demos archive
   // (Archive is instant, Delete asks first — same shelf).
   const [deleteTarget, setDeleteTarget] = useState<
     { kind: "custom" | "demo"; id: string; title: string } | null
   >(null);
+  // Per-chat pending flag drives the inline Spinner on the side-nav row
+  // while a side-nav action (pin/archive/delete) is in flight. Today
+  // these are synchronous local-store writes, so the flag only flashes
+  // briefly — keep it so the UX is consistent when persistence moves
+  // server-side. Keyed by `${kind}:${id}` to match refKeys().
+  const [pending, setPending] = useState<Record<string, true>>({});
+  const setRowPending = (key: string, value: boolean) =>
+    setPending((prev) => {
+      if (value) return { ...prev, [key]: true };
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  const refKeyOf = (ref: ChatRef) => `${ref.kind}:${ref.id}`;
+  const isRowPending = (ref: ChatRef) => Boolean(pending[refKeyOf(ref)]);
   // Sidebar conversation search (filters demo + custom labels).
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -632,31 +717,52 @@ export default function ShellSideNav({
         ? demoDisplayLabel(renameTarget.label)
         : "";
 
-  const saveRename = () => {
-    if (renameTarget?.kind === "custom") {
-      renameCustomChat(renameTarget.code, renameValue);
-    } else if (renameTarget) {
-      renameDemoChat(renameTarget.label, renameValue);
+  // Persists rename, then closes the dialog. Both rename helpers are
+  // synchronous local-store writes; the isLoading state stays on for a
+  // tick so the button spinner lands even though the work is instant —
+  // gives consistent feedback if the writes ever become async.
+  const saveRename = async () => {
+    if (isRenaming || renameTarget == null) return;
+    setIsRenaming(true);
+    try {
+      if (renameTarget.kind === "custom") {
+        renameCustomChat(renameTarget.code, renameValue);
+      } else {
+        renameDemoChat(renameTarget.label, renameValue);
+      }
+    } finally {
+      setIsRenaming(false);
+      setRenameTarget(null);
     }
-    setRenameTarget(null);
   };
 
+  // Delete confirmation handler. Mirrors saveRename's "set/clear in
+  // finally" pattern: both delete paths are local-store writes, so the
+  // pending state is brief — but the AlertDialog now disables confirm
+  // while in flight (and the close-by-cancel paths clear the flag too).
+  const [isDeleting, setIsDeleting] = useState(false);
   const confirmDelete = () => {
-    if (deleteTarget?.kind === "custom") {
-      deleteCustomChat(deleteTarget.id);
-      if (draftCode === deleteTarget.id) {
-        setDraftCode(null);
-        setDraftAutoSend(null);
+    if (isDeleting || deleteTarget == null) return;
+    setIsDeleting(true);
+    try {
+      if (deleteTarget.kind === "custom") {
+        deleteCustomChat(deleteTarget.id);
+        if (draftCode === deleteTarget.id) {
+          setDraftCode(null);
+          setDraftAutoSend(null);
+        }
+      } else {
+        archiveChat({ kind: "demo", id: deleteTarget.id });
+        if (selectedChat === deleteTarget.id) {
+          // Client-side transition: the persisted shell re-syncs from the
+          // new page's props, so the sidebar never rebuilds.
+          navigate("/new");
+        }
       }
-    } else if (deleteTarget) {
-      archiveChat({ kind: "demo", id: deleteTarget.id });
-      if (selectedChat === deleteTarget.id) {
-        // Client-side transition: the persisted shell re-syncs from the
-        // new page's props, so the sidebar never rebuilds.
-        navigate("/new");
-      }
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
     }
-    setDeleteTarget(null);
   };
 
   const query = searchQuery.trim().toLowerCase();
@@ -683,13 +789,19 @@ export default function ShellSideNav({
     ref.kind === "custom" ? draftCode === ref.id : selectedChat === ref.id;
 
   const archiveAndExit = (ref: ChatRef) => {
-    archiveChat(ref);
-    if (ref.kind === "custom" && draftCode === ref.id) {
-      setDraftCode(null);
-      setDraftAutoSend(null);
-    }
-    if (ref.kind === "demo" && selectedChat === ref.id) {
-      navigate("/new");
+    const key = refKeyOf(ref);
+    setRowPending(key, true);
+    try {
+      archiveChat(ref);
+      if (ref.kind === "custom" && draftCode === ref.id) {
+        setDraftCode(null);
+        setDraftAutoSend(null);
+      }
+      if (ref.kind === "demo" && selectedChat === ref.id) {
+        navigate("/new");
+      }
+    } finally {
+      setRowPending(key, false);
     }
   };
 
@@ -704,36 +816,58 @@ export default function ShellSideNav({
 
   // Listed chats: full menu. Demo Delete archives via confirm
   // (Archive is instant; Delete asks first).
-  const listedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => [
-    {
-      label: isPinnedHere(ref) ? "Unpin" : "Pin",
-      onClick: () => togglePin(ref),
-    },
-    { label: "Rename", onClick: () => startRename(ref, display) },
-    { label: "Archive", onClick: () => archiveAndExit(ref) },
-    {
-      label: "Delete",
-      onClick: () =>
-        setDeleteTarget(
-          ref.kind === "custom"
-            ? { kind: "custom", id: ref.id, title: display }
-            : { kind: "demo", id: ref.id, title: display },
-        ),
-    },
-  ];
+  const listedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => {
+    const key = refKeyOf(ref);
+    const wrap = (fn: () => void): ChatMenuItem["onClick"] => () => {
+      setRowPending(key, true);
+      try {
+        fn();
+      } finally {
+        setRowPending(key, false);
+      }
+    };
+    return [
+      {
+        label: isPinnedHere(ref) ? "Unpin" : "Pin",
+        onClick: wrap(() => togglePin(ref)),
+      },
+      { label: "Rename", onClick: () => startRename(ref, display) },
+      { label: "Archive", onClick: () => archiveAndExit(ref) },
+      {
+        label: "Delete",
+        onClick: () =>
+          setDeleteTarget(
+            ref.kind === "custom"
+              ? { kind: "custom", id: ref.id, title: display }
+              : { kind: "demo", id: ref.id, title: display },
+          ),
+      },
+    ];
+  };
 
-  const archivedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => [
-    { label: "Unarchive", onClick: () => unarchiveChat(ref) },
-    ...(ref.kind === "custom"
-      ? [
-          {
-            label: "Delete",
-            onClick: () =>
-              setDeleteTarget({ kind: "custom", id: ref.id, title: display }),
-          },
-        ]
-      : []),
-  ];
+  const archivedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => {
+    const key = refKeyOf(ref);
+    const wrap = (fn: () => void): ChatMenuItem["onClick"] => () => {
+      setRowPending(key, true);
+      try {
+        fn();
+      } finally {
+        setRowPending(key, false);
+      }
+    };
+    return [
+      { label: "Unarchive", onClick: wrap(() => unarchiveChat(ref)) },
+      ...(ref.kind === "custom"
+        ? [
+            {
+              label: "Delete",
+              onClick: () =>
+                setDeleteTarget({ kind: "custom", id: ref.id, title: display }),
+            },
+          ]
+        : []),
+    ];
+  };
 
   const collectRows = (refs: ChatRef[], includeArchived: boolean) =>
     refs
@@ -936,25 +1070,25 @@ export default function ShellSideNav({
                   <HStack gap={2} vAlign="center" padding={1}>
                     <Avatar
                       name={
-                        authState.user.displayName ||
-                        authState.user.email ||
+                        displayName ||
+                        accountEmail ||
                         "?"
                       }
                       size="sm"
                     />
                     <VStack gap={0.5}>
                       <Text type="body" weight="bold" maxLines={1}>
-                        {authState.user.displayName ||
-                          authState.user.email ||
+                        {displayName ||
+                          accountEmail ||
                           "?"}
                       </Text>
-                      {authState.user.displayName !== "" && (
+                      {displayName !== "" && (
                         <Text
                           type="supporting"
                           color="secondary"
                           maxLines={1}
                         >
-                          {authState.user.email}
+                          {accountEmail}
                         </Text>
                       )}
                     </VStack>
@@ -1049,6 +1183,7 @@ export default function ShellSideNav({
                       label={title}
                       icon={BookmarkIcon}
                       isSelected={isRefOpen(ref)}
+                      isPending={isRowPending(ref)}
                       onClick={() => openRef(ref)}
                       menu={listedMenu(ref, title)}
                     />
@@ -1100,6 +1235,7 @@ export default function ShellSideNav({
                             key={chat.label}
                             label={display}
                             isSelected={chat.label === selectedChat}
+                            isPending={isRowPending(ref)}
                             onClick={() => openConversation(chat.label)}
                             menu={listedMenu(ref, display)}
                           />
@@ -1115,6 +1251,7 @@ export default function ShellSideNav({
                             key={c.code}
                             label={c.title}
                             isSelected={c.code === draftCode}
+                            isPending={isRowPending(ref)}
                             onClick={() => {
                               setDraftCode(c.code);
                               setDraftAutoSend(null);
@@ -1138,6 +1275,7 @@ export default function ShellSideNav({
                       key={`${ref.kind}:${ref.id}`}
                       label={title}
                       isSelected={isRefOpen(ref)}
+                      isPending={isRowPending(ref)}
                       onClick={() => openRef(ref)}
                       menu={archivedMenu(ref, title)}
                     />
@@ -1503,9 +1641,16 @@ export default function ShellSideNav({
                   <Button
                     label="Cancel"
                     variant="ghost"
+                    isDisabled={isRenaming}
                     onClick={() => setRenameTarget(null)}
                   />
-                  <Button label="Save" variant="primary" onClick={saveRename} />
+                  <Button
+                    label="Save"
+                    variant="primary"
+                    isLoading={isRenaming}
+                    isDisabled={isRenaming}
+                    onClick={() => void saveRename()}
+                  />
                 </HStack>
               </LayoutFooter>
             }
@@ -1528,6 +1673,7 @@ export default function ShellSideNav({
                 : `“${deleteTarget.title}” and its messages will be permanently removed. This cannot be undone.`
           }
           actionLabel={deleteTarget?.kind === "demo" ? "Hide" : "Delete"}
+          isActionLoading={isDeleting}
           onAction={confirmDelete}
         />
       </AppShell>

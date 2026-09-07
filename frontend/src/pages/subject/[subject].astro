@@ -2,6 +2,7 @@
 import "../../styles/global.css";
 import { ClientRouter } from "astro:transitions";
 import AppLayout from "../../components/layout/AppLayout";
+import InitialSession from "../../components/layout/InitialSession.astro";
 import { SUBJECTS } from "../../lib/chat";
 
 export function getStaticPaths() {
@@ -24,6 +25,7 @@ const { subject } = Astro.params;
     </style>
   </head>
   <body>
+    <InitialSession />
     <AppLayout client:load transition:persist="pesdac-shell" initialSubject={subject} />
   </body>
 </html>
