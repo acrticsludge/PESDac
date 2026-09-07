@@ -183,6 +183,11 @@ export default function AuthLayout(props: AuthLayoutProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<FieldError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // Google is its own flag because redirecting-via-window.location races
+  // the React paint; a shared isLoading would be cleared before the
+  // user ever sees the spinner. BetterAuth's redirectPlugin moves the
+  // page before paint can land — see handleGoogleSignIn comment.
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   // Second step when the account has 2FA on: email sign-in answers
   // twoFactorRedirect instead of a session, and this code finishes it.
   const [needsTwoFactor, setNeedsTwoFactor] = useState(false);
@@ -205,20 +210,24 @@ export default function AuthLayout(props: AuthLayoutProps) {
   }
 
   async function handleGoogleSignIn() {
-    if (isLoading) return;
-    setIsLoading(true);
+    if (isGoogleLoading) return;
+    setIsGoogleLoading(true);
     setError(null);
-    console.log("[AuthLayout] Calling signInWithGoogle...");
     try {
+      // BetterAuth's redirectPlugin sets window.location.href inside the
+      // fetch promise, so React never gets a paint between setIsLoading
+      // and navigation. We surface feedback via the same state for a
+      // brief moment, then the browser takes over. The finally always
+      // resets the flag so re-entry is safe if the popup is blocked.
       void signInWithGoogle();
     } catch (e: unknown) {
-      console.error("[AuthLayout] Google sign-in failed:", e);
       setError({
-        field: "password",
-        message: (e instanceof Error ? e.message : "Google sign-in failed. Try again."),
+        field: "form",
+        message:
+          e instanceof Error ? e.message : "Google sign-in failed. Try again.",
       });
     } finally {
-      setIsLoading(false);
+      setIsGoogleLoading(false);
     }
   }
 
@@ -357,7 +366,8 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 variant="primary"
                                 size="lg"
                                 isLoading={isLoading}
-                                onClick={() => {
+                                isDisabled={isLoading}
+                                clickAction={() => {
                                   void handleVerifySecondFactor();
                                 }}
                               />
@@ -422,7 +432,8 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 variant="primary"
                                 size="lg"
                                 isLoading={isLoading}
-                                onClick={() => {
+                                isDisabled={isLoading || isGoogleLoading}
+                                clickAction={() => {
                                   void handleEmailAuth();
                                 }}
                               />
@@ -431,9 +442,10 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 label="Google"
                                 variant="secondary"
                                 size="lg"
-                                isLoading={isLoading}
+                                isLoading={isGoogleLoading}
+                                isDisabled={isLoading || isGoogleLoading}
                                 icon={<GoogleLogo />}
-                                onClick={() => {
+                                clickAction={() => {
                                   void handleGoogleSignIn();
                                 }}
                               />

@@ -54,7 +54,6 @@ import {
   DocumentTextIcon,
   ClipboardDocumentIcon,
   CheckIcon,
-  ShareIcon,
   XMarkIcon,
   ChevronRightIcon,
   AtSymbolIcon,
@@ -373,13 +372,6 @@ function StudyNoteActions({
         isIconOnly
         onClick={onCopy}
       />
-      <Button
-        label="Share"
-        variant="ghost"
-        size="sm"
-        icon={<Icon icon={ShareIcon} size="sm" />}
-        isIconOnly
-      />
       {onClose && (
         <Button
           label="Close study note"
@@ -531,6 +523,7 @@ async function copyText(text: string): Promise<boolean> {
 // Ghost icon button with brief "copied" feedback.
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
   const timer = useRef<number | null>(null);
 
   useEffect(
@@ -546,10 +539,15 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       variant="ghost"
       size="sm"
       isIconOnly
+      isLoading={isCopying}
+      isDisabled={isCopying}
       // sm icon to match the supporting-size timestamp beside it.
       icon={<Icon icon={copied ? CheckIcon : ClipboardDocumentIcon} size="sm" />}
-      onClick={() => {
+      clickAction={() => {
+        if (isCopying) return;
+        setIsCopying(true);
         void copyText(text).then((ok) => {
+          setIsCopying(false);
           if (!ok) return;
           setCopied(true);
           if (timer.current != null) window.clearTimeout(timer.current);
