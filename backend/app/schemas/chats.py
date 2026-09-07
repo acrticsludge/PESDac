@@ -59,7 +59,19 @@ class ChatOut(BaseModel):
 
 class ChatListOut(BaseModel):
     data: list[ChatOut]
-    pagination: dict
+    pagination: "Pagination"
+
+
+class Pagination(BaseModel):
+    """Pagination envelope for list endpoints. `{limit, offset, total}`
+    is the wire format — see docs/api-design-audit.md §2.5 for why
+    we don't follow the skill's `{page, pageSize, totalItems, totalPages}`
+    shape (the frontend already consumes the current shape; the
+    One-Version Rule says don't break it without value)."""
+
+    limit: int
+    offset: int
+    total: int
 
 
 class DemoPut(BaseModel):

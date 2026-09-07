@@ -118,11 +118,18 @@ async def delete_chat(code: str, request: Request, result: User = Depends(get_cu
 
 @router.delete("", status_code=200)
 async def clear_chats(request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Delete-all (mirrors clearAllChats): chats only, profile/demo kept."""
+    """Delete-all (mirrors clearAllChats): chats only, profile/demo kept.
+
+    Returns the same `{data, pagination}` envelope as `list_chats` so
+    the frontend's `apiFetch<T>` consumer parses one shape for every
+    chats endpoint. `pagination.total` is the number deleted, so
+    the same `apiGetChats` query that loaded the rows can report
+    the new total without an extra fetch.
+    """
     if denied := check_mutation_origin(request):
         return denied
     if limited := rate_limit.check("chats-clear", request, 10, 300):
         return limited
     count = db.query(Chat).filter(Chat.user_id == result.id).delete()
     db.commit()
-    return {"deleted": count}
+    return {"data": {"deleted": count}, "pagination": {"limit": 0, "offset": 0, "total": count}}
