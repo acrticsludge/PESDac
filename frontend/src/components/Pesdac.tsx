@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { navigate } from "astro:transitions/client";
 
@@ -25,14 +25,16 @@ import {
 } from "../lib/attachments";
 import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
-import ProfileDialog, { type ProfileTab } from "./profile/ProfileDialog";
+import type { ProfileTab } from "./profile/profile-tabs";
 import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
 import AppToasts, { type ShowToastFn } from "./AppToasts";
 import { apiLogout, apiGetProfile, useAuth, useProfile, AUTH_REQUIRED_EVENT, toUserMessage } from "../lib/auth";
-import { tabFromHash } from "./profile/sections";
+import { tabFromHash } from "./profile/profile-tabs";
 import { isCampus } from "../lib/profile-options";
 import AttachButton from "./chat/AttachButton";
+
+const ProfileDialog = lazy(() => import("./profile/ProfileDialog"));
 import { getThread } from "../content/threads";
 import {
   useSessionVersion,
@@ -523,7 +525,8 @@ export default function ShellSideNav({
   useEffect(() => {
     if (authState.status !== "authenticated" || hydratedRef.current) return;
     let cancelled = false;
-    void apiGetProfile()
+    const userId = authState.user.id;
+    void apiGetProfile(userId)
       .then((server) => {
         if (cancelled) return;
         updateLocalProfile({
@@ -1651,13 +1654,17 @@ export default function ShellSideNav({
 
         <OnboardingDialog onActiveChange={setIsOnboardingOpen} />
 
-        <ProfileDialog
-          isOpen={isProfileOpen}
-          initialTab={profileTab}
-          onOpenChange={(open) => {
-            if (!open) setIsProfileOpen(false);
-          }}
-        />
+        {isProfileOpen && (
+          <Suspense fallback={null}>
+            <ProfileDialog
+              isOpen
+              initialTab={profileTab}
+              onOpenChange={(open) => {
+                if (!open) setIsProfileOpen(false);
+              }}
+            />
+          </Suspense>
+        )}
 
         <Dialog
           isOpen={renameTarget != null}

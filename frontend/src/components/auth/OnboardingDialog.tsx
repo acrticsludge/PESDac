@@ -94,14 +94,19 @@ export default function OnboardingDialog({
   // permanently un-onboarded with no signal (audit G4) — it now opens
   // an error state with a retry instead.
   const [attempt, setAttempt] = useState(0);
+  // Stable identity key: a cross-tab user switch (BetterAuth
+  // revalidates and the auth hook returns the new user) re-runs the
+  // effect so the wizard pre-fills the new row, not the old one.
+  const authUserId = auth.status === "authenticated" ? auth.user.id : "";
   useEffect(() => {
     if (auth.status !== "authenticated") return;
     let cancelled = false;
+    const userId = auth.user.id;
     (async () => {
       try {
         const [me, profile] = await Promise.all([
-          apiGetMe(),
-          apiGetProfile(),
+          apiGetMe(userId),
+          apiGetProfile(userId),
         ]);
         if (cancelled) return;
         if (me.onboardingDone) {
@@ -131,7 +136,7 @@ export default function OnboardingDialog({
     return () => {
       cancelled = true;
     };
-  }, [auth.status, attempt]);
+  }, [auth.status, authUserId, attempt]);
 
   if (auth.status !== "authenticated" || phase === "done" || phase === "checking") return null;
 

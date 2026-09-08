@@ -31,7 +31,6 @@ import {
   DocumentTextIcon,
 } from "@heroicons/react/24/outline";
 import {
-  TABS,
   IdentitySection,
   AuthenticationSection,
   StudySection,
@@ -40,8 +39,8 @@ import {
   LanguageSection,
   PrivacySection,
   LegalSection,
-  type ProfileTab,
 } from "./sections";
+import { TABS, type ProfileTab } from "./profile-tabs";
 
 export type { ProfileTab };
 
