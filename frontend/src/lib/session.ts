@@ -10,8 +10,12 @@
 
 import { useEffect, useState } from "react";
 import type { Block, Thread } from "../content/threads/types";
-import { CHAT_CODES, dayDividerLabel } from "./chat";
-import { isCampus } from "./profile-options";
+// Explicit `.ts` suffixes (not extensionless): the node test runner
+// (`--experimental-transform-types`, no bundler resolution) requires
+// them — extensionless imports fail there with ERR_MODULE_NOT_FOUND.
+// Astro/Vite resolves both forms, so keep the suffixed form.
+import { CHAT_CODES, dayDividerLabel } from "./chat.ts";
+import { isCampus } from "./profile-options.ts";
 
 export type CustomChat = {
   code: string;
@@ -449,6 +453,82 @@ export function getProfile(): Profile {
 
 export function updateProfile(patch: Partial<Profile>) {
   writeJSON(PROFILE_KEY, { ...getProfile(), ...patch });
+  emit();
+}
+
+// Server→local seed state (logout + Google relogin fix).
+//
+// Campus/semester/branch/subjects render from the LOCAL store, which is
+// seeded from /profiles/me by the Pesdac hydration effect — but the
+// IdentitySection skeleton used to watch only /auth/me (useProfile).
+// These helpers give the seed its own explicit pending state so the
+// section can skeleton the campus rows while the seed is in flight,
+// plus an identity key so a stale user-A resolve can never seed user-B.
+let profileSeedPending = false;
+let seededIdentityKey: string | null = null;
+
+/** True while the server→local profile seed fetch is in flight. */
+export function getProfileSeedPending(): boolean {
+  return profileSeedPending;
+}
+
+/** Publish a seed-flight edge; reactive via useSessionVersion(). */
+export function setProfileSeedPending(pending: boolean): void {
+  profileSeedPending = pending;
+  emit();
+}
+
+/** Identity key (user id + auth epoch) that produced the current seed. */
+export function getSeededIdentityKey(): string | null {
+  return seededIdentityKey;
+}
+
+export function setSeededIdentityKey(key: string | null): void {
+  seededIdentityKey = key;
+  emit();
+}
+
+/** Build the identity key for a (user id, auth epoch) pair. */
+export function identitySeedKey(userId: string, epoch: number): string {
+  return `${userId}:${epoch}`;
+}
+
+/**
+ * Skeleton predicate for IdentitySection (unit-testable; the component
+ * calls it with its live statuses). While the server identity OR the
+ * local profile seed is pending, the section skeletons — including the
+ * campus/semester/branch rows. Ready-with-empty stays a valid state
+ * (new user, blank campus renders the Select placeholder) and MUST be
+ * visually distinct from pending: it returns false here.
+ */
+export function shouldShowIdentitySkeleton(
+  authStatus: string,
+  serverProfileStatus: string,
+  seedPending: boolean,
+): boolean {
+  return (
+    authStatus === "loading" ||
+    serverProfileStatus === "loading" ||
+    seedPending
+  );
+}
+
+/**
+ * Logout hygiene (called from apiLogout): drop the old identity's
+ * campus/semester/branch/subjects seed and retag to logged-out so the
+ * next login reseeds from scratch. Preference fields (language, weekly
+ * goal, …) are device-level and preserved — only identity data clears.
+ */
+export function clearLocalProfileSeed(): void {
+  writeJSON(PROFILE_KEY, {
+    ...getProfile(),
+    institution: "",
+    semester: "",
+    branch: "",
+    subjects: [],
+  });
+  profileSeedPending = false;
+  seededIdentityKey = null;
   emit();
 }
 

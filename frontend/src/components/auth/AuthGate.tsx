@@ -21,7 +21,13 @@ import {
 } from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
 
+import { useEffect, useState } from "react";
+
 import { useAuth } from "../../lib/auth";
+import {
+  isLogoutTransition,
+  LOGOUT_TRANSITION_EVENT,
+} from "../../lib/logout-guard";
 
 // Standalone auth pages manage their own session state (logged-in loads
 // bounce); the gate never renders there.
@@ -29,6 +35,18 @@ const AUTH_PATHS = new Set(["/login", "/signup"]);
 
 export default function AuthGate() {
   const auth = useAuth();
+  // Logout flight (logout/relogin fix): the session is transiently guest
+  // on an app route while navigation to /login is already guaranteed.
+  // Re-render on window edges so the gate stays shut for zero frames.
+  // No copy/layout change — the dialog below is untouched.
+  const [, setTransitionTick] = useState(0);
+  useEffect(() => {
+    const onTransition = () => setTransitionTick((v) => v + 1);
+    window.addEventListener(LOGOUT_TRANSITION_EVENT, onTransition);
+    return () =>
+      window.removeEventListener(LOGOUT_TRANSITION_EVENT, onTransition);
+  }, []);
+  if (isLogoutTransition()) return null;
   // In-flight sessions render the shell as-is — no flash of gate while
   // the session is still resolving.
   if (auth.status !== "guest") return null;
