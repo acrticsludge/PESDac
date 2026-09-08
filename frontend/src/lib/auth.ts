@@ -1,15 +1,22 @@
 // Auth facade for the React app. Single entry point.
-import "./buffer-polyfill"; // Must load before any auth module that uses Buffer.
+import "./buffer-polyfill.ts"; // Must load before any auth module that uses Buffer.
 
 import { useEffect, useState } from "react";
-import { authClient } from "./auth-client";
+import { authClient } from "./auth-client.ts";
+import {
+  mintTokenWithRetry,
+  sharedTaggedFetch,
+  isStaleTagged,
+  withBearerToken,
+  type TaggedCache,
+  type TokenReason,
+  type TokenResult,
+} from "./auth-cache.ts";
 
-const API_BASE_URL = import.meta.env.PUBLIC_API_BASE_URL;
-if (!API_BASE_URL) {
-  throw new Error(
-    "PUBLIC_API_BASE_URL is not set. Add it to frontend/.env (see .env.example).",
-  );
-}
+const API_BASE_URL = import.meta.env?.PUBLIC_API_BASE_URL;
+// Do not throw during module evaluation. A missing public env must produce a
+// recoverable auth/API error, not prevent the React island from hydrating and
+// leave Astro with an empty document.
 
 /**
  * Minimum credential password length, stated upfront in password forms
@@ -238,7 +245,14 @@ export function useAuth(): AuthState {
     setHydrated(true);
   }, []);
 
-  if (!hydrated || isPending) {
+  // The server render cannot inspect `document`, so it always renders the
+  // loading branch. Keep the first browser render identical; only consult
+  // the embedded session after the hydration effect has committed.
+  if (!hydrated) {
+    return { status: "loading" };
+  }
+
+  if (isPending) {
     const cached = readInitialSession();
     if (cached) {
       return { status: "authenticated", user: cached };
@@ -299,33 +313,57 @@ export type LinkedAccount = {
   accountId: string;
 };
 
-let accountsPromise: Promise<LinkedAccount[]> | null = null;
+// Identity-scoped promise cache (T41): each entry is tagged with the
+// user-id at fetch time. A stale resolve (user-A's promise landing in
+// user-B's screen, or a 401-triggered `clearAuthCache()` racing a still
+// in-flight fetch) is dropped by comparing the captured user-id to the
+// current session user-id before fulfilling the caller. Listeners can
+// also compare the auth epoch via `getAuthEpoch()`.
 
-/** List linked sign-in methods (shared cache; guests never fetch). */
-export async function apiGetAccounts(): Promise<LinkedAccount[]> {
-  if (!accountsPromise) {
-    accountsPromise = authClient.listAccounts().then((res) => {
-      if (res.error || !res.data) {
-        throw new Error(
-          res.error?.message ?? "Couldn't load linked accounts.",
-        );
-      }
-      return res.data.map((a) => ({
-        id: a.id,
-        providerId: a.providerId,
-        accountId: a.accountId,
-      }));
-    });
-    void accountsPromise.catch(() => {
-      accountsPromise = null;
-    });
+let currentAccountsCache: TaggedCache<LinkedAccount[]> | null = null;
+
+/**
+ * List linked sign-in methods (identity-scoped shared cache; guests
+ * never fetch). A request initiated for user A is never fulfilled for
+ * user B even if A's promise resolves after B took over.
+ */
+export async function apiGetAccounts(currentUserId: string): Promise<LinkedAccount[]> {
+  if (currentAccountsCache && currentAccountsCache.userId === currentUserId) {
+    return currentAccountsCache.promise;
   }
-  return accountsPromise;
+  const { result } = sharedTaggedFetch(
+    currentAccountsCache,
+    () =>
+      authClient.listAccounts().then((res) => {
+        if (res.error || !res.data) {
+          throw new Error(
+            res.error?.message ?? "Couldn't load linked accounts.",
+          );
+        }
+        return res.data.map((a) => ({
+          id: a.id,
+          providerId: a.providerId,
+          accountId: a.accountId,
+        }));
+      }),
+    currentUserId,
+    (entry) => {
+      currentAccountsCache = entry;
+    },
+    (entry) => currentAccountsCache === entry,
+  );
+  // Drop results that arrive after the user switched (T41 stale guard).
+  return result.then((accounts) => {
+    if (isStaleTagged(currentAccountsCache, currentUserId)) {
+      throw new Error("identity-changed");
+    }
+    return accounts;
+  });
 }
 
 /** Drop the cached account list (after link/unlink, logout, 401). */
 export function refreshAccounts(): void {
-  accountsPromise = null;
+  currentAccountsCache = null;
 }
 
 export type AccountsState =
@@ -346,8 +384,9 @@ export function useAccounts(): AccountsState {
       return;
     }
     let cancelled = false;
+    const userId = auth.user.id;
     setState({ status: "loading" });
-    apiGetAccounts().then(
+    apiGetAccounts(userId).then(
       (accounts) => {
         if (!cancelled) setState({ status: "ready", accounts });
       },
@@ -358,7 +397,7 @@ export function useAccounts(): AccountsState {
     return () => {
       cancelled = true;
     };
-  }, [auth.status]);
+  }, [auth.status, auth.status === "authenticated" ? auth.user.id : null]);
 
   return state;
 }
@@ -470,28 +509,39 @@ export async function disableTwoFactor(): Promise<void> {
  * email/displayName).
  *
  * One shared in-flight/cached request per session: the onboarding
- * dialog and useProfile() ask for the same row. A rejection clears the
- * cache so the next caller retries instead of replaying the failure.
+ * dialog and useProfile() ask for the same row. Identity-scoped (T41):
+ * a request initiated for user A cannot leak into user B. A rejection
+ * clears the cache so the next caller retries instead of replaying the
+ * failure.
  */
-let mePromise: Promise<AuthUser> | null = null;
-let profilePromise: Promise<ServerProfile> | null = null;
+let currentMeCache: TaggedCache<AuthUser> | null = null;
+let currentProfileCache: TaggedCache<ServerProfile> | null = null;
 
-export async function apiGetMe(): Promise<AuthUser> {
-  if (!mePromise) {
-    mePromise = apiFetch<{ user: AuthUser }>("/auth/me").then(
-      (res) => res.user,
-    );
-    void mePromise.catch(() => {
-      mePromise = null;
-    });
+export async function apiGetMe(currentUserId: string): Promise<AuthUser> {
+  if (currentMeCache && currentMeCache.userId === currentUserId) {
+    return currentMeCache.promise;
   }
-  return mePromise;
+  const { result } = sharedTaggedFetch(
+    currentMeCache,
+    () => apiFetch<{ user: AuthUser }>("/auth/me").then((res) => res.user),
+    currentUserId,
+    (entry) => {
+      currentMeCache = entry;
+    },
+    (entry) => currentMeCache === entry,
+  );
+  return result.then((user) => {
+    if (isStaleTagged(currentMeCache, currentUserId)) {
+      throw new Error("identity-changed");
+    }
+    return user;
+  });
 }
 
 /** Drop the cached /auth/me (logout, 401, or after saving onboarding). */
 export function refreshProfile(): void {
-  mePromise = null;
-  profilePromise = null;
+  currentMeCache = null;
+  currentProfileCache = null;
 }
 
 export type ProfileState =
@@ -516,8 +566,9 @@ export function useProfile(): ProfileState {
       return;
     }
     let cancelled = false;
+    const userId = auth.user.id;
     setState({ status: "loading" });
-    apiGetMe().then(
+    apiGetMe(userId).then(
       (user) => {
         if (!cancelled) setState({ status: "ready", user });
       },
@@ -528,20 +579,31 @@ export function useProfile(): ProfileState {
     return () => {
       cancelled = true;
     };
-  }, [auth.status]);
+  }, [auth.status, auth.status === "authenticated" ? auth.user.id : null]);
 
   return state;
 }
 
 /** Read the full server profile row (auto-creates a blank row first time). */
-export async function apiGetProfile(): Promise<ServerProfile> {
-  if (!profilePromise) {
-    profilePromise = apiFetch<ServerProfile>("/profiles/me");
-    void profilePromise.catch(() => {
-      profilePromise = null;
-    });
+export async function apiGetProfile(currentUserId: string): Promise<ServerProfile> {
+  if (currentProfileCache && currentProfileCache.userId === currentUserId) {
+    return currentProfileCache.promise;
   }
-  return profilePromise;
+  const { result } = sharedTaggedFetch(
+    currentProfileCache,
+    () => apiFetch<ServerProfile>("/profiles/me"),
+    currentUserId,
+    (entry) => {
+      currentProfileCache = entry;
+    },
+    (entry) => currentProfileCache === entry,
+  );
+  return result.then((profile) => {
+    if (isStaleTagged(currentProfileCache, currentUserId)) {
+      throw new Error("identity-changed");
+    }
+    return profile;
+  });
 }
 
 /**
@@ -561,6 +623,34 @@ export async function apiUpdateProfile(
 
 // ---- apiFetch --------------------------------------------------------------
 
+/**
+ * Typed recoverable error for auth-service outages (token-mint failures).
+ * These are transient, non-session-invalidating failures that should use
+ * existing toast/retry handling and keep the user in the current shell.
+ * Distinguished from AuthRequiredError (backend 401) and ApiError (other status codes).
+ */
+export class AuthServiceError extends Error {
+  readonly code: "auth-service-unavailable";
+  readonly reason: TokenReason;
+  readonly retry?: { afterMs: number };
+  constructor(reason: Exclude<TokenReason, "ok">, retry?: { afterMs: number }) {
+    const msg = reason === "missing-config" ? "Authentication service is not configured. Please contact your administrator." :
+      reason === "network" ? "Couldn't reach the authentication service. Check your connection and try again." :
+      reason === "timeout" ? "Authentication service timed out. Please try again." :
+      reason === "rate-limited" ? "Too many authentication attempts. Please wait and try again." :
+      reason === "server" ? "Authentication service is temporarily unavailable. Please try again later." :
+      reason === "malformed" ? "Authentication service returned an invalid response. Please try again." :
+      reason === "client-error" ? "Authentication failed. Please check your credentials." :
+      reason === "unexpected-status" ? "Authentication service returned an unexpected response. Please try again." :
+      "Authentication service failed.";
+    super(msg);
+    this.name = "AuthServiceError";
+    this.code = "auth-service-unavailable";
+    this.reason = reason;
+    this.retry = retry;
+  }
+}
+
 export type ApiFetchInit = Omit<RequestInit, "body" | "headers"> & {
   body?: unknown;
   headers?: Record<string, string>;
@@ -571,7 +661,13 @@ export type ApiFetchInit = Omit<RequestInit, "body" | "headers"> & {
 // paths ("/auth/me") and PUBLIC_API_BASE_URL stays a clean host.
 // (Audit: without this every call 404s; there is no dev proxy.)
 const API_PREFIX = "/api/v1";
-const API_ROOT = API_BASE_URL.replace(/\/+$/, "");
+// Test-only override mirroring authBaseOverride below: the node test runner
+// has no PUBLIC_API_BASE_URL, so tests set the root explicitly. Empty in
+// production unless the env is missing (then apiFetch throws missing-config).
+let apiRootOverride = "";
+function currentApiRoot(): string {
+  return (apiRootOverride || (API_BASE_URL ?? "")).replace(/\/+$/, "");
+}
 
 // Hung backend must not hang the UI with no feedback: abort the request
 // and let toUserMessage render the connection copy (AbortError branch).
@@ -586,10 +682,16 @@ const TOKEN_TIMEOUT_MS = 8000;
 // short-lived JWT (15m server-side default) for the current session.
 // Cached in memory for 5 minutes so one token covers a burst of apiFetch
 // calls; cleared on logout and on 401.
-const AUTH_BASE = (import.meta.env.PUBLIC_BETTER_AUTH_URL ?? "").replace(
-  /\/+$/,
-  "",
-);
+// Test-only override: lets the node test suite swap the base URL when
+// PUBLIC_BETTER_AUTH_URL is unset in a build env. Empty in production.
+let authBaseOverride = "";
+function currentAuthBase(): string {
+  return (
+    authBaseOverride ||
+    (import.meta.env?.PUBLIC_BETTER_AUTH_URL ?? "")
+  ).replace(/\/+$/, "");
+}
+
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 let cachedToken: { token: string; at: number } | null = null;
 // In-flight dedupe: many simultaneous apiFetch callers share one mint.
@@ -600,26 +702,15 @@ let inFlightToken: Promise<TokenResult> | null = null;
  *  can tell "confirmed guest" from "auth service down" from "aborted".
  *  Backend endpoints never see a token from a confused service, but the
  *  type is also useful for tests (we assert on the reason, not a string). */
-export type TokenReason =
-  | "ok"
-  | "missing-config"
-  | "network"
-  | "timeout"
-  | "http"
-  | "malformed";
-
-export type TokenResult =
-  | { reason: "ok"; token: string }
-  | { reason: Exclude<TokenReason, "ok"> };
-
 async function getBackendToken(): Promise<TokenResult> {
   if (cachedToken && Date.now() - cachedToken.at < TOKEN_TTL_MS) {
     return { reason: "ok", token: cachedToken.token };
   }
   cachedToken = null;
-  if (!AUTH_BASE) return { reason: "missing-config" };
+  const base = currentAuthBase();
+  if (!base) return { reason: "missing-config" };
   if (inFlightToken) return inFlightToken;
-  inFlightToken = mintBackendToken();
+  inFlightToken = mintBackendTokenWithRetry(base);
   try {
     const result = await inFlightToken;
     return result;
@@ -628,43 +719,34 @@ async function getBackendToken(): Promise<TokenResult> {
   }
 }
 
-async function mintBackendToken(): Promise<TokenResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TOKEN_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${AUTH_BASE}/api/auth/token`, {
-      credentials: "include",
-      signal: controller.signal,
-    });
-    if (!res.ok) return { reason: "http" };
-    const data: unknown = await res.json().catch(() => null);
-    const token =
-      typeof data === "object" && data !== null
-        ? (data as { token?: unknown }).token
-        : null;
-    if (typeof token !== "string" || !token) return { reason: "malformed" };
-    cachedToken = { token, at: Date.now() };
-    return { reason: "ok", token };
-  } catch (err) {
-    if (typeof DOMException !== "undefined" && err instanceof DOMException && err.name === "AbortError") {
-      return { reason: "timeout" };
-    }
-    return { reason: "network" };
-  } finally {
-    clearTimeout(timer);
+/**
+ * Token-mint wrapper that caches a successful token and delegates the
+ * retry policy to the pure helper in `./auth-cache`. The first attempt
+ * must always go through `mintTokenOnce`; `mintTokenWithRetry` runs a
+ * second attempt on transient failures with a 200ms backoff (T40).
+ */
+async function mintBackendTokenWithRetry(base: string): Promise<TokenResult> {
+  const result = await mintTokenWithRetry(base, fetch, TOKEN_TIMEOUT_MS);
+  if (result.reason === "ok") {
+    cachedToken = { token: result.token, at: Date.now() };
   }
+  return result;
 }
 
 /** Drop cached auth material (logout, 401, account delete). */
 export function clearAuthCache(): void {
   cachedToken = null;
-  mePromise = null;
-  profilePromise = null;
-  accountsPromise = null;
+  currentMeCache = null;
+  currentProfileCache = null;
+  currentAccountsCache = null;
   bumpAuthEpoch();
 }
 
 export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
+  const apiRoot = currentApiRoot();
+  if (!apiRoot) {
+    throw new AuthServiceError("missing-config");
+  }
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...(init.headers ?? {}),
@@ -673,15 +755,24 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   // the session cookie — attach it when a session exists. Guests send no
   // header and get the usual 401 envelope below.
   const tokenResult = await getBackendToken();
-  if (tokenResult.reason === "ok") {
-    headers.Authorization = `Bearer ${tokenResult.token}`;
-  } else if (tokenResult.reason !== "missing-config") {
-    // Auth service outage / timeout / malformed: drop cached token and
-    // signal a soft auth-required so the shell can stop pretending the
-    // session is fresh. We don't crash a fetch on a transient BetterAuth
-    // stall — the user gets the same envelope as a guest would, and the
-    // server still answers authoritatively for unauthenticated reads.
-    clearAuthCache();
+  const authorizedHeaders = withBearerToken(headers, tokenResult);
+  if (!authorizedHeaders) {
+    // `withBearerToken` and this branch are intentionally paired. Keep the
+    // impossible ok case explicit so TypeScript and future refactors cannot
+    // accidentally turn a missing header into an unauthenticated request.
+    if (tokenResult.reason === "ok") {
+      throw new Error("Token/header authorization invariant violated.");
+    }
+    // Auth service outage / timeout / malformed: do not proceed to protected
+    // backend request. These are transient failures, not proof the session
+    // is invalid. The user stays in the current shell with a recoverable error.
+    if (tokenResult.reason === "rate-limited") {
+      throw new AuthServiceError(tokenResult.reason, { afterMs: 60000 });
+    }
+    if (tokenResult.reason === "server" || tokenResult.reason === "client-error") {
+      throw new AuthServiceError(tokenResult.reason);
+    }
+    throw new AuthServiceError(tokenResult.reason);
   }
   const body =
     init.body === undefined ? undefined : JSON.stringify(init.body);
@@ -690,9 +781,11 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(`${API_ROOT}${API_PREFIX}${path}`, {
+    res = await fetch(`${apiRoot}${API_PREFIX}${path}`, {
       ...init,
-      headers: body ? { ...headers, "Content-Type": "application/json" } : headers,
+      headers: body
+        ? { ...authorizedHeaders, "Content-Type": "application/json" }
+        : authorizedHeaders,
       body,
       credentials: "include",
       signal: controller.signal,
@@ -721,8 +814,12 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
           (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = true;
           window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
           // Reset on next tick so subsequent distinct sessions can fire.
+          // Guarded: the callback outlives the caller and window may be gone
+          // (SSR teardown, test harness removing its fake window).
           setTimeout(() => {
-            (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = false;
+            if (typeof window !== "undefined") {
+              (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = false;
+            }
           }, 0);
         }
       }
@@ -860,4 +957,62 @@ export async function apiDeleteAccount(): Promise<DeleteAccountOutcome> {
     // Already gone.
   }
   return { kind: "complete" };
+}
+
+// ---- Test hooks ------------------------------------------------------------
+//
+// Internal helpers used by `frontend/tests/`. They are exported so the
+// node test runner can reset module-level state between cases; they
+// never affect production behavior (no caller in src/ uses them).
+
+/** Reset every identity-scoped cache (me/profile/accounts/token). */
+export function __resetAuthCachesForTesting(): void {
+  cachedToken = null;
+  currentMeCache = null;
+  currentProfileCache = null;
+  currentAccountsCache = null;
+  inFlightToken = null;
+}
+
+/**
+ * Override the BetterAuth base URL used by the token mint helper. Only
+ * effective when `PUBLIC_BETTER_AUTH_URL` is unset (the dev build
+ * normally picks it up from env). Test-only.
+ */
+export function __setAuthBaseForTesting(value: string): void {
+  authBaseOverride = value.replace(/\/+$/, "");
+}
+
+/** Snapshot of the BetterAuth base URL (test introspection only). */
+export function __getAuthBaseForTesting(): string {
+  return currentAuthBase();
+}
+
+/**
+ * Override the API root used by apiFetch. Mirrors __setAuthBaseForTesting:
+ * the node test runner has no PUBLIC_API_BASE_URL. Test-only.
+ */
+export function __setApiRootForTesting(value: string): void {
+  apiRootOverride = value.replace(/\/+$/, "");
+}
+
+/** Snapshot of the API root (test introspection only). */
+export function __getApiRootForTesting(): string {
+  return currentApiRoot();
+}
+
+/**
+ * Swap `globalThis.fetch` for the duration of the returned restore
+ * closure. Used by the node test suite to mock token and api responses
+ * without a real network. Calling again before restoring throws — tests
+ * should always restore or call in a `try/finally`.
+ */
+export function __setFetchForTesting(
+  impl: typeof fetch,
+): () => void {
+  const previous = globalThis.fetch;
+  globalThis.fetch = impl;
+  return () => {
+    globalThis.fetch = previous;
+  };
 }
