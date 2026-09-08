@@ -27,6 +27,14 @@ const API_BASE_URL = import.meta.env?.PUBLIC_API_BASE_URL;
  */
 export const MIN_PASSWORD_LENGTH = 8;
 
+/**
+ * Maximum credential password length. Mirrors the server's
+ * `LinkPasswordIn` (`backend/app/schemas/auth.py`) and BetterAuth's
+ * `maxPasswordLength` (lib/auth.ts). The link form enforces it inline
+ * so over-long input never costs a round trip.
+ */
+export const MAX_PASSWORD_LENGTH = 128;
+
 // ---- Types -----------------------------------------------------------------
 
 export type AuthUser = {
@@ -131,6 +139,13 @@ export function toUserMessage(error: unknown, fallback: string): string {
   }
   if (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") {
     return "Couldn't reach the server. Check your connection and try again.";
+  }
+  if (error instanceof AuthServiceError) {
+    // Token-mint outage/timeout/rate-limit: the message is authored
+    // user-safe at construction. Pinned explicitly (not via the generic
+    // Error branch) so a future edit to the fallback below cannot
+    // regress auth-service copy silently.
+    return error.message;
   }
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -367,9 +382,34 @@ export async function apiGetAccounts(currentUserId: string): Promise<LinkedAccou
   });
 }
 
+/**
+ * Observable generation for the linked-account list. `refreshAccounts()`
+ * drops the cache AND bumps this counter; `useAccounts()` subscribes, so
+ * link/unlink/Google-link visibly refetch without a reload. (Previously
+ * the cache was dropped with no subscriber update, and the section kept
+ * showing stale rows until reload.) Identity scoping is preserved: the
+ * counter only re-runs the effect for the currently authenticated user,
+ * and `apiGetAccounts` still drops cross-identity resolves.
+ */
+let accountsVersion = 0;
+const accountsListeners = new Set<() => void>();
+
+/** Current linked-account generation (test introspection only). */
+export function __getAccountsVersionForTesting(): number {
+  return accountsVersion;
+}
+
 /** Drop the cached account list (after link/unlink, logout, 401). */
 export function refreshAccounts(): void {
   currentAccountsCache = null;
+  accountsVersion += 1;
+  accountsListeners.forEach((notify) => {
+    try {
+      notify();
+    } catch {
+      // A stale listener must not break the refresh for the rest.
+    }
+  });
 }
 
 export type AccountsState =
@@ -382,6 +422,18 @@ export type AccountsState =
 export function useAccounts(): AccountsState {
   const auth = useAuth();
   const [state, setState] = useState<AccountsState>({ status: "loading" });
+  // Re-run the fetch when refreshAccounts() bumps the generation
+  // (link/unlink/Google-link, retry after error) — not just when the
+  // identity changes.
+  const [version, setVersion] = useState(accountsVersion);
+
+  useEffect(() => {
+    const notify = () => setVersion(accountsVersion);
+    accountsListeners.add(notify);
+    return () => {
+      accountsListeners.delete(notify);
+    };
+  }, []);
 
   useEffect(() => {
     if (auth.status === "loading") return;
@@ -403,7 +455,7 @@ export function useAccounts(): AccountsState {
     return () => {
       cancelled = true;
     };
-  }, [auth.status, auth.status === "authenticated" ? auth.user.id : null]);
+  }, [auth.status, auth.status === "authenticated" ? auth.user.id : null, version]);
 
   return state;
 }

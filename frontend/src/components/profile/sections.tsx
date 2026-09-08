@@ -65,7 +65,7 @@ import {
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
-import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, linkPassword, apiDeleteAccount, apiFetch, apiUpdateProfile, toUserMessage, MIN_PASSWORD_LENGTH } from "../../lib/auth";
+import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, linkPassword, refreshAccounts, apiDeleteAccount, apiFetch, apiUpdateProfile, toUserMessage, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from "../../lib/auth";
 import { navigate } from "astro:transitions/client";
 import {
   BRANCHES,
@@ -1261,6 +1261,8 @@ export function AuthenticationSection() {
     setIsLinking(true);
     try {
       await linkGoogle();
+      refreshAccounts();
+      toast({ body: "Google linked.", type: "info" });
     } catch (e) {
       toast({
         body: toUserMessage(e, "Couldn't link Google. Try again."),
@@ -1276,6 +1278,7 @@ export function AuthenticationSection() {
     setIsUnlinking(true);
     try {
       await unlinkAccount(googleAccount.id);
+      toast({ body: "Google unlinked.", type: "info" });
     } catch (e) {
       toast({
         body: toUserMessage(e, "Couldn't unlink Google. Try again."),
@@ -1389,6 +1392,12 @@ export function AuthenticationSection() {
       );
       return;
     }
+    if (linkNewPassword.length > MAX_PASSWORD_LENGTH) {
+      setLinkFieldError(
+        `Password must be at most ${MAX_PASSWORD_LENGTH} characters.`,
+      );
+      return;
+    }
     if (linkNewPassword !== linkConfirmPassword) {
       // Mismatch is attributed to the Confirm field — it's the most
       // recently typed one, and the user can fix it without touching
@@ -1468,6 +1477,24 @@ control={
               )
             }
           />
+          {accounts.status === "error" && (
+            <SettingsRow
+              title="Link status"
+              description="Your sign-in methods couldn't be loaded."
+              icon={GlobeAltIcon}
+              control={
+                <Button
+                  label="Retry"
+                  variant="secondary"
+                  size="sm"
+                  isDisabled={anyPending}
+                  onClick={() => {
+                    refreshAccounts();
+                  }}
+                />
+              }
+            />
+          )}
           <SettingsRow
             title="Two-factor authentication"
             description={
