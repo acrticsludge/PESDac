@@ -217,3 +217,126 @@ def test_link_password_upstream_unreachable(client: TestClient, monkeypatch):
     )
     assert r.status_code == 502
     assert r.json()["error"]["code"] == "AUTH_UNREACHABLE"
+
+
+def test_link_password_upstream_401_is_not_ours_401(
+    client: TestClient, monkeypatch
+):
+    """Upstream rejected the session cookie while our JWT is valid.
+
+    Forwarding 401 would make apiFetch fire the global auth-required
+    logout (navigate to /login, clear session) for a recoverable
+    cookie problem. It must surface as a non-401 AUTH_ERROR so the
+    modal toasts recoverably instead.
+    """
+    _patch_upstream(
+        monkeypatch,
+        _StubResponse(401, {"message": "Unauthorized"}),
+    )
+    r = client.post(
+        "/api/v1/auth/link-password",
+        json={"newPassword": "passwordpassword"},
+    )
+    assert r.status_code != 401, r.text
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "AUTH_ERROR"
+
+
+class _BrokenJsonResponse(_StubResponse):
+    def json(self):
+        raise ValueError("not json")
+
+
+def test_link_password_upstream_malformed_body_falls_back(
+    client: TestClient, monkeypatch
+):
+    """Unparseable upstream body must not throw inside the handler;
+    the safe default copy is returned instead."""
+    _patch_upstream(monkeypatch, _BrokenJsonResponse(400, {}))
+    r = client.post(
+        "/api/v1/auth/link-password",
+        json={"newPassword": "passwordpassword"},
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "AUTH_ERROR"
+    assert r.json()["error"]["message"] == "Couldn't link password. Try again."
+
+
+def test_link_password_upstream_non_dict_body_falls_back(
+    client: TestClient, monkeypatch
+):
+    """A 200-shaped non-dict JSON body (e.g. a list) has no message to
+    read; same safe fallback, no handler exception."""
+    _patch_upstream(monkeypatch, _StubResponse(403, ["unexpected"]))  # type: ignore[arg-type]
+    r = client.post(
+        "/api/v1/auth/link-password",
+        json={"newPassword": "passwordpassword"},
+    )
+    assert r.status_code == 403
+    assert r.json()["error"]["message"] == "Couldn't link password. Try again."
+
+
+def test_link_password_forwards_only_session_cookie(
+    client: TestClient, monkeypatch
+):
+    """Only `better-auth.*` cookies travel upstream; unrelated cookies
+    (analytics, other first-party state) stay on our side."""
+    capture: dict[str, Any] = {}
+    _patch_upstream(monkeypatch, _StubResponse(200, {"status": True}), capture)
+    r = client.post(
+        "/api/v1/auth/link-password",
+        json={"newPassword": "passwordpassword"},
+        headers={
+            "Cookie": (
+                "better-auth.session_token=abc123; "
+                "better-auth.session_data=xyz; "
+                "_ga=GA1.2.3; theme=dark"
+            )
+        },
+    )
+    assert r.status_code == 200, r.text
+    sent = capture["headers"].get("Cookie", "")
+    assert "better-auth.session_token=abc123" in sent
+    assert "better-auth.session_data=xyz" in sent
+    assert "_ga" not in sent
+    assert "theme" not in sent
+
+
+def test_link_password_no_cookie_sends_no_cookie_header(
+    client: TestClient, monkeypatch
+):
+    """No incoming cookie means no upstream Cookie header at all."""
+    capture: dict[str, Any] = {}
+    _patch_upstream(monkeypatch, _StubResponse(200, {"status": True}), capture)
+    r = client.post(
+        "/api/v1/auth/link-password",
+        json={"newPassword": "passwordpassword"},
+    )
+    assert r.status_code == 200, r.text
+    assert "Cookie" not in capture["headers"]
+
+
+def test_link_password_forwards_secure_prefixed_session_cookie(
+    client: TestClient, monkeypatch
+):
+    """Production (https) deployments set `__Secure-`/`__Host-`-prefixed
+    BetterAuth cookies. Dropping them would break linking everywhere
+    except local dev, so they must travel upstream like the bare names."""
+    capture: dict[str, Any] = {}
+    _patch_upstream(monkeypatch, _StubResponse(200, {"status": True}), capture)
+    r = client.post(
+        "/api/v1/auth/link-password",
+        json={"newPassword": "passwordpassword"},
+        headers={
+            "Cookie": (
+                "__Secure-better-auth.session_token=s1; "
+                "__Host-better-auth.session_data=d1; "
+                "_ga=GA1.2.3"
+            )
+        },
+    )
+    assert r.status_code == 200, r.text
+    sent = capture["headers"].get("Cookie", "")
+    assert "__Secure-better-auth.session_token=s1" in sent
+    assert "__Host-better-auth.session_data=d1" in sent
+    assert "_ga" not in sent

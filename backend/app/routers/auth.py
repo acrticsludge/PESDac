@@ -32,6 +32,41 @@ logger = logging.getLogger("pesdac")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# BetterAuth (1.7.3, no custom cookie prefix in lib/auth.ts) names its
+# session cookies `better-auth.<name>` (session_token, session_data, ...).
+# On secure/production deployments the same names carry a `__Secure-` (or
+# `__Host-`) prefix, and the reader also accepts the `-` separator
+# variant — all of these must travel upstream. Only these are forwarded —
+# never the whole Cookie header (analytics or other first-party cookies
+# must not leave our boundary).
+_BETTER_AUTH_COOKIE_PREFIXES = ("better-auth.", "better-auth-")
+_SECURE_COOKIE_PREFIXES = ("__secure-", "__host-")
+
+
+def _session_cookie_header(raw: str) -> dict[str, str]:
+    """Reduce a `Cookie` header to the BetterAuth session cookies.
+
+    Parses `name=value` pairs and keeps only the BetterAuth session
+    names (secure-prefixed and `-`-separator variants included);
+    returns `{}` when nothing session-scoped remains so the caller
+    sends no Cookie header at all. Original pairs are forwarded
+    verbatim (only surrounding whitespace is trimmed).
+    """
+    kept: list[str] = []
+    for part in raw.split(";"):
+        name, sep, value = part.strip().partition("=")
+        if not sep or not name:
+            continue
+        name = name.strip()
+        matchable = name.lower()
+        for secure in _SECURE_COOKIE_PREFIXES:
+            if matchable.startswith(secure):
+                matchable = matchable[len(secure):]
+                break
+        if matchable.startswith(_BETTER_AUTH_COOKIE_PREFIXES):
+            kept.append(f"{name}={value.strip()}")
+    return {"Cookie": "; ".join(kept)} if kept else {}
+
 
 @router.get("/me")
 async def me(
@@ -82,9 +117,11 @@ async def link_password(
         return limited  # type: ignore[return-value]
 
     # BetterAuth verifies the SESSION COOKIE server-side, not the JWT
-    # our API uses. Copy the cookie header through; the upstream call
-    # is on behalf of this very user.
+    # our API uses. Forward only the BetterAuth session cookies on
+    # behalf of this very user; anything else in the Cookie header
+    # stays on our side of the boundary.
     cookie = request.headers.get("cookie", "")
+    forward_headers = _session_cookie_header(cookie)
     upstream = (
         f"{config.BETTER_AUTH_URL}/api/auth/set-password"
         if config.BETTER_AUTH_URL
@@ -101,7 +138,7 @@ async def link_password(
             resp = await client.post(
                 upstream,
                 json={"newPassword": body.newPassword},
-                headers={"Cookie": cookie} if cookie else {},
+                headers=forward_headers,
             )
     except httpx.HTTPError:
         logger.warning("link-password: upstream unreachable")
@@ -113,21 +150,35 @@ async def link_password(
     if not resp.is_success:
         # Surface BetterAuth's user-safe error message; never leak the
         # upstream status or raw body (it can include internal codes).
+        data: Any = None
         try:
             data = resp.json()
-            message = (
-                data.get("message")
-                if isinstance(data, dict) and isinstance(data.get("message"), str)
-                else None
-            )
         except Exception:
-            message = None
+            data = None
+        message: str | None = None
+        if isinstance(data, dict):
+            raw_message = data.get("message")
+            if isinstance(raw_message, str) and raw_message:
+                message = raw_message
         # 422 means the password didn't pass server-side policy (length,
         # character class). The frontend already enforces the same range;
         # this is the server's authoritative answer.
         code = "AUTH_VALIDATION" if resp.status_code == 422 else "AUTH_ERROR"
+        backend_status = resp.status_code
+        if resp.status_code == 401:
+            # Upstream rejected the session cookie while our JWT is valid.
+            # A backend 401 would make apiFetch fire the global
+            # `pesdac:auth-required` logout (navigating to /login and
+            # clearing the session) for a recoverable cookie problem, so
+            # remap it: 500 AUTH_ERROR toasts recoverably in the open
+            # modal instead. Upstream status stays in the server log only.
+            logger.warning(
+                "link-password: upstream rejected session cookie user_id=%s",
+                result.id,
+            )
+            backend_status = 500
         return JSONResponse(  # type: ignore[return-value]
-            status_code=resp.status_code,
+            status_code=backend_status,
             content=error_body(code, message or "Couldn't link password. Try again."),
         )
 
