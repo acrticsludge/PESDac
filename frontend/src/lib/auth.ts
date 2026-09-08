@@ -181,47 +181,81 @@ export function bumpAuthEpoch(): void {
 
 /**
  * Reads the JSON embedded by `<InitialSession />` on the server.
- * Used by useAuth() so the first render already knows guest vs
- * authenticated, without waiting for /api/auth/get-session.
- *
- * The script tag is rendered in the body before any `client:load`
- * island, so it is available the moment React mounts. The cache
- * is process-global; React StrictMode double-invokes effects, not
- * reads, so this is safe.
- *
- * Returns `null` (guest) when:
- * - the script tag is missing (auth pages, transit navigation,
- *   server error), or
- * - the script is the literal `null` (no session cookie), or
- * - the JSON is malformed (defensive; never throws).
+ * Tri-state: present-guest (literal `null`), present-user (validated
+ * object), or absent (missing tag, malformed or wrong-shape JSON).
+ * Absent fails closed — useAuth() treats it as loading, never guest,
+ * so a missing hint can't open the gate over a valid session. The
+ * cache is keyed by raw tag contents (Astro-transition safe).
  */
-let initialSessionCache: { raw: string; value: SessionUser | null } | undefined;
-function readInitialSession(): SessionUser | null {
+export type InitialSessionTag = {
+  present: boolean;
+  user: SessionUser | null;
+};
+
+let initialSessionCache: { raw: string; value: InitialSessionTag } | undefined;
+export function readInitialSessionTag(): InitialSessionTag {
   if (typeof document === "undefined") {
-    return null;
+    return { present: false, user: null };
   }
   const el = document.getElementById("pesdac:initial-session");
-  const raw = el?.textContent ?? "null";
+  if (!el) {
+    return { present: false, user: null };
+  }
+  const raw = el.textContent ?? "";
   // Astro transitions can replace the embedded session script without
   // reloading this module. Cache by the script contents, not process-wide,
   // so a guest -> authenticated transition cannot retain a stale null.
   if (initialSessionCache?.raw === raw) return initialSessionCache.value;
+  let value: InitialSessionTag;
   try {
     const parsed = JSON.parse(raw) as SessionUser | null;
-    const value =
-      parsed && typeof parsed.id === "string" && typeof parsed.email === "string"
-        ? {
-            id: parsed.id,
-            email: parsed.email,
-            name: parsed.name ?? "",
-            twoFactorEnabled: parsed.twoFactorEnabled === true,
-          }
-        : null;
-    initialSessionCache = { raw, value };
+    value =
+      parsed === null
+        ? { present: true, user: null }
+        : parsed && typeof parsed.id === "string" && typeof parsed.email === "string"
+          ? {
+              present: true,
+              user: {
+                id: parsed.id,
+                email: parsed.email,
+                name: parsed.name ?? "",
+                twoFactorEnabled: parsed.twoFactorEnabled === true,
+              },
+            }
+          : { present: false, user: null };
   } catch {
-    initialSessionCache = { raw, value: null };
+    value = { present: false, user: null };
   }
-  return initialSessionCache.value;
+  initialSessionCache = { raw, value };
+  return value;
+}
+
+/**
+ * Pure initial-auth decision for the useSession pending window.
+ * Epoch (not cookies): BetterAuth session cookies are httpOnly, so
+ * document.cookie can't gate staleness; the epoch bumps in exactly
+ * one place (clearAuthCache, itself only called on identity
+ * transitions), making any mismatch proof the tag is stale.
+ * Mismatch and absent tags fail closed to loading — never a gate
+ * flash over a live session, never a false authenticated paint.
+ * BFCache restores keep tag+epoch together, so a stale tag can
+ * survive restore; accepted (the live session converges on resolve).
+ */
+export function resolveInitialAuth(
+  tag: InitialSessionTag,
+  epochAtMount: number,
+  currentEpoch: number,
+): "authenticated" | "guest" | "loading" {
+  if (epochAtMount !== currentEpoch) {
+    return "loading";
+  }
+  if (!tag.present) {
+    return "loading";
+  }
+  if (tag.user) {
+    return "authenticated";
+  }
+  return "guest";
 }
 
 // Let callers observe epoch changes (e.g. hook into a re-render or test).
@@ -256,6 +290,10 @@ export function useAuthEpoch(): number {
 export function useAuth(): AuthState {
   const { data: session, isPending } = authClient.useSession();
   const [hydrated, setHydrated] = useState(false);
+  // Latch the epoch at mount (lazy initializer, never a render-time
+  // ref write). Any clearAuthCache() after this point — in-page
+  // sign-in, logout, 401 — mismatches below and forces loading.
+  const [epochAtMount] = useState(getAuthEpoch);
 
   useEffect(() => {
     setHydrated(true);
@@ -269,11 +307,16 @@ export function useAuth(): AuthState {
   }
 
   if (isPending) {
-    const cached = readInitialSession();
-    if (cached) {
-      return { status: "authenticated", user: cached };
+    const tag = readInitialSessionTag();
+    const initial = resolveInitialAuth(tag, epochAtMount, getAuthEpoch());
+    if (initial === "authenticated" && tag.user) {
+      return { status: "authenticated", user: tag.user };
     }
-    // No server hint means the client is still authoritative-checking the
+    if (initial === "guest") {
+      return { status: "guest" };
+    }
+    // No server hint, or the hint predates an in-page identity
+    // transition: the client is still authoritative-checking the
     // cookie. Never classify that window as guest: AuthGate would open a
     // destructive-looking create-account prompt over a valid session.
     return { status: "loading" };
@@ -311,6 +354,10 @@ export async function signUp(email: string, password: string, name: string) {
 }
 
 export async function signOut() {
+  // Epoch closure: the bare signOut path is an identity transition like
+  // apiLogout below. Bump up front so a stale embedded tag can never
+  // paint post-logout renders while the sign-out is in flight.
+  clearAuthCache();
   return authClient.signOut();
 }
 
@@ -909,7 +956,11 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   const text = await res.text();
   const parsed: unknown = text ? safeJson(text) : null;
   if (!res.ok) {
-    const body = isErrorBody(parsed) ? parsed : null;
+    // The backend envelope is nested ({ error: { code, message } }); accept
+    // the flat shape too for forward-compat. Without the unwrap, every
+    // backend 4xx degraded to the HTTP reason phrase instead of the
+    // server-authored user-safe message.
+    const body: ApiErrorBody | null = isErrorBody(parsed) ? parsed : errorEnvelopeBody(parsed);
     if (res.status === 401) {
       throw authRequiredError(body);
     }

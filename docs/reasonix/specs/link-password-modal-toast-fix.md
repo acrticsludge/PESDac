@@ -1,6 +1,6 @@
 # Spec: link-password in My Profile + toast-over-modal fix
 
-Status: Proposed
+Status: Superseded (mechanism) — the feature shipped via same-origin Astro route, not the backend proxy below. See the correction note under §6 FR1 and `docs/slices/slice-12b-link-credential.md` (2026-09-08, commit `3c442c7`). Kept as history; do not implement §6 FR1/§9 as written.
 Audit basis: `docs/audits/2026-09-08-link-password-modal-toast-audit.md`
 Stack: Astro + React 19 + Astryx 0.5.2 + StyleX + `PESDacMockupTheme` (per `AGENTS.md`; `CLAUDE.md` Next.js/Supabase references are stale for this repo and do not apply).
 
@@ -56,7 +56,9 @@ Trailing defects in the same flow (stale linked-account list, upstream-401 trigg
 
 ## 6. Functional requirements
 
-### FR1: Contract (unchanged path)
+### FR1: Contract (SUPERSEDED 2026-09-08 — Tandatangani history only)
+
+The backend-proxy contract below was unimplementable: `POST {BETTER_AUTH_URL}/api/auth/set-password` exists nowhere in BetterAuth 1.7.3 (`setPassword` is `serverOnly`, in-process only), so the proxy could only ever 404. The shipped mechanism is same-origin `POST /api/link-password` (`frontend/src/pages/api/link-password.ts`) calling `auth.api.setPassword` in process with the session cookie; `linkPassword()` in `frontend/src/lib/auth.ts` targets it with apiFetch-equivalent 401/error semantics. Original (wrong) contract preserved for the record:
 
 - Frontend MUST call `apiFetch("/auth/link-password", { method: "POST", body: { newPassword } })`, which resolves to `POST {PUBLIC_API_BASE_URL}/api/v1/auth/link-password`. No hardcoded host, no duplicated prefix.
 - Backend MUST keep `POST /api/v1/auth/link-password` (`backend/app/routers/auth.py` + `backend/app/main.py` mount) with deps order: JWT (`get_current_user`) -> origin check -> rate limit (5/300s per IP) -> BetterAuth `POST {BETTER_AUTH_URL}/api/auth/set-password`.
@@ -108,7 +110,7 @@ Trailing defects in the same flow (stale linked-account list, upstream-401 trigg
 - Never log secrets, tokens, passwords, or request bodies; method + path + safe reason only.
 - Work on a feature branch, never directly on main; do not commit unless the user explicitly asks (match existing prompt convention: report, don't push).
 
-## 9. API / interface requirements
+## 9. API / interface requirements (SUPERSEDED — backend route removed 2026-09-08; live contract is same-origin `POST /api/link-password` per §6 FR1 note)
 
 - Request: `POST /api/v1/auth/link-password`, headers `Authorization: Bearer <jwt>`, `Content-Type: application/json`, body `{ newPassword: string(8-128) }`.
 - Responses: `200 {ok:true}`; `401 {error:{code:UNAUTHORIZED}}` (JWT only); `403 {FORBIDDEN}`; `422 {VALIDATION_ERROR|AUTH_VALIDATION}`; `429 {RATE_LIMITED}` with `Retry-After`; `502 {AUTH_UNREACHABLE}`; `500 {INTERNAL}`. Upstream statuses are never forwarded as backend 401.

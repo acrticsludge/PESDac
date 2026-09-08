@@ -214,6 +214,26 @@ The first three steps are additive; Step 4 is optional and only
 needed if the JWT mint cost is measured as a significant contributor
 in the user's network.
 
+## Implementation status (2026-09-08, branch `fix/auth-gate-instant-guest`)
+
+Step 1 guest path is done: `useAuth()` (`frontend/src/lib/auth.ts`)
+now reads the embedded tag tri-state (present-guest vs present-user
+vs absent) and resolves `guest` while `useSession` is still pending,
+gated on a mount-latched auth epoch so stale hints after in-page
+identity transitions fail closed to `loading`. Locked by
+`frontend/tests/initial-session.test.ts` (node:test, no new deps).
+
+Step 3 is subsumed, not built: the epoch-gated instant guest read
+already opens the gate in ~1 frame, so the `__PESDAC_NO_COOKIE__` /
+`<html>` class machinery would add a second mechanism for the same
+frame with no further latency to remove.
+
+Steps 2 and 4 are deferred per this slice's own optionality ("only
+if 1+2 aren't enough"): no profile pre-fetch, no pre-minted token.
+Revisit Step 2 if OnboardingDialog's `apiGetMe` + `apiGetProfile`
+chain measures slow after this change; revisit Step 4 only if the
+first-call JWT mint cost shows up in the user's network timings.
+
 ## Slice ordering
 
 This slice is **N+1** (the next one). It comes after Slice 8 and

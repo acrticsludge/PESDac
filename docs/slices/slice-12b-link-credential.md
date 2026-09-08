@@ -1,9 +1,20 @@
 # Slice 12B — Link email/password to an existing account
 
-> **Status:** SHIPPED.
+> **Status:** SHIPPED (mechanism corrected 2026-09-08 — see note).
 > **Date:** 2026-09-07.
 > **Auth provider:** BetterAuth 1.7.3 (Astro + FastAPI + Neon Postgres).
 > **Scope:** Authentication section in `profile.astro` (slice 12 work extended).
+>
+> **Mechanism correction (2026-09-08, commit `3c442c7`):** §2's constraint
+> was right (`setPassword` is `serverOnly` = in-process only, no HTTP path)
+> but §3/§4's FastAPI-proxy decision was unimplementable — a Python backend
+> cannot call a TS in-process API, and `POST /api/auth/set-password` exists
+> nowhere in BetterAuth 1.7.3, so the proxy could only ever 404 (proven live).
+> The working mechanism is a same-origin Astro route
+> (`frontend/src/pages/api/link-password.ts`) calling `auth.api.setPassword`
+> in process; the backend route, `LinkPasswordIn`, and the mocked contract
+> tests were removed. UI, validation (8-128), origin check, and 5/5min rate
+> limit are unchanged. Read §3/§4 as history, not contract.
 
 ## 1. Problem
 

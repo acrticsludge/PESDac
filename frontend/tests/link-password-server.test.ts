@@ -90,6 +90,11 @@ test("cross-origin request is rejected before touching setPassword", async () =>
     { setPassword: okSetPassword(calls) },
   );
   assert.equal(evil.status, 403);
+  const wrongPort = await handleLinkPassword(
+    req({ origin: "http://localhost:4322", clientIp: "10.0.0.8" }),
+    { setPassword: okSetPassword(calls) },
+  );
+  assert.equal(wrongPort.status, 403);
   assert.equal(calls.length, 0);
 });
 
@@ -115,7 +120,7 @@ test("referer-only mismatch is rejected; match and headerless pass", async () =>
   assert.equal(calls.length, 2);
 });
 
-test("rate limit: 5 attempts pass, the 6th is rejected with 429", async () => {
+test("rate limit: 5 attempts pass, the 6th is rejected with 429 + Retry-After", async () => {
   const attempts = new Map<string, number[]>();
   const calls: Array<{ password: string; headers: Headers }> = [];
   const deps = { setPassword: okSetPassword(calls), attempts, now: () => 1_000_000 };
@@ -125,7 +130,26 @@ test("rate limit: 5 attempts pass, the 6th is rejected with 429", async () => {
   }
   const limited = await handleLinkPassword(req({ clientIp: "10.0.3.9" }), deps);
   assert.equal(limited.status, 429);
+  assert.equal(limited.headers?.["Retry-After"], "300");
   assert.equal(calls.length, 5);
+});
+
+test("expired buckets are swept so the store cannot grow without bound", async () => {
+  const attempts = new Map<string, number[]>([
+    ["10.0.9.1", [1_000]],
+    ["10.0.9.2", [1_000, 2_000]],
+  ]);
+  const calls: Array<{ password: string; headers: Headers }> = [];
+  // Window is 5 min: at t=1_000_000 every seeded stamp is expired.
+  const res = await handleLinkPassword(req({ clientIp: "10.0.9.3" }), {
+    setPassword: okSetPassword(calls),
+    attempts,
+    now: () => 1_000_000,
+  });
+  assert.equal(res.status, 200);
+  assert.ok(!attempts.has("10.0.9.1"), "empty bucket removed");
+  assert.ok(!attempts.has("10.0.9.2"), "empty bucket removed");
+  assert.deepEqual(attempts.get("10.0.9.3"), [1_000_000]);
 });
 
 test("setPassword 401 becomes a 401 UNAUTHORIZED envelope (re-login flow)", async () => {

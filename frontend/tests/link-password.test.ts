@@ -133,6 +133,9 @@ test("linkPassword success bumps the accounts generation (visible refetch trigge
     assert.equal(apiLog[0].url, "/api/link-password");
     assert.equal(apiLog[0].init?.method, "POST");
     assert.equal(apiLog[0].init?.credentials, "same-origin");
+    // Cookie-only auth: no bearer token is minted or attached on this route.
+    const sentHeaders = (apiLog[0].init?.headers ?? {}) as Record<string, string>;
+    assert.ok(!("Authorization" in sentHeaders), "no Authorization header on same-origin link");
     const sent = JSON.parse(String(apiLog[0].init?.body));
     assert.equal(sent.newPassword, "passwordpassword");
     assert.equal(__getAccountsVersionForTesting(), before + 1);
