@@ -9,9 +9,11 @@ import assert from "node:assert/strict";
 import { withBearerToken, type TokenResult } from "../src/lib/auth-cache.ts";
 import {
   apiFetch,
+  ApiError,
   AuthRequiredError,
   AuthServiceError,
   AUTH_REQUIRED_EVENT,
+  toUserMessage,
   __resetAuthCachesForTesting,
   __setApiRootForTesting,
   __setAuthBaseForTesting,
@@ -252,6 +254,36 @@ test("apiFetch concurrent callers share one token attempt sequence", async () =>
     assert.equal(apiLog.length, 2, "each caller still makes its own request");
     assert.equal(apiLog[0].auth, "Bearer shared");
     assert.equal(apiLog[1].auth, "Bearer shared");
+  } finally {
+    restore();
+  }
+});
+
+test("apiFetch unwraps the nested backend envelope so 4xx shows server copy", async () => {
+  // Backend error_body emits { error: { code, message } }. Without the
+  // unwrap, ApiError fell back to the HTTP reason phrase and users never
+  // saw the server-authored message.
+  __resetAuthCachesForTesting();
+  const apiLog: ApiCall[] = [];
+  const tokenCounter = { value: 0 };
+  const restore = __setFetchForTesting(
+    makeRouter(
+      [() => tokenOk("t-nested")],
+      [() => apiJson({ error: { code: "VALIDATION_ERROR", message: "Name is too short." } }, 422)],
+      apiLog,
+      tokenCounter,
+    ),
+  );
+  try {
+    let caught: unknown = null;
+    try {
+      await apiFetch("/profiles/me");
+    } catch (e) {
+      caught = e;
+    }
+    assert.ok(caught instanceof ApiError, "4xx surfaces as ApiError");
+    assert.equal((caught as ApiError).body?.code, "VALIDATION_ERROR");
+    assert.equal(toUserMessage(caught, "FALLBACK"), "Name is too short.");
   } finally {
     restore();
   }

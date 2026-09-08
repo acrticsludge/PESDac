@@ -22,6 +22,12 @@ export const POST: APIRoute = async ({ request, clientAddress, url }) => {
       selfOrigin: url.origin,
       origin: request.headers.get("origin"),
       referer: request.headers.get("referer"),
+      // Per-IP rate-limit key. clientAddress is the direct peer: behind a
+      // proxy without trusted forwarding every client collapses into one
+      // bucket (or "unknown"). Do NOT read X-Forwarded-For without a
+      // trusted-proxy allowlist (cf. BETTER_AUTH_TRUSTED_PROXIES in
+      // lib/auth.ts) — it is client-spoofable. Local/dev serving is direct,
+      // so the key is exact there.
       clientIp: clientAddress ?? "unknown",
       body,
       headers: request.headers,
@@ -33,5 +39,5 @@ export const POST: APIRoute = async ({ request, clientAddress, url }) => {
       },
     },
   );
-  return Response.json(result.body, { status: result.status });
+  return Response.json(result.body, { status: result.status, headers: result.headers });
 };

@@ -101,7 +101,7 @@ function apiErrorParts(e: unknown): {
 export async function handleLinkPassword(
   req: LinkPasswordRequest,
   deps: LinkPasswordDeps,
-): Promise<{ status: number; body: unknown }> {
+): Promise<{ status: number; body: unknown; headers?: Record<string, string> }> {
   const self = req.selfOrigin.toLowerCase();
   // Same rule as the backend's check_mutation_origin with the allowlist
   // reduced to self: non-browser clients (no Origin AND no Referer) pass;
@@ -134,11 +134,25 @@ export async function handleLinkPassword(
 
   const now = deps.now?.() ?? Date.now();
   const store = deps.attempts ?? defaultAttempts;
-  const hits = (store.get(req.clientIp) ?? []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  // Opportunistic sweep: drop expired hits (and empty buckets) on every
+  // call so the store cannot grow without bound on distinct IPs. Uses
+  // the same clock as the check below, so injected fake clocks in tests
+  // stay deterministic.
+  for (const [key, stamps] of store) {
+    const live = stamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+    if (live.length > 0) {
+      store.set(key, live);
+    } else {
+      store.delete(key);
+    }
+  }
+  const hits = store.get(req.clientIp) ?? [];
   if (hits.length >= RATE_LIMIT_MAX) {
     return {
       status: 429,
       body: errorBody("RATE_LIMITED", "Too many attempts. Try again later."),
+      // Contract parity with the old backend route (Retry-After on 429).
+      headers: { "Retry-After": String(RATE_LIMIT_WINDOW_MS / 1000) },
     };
   }
   hits.push(now);
