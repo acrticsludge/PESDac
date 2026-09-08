@@ -536,21 +536,72 @@ export async function changePassword(
 
 /**
  * Attach an email+password credential to the current user. Google-only
- * users have no credential account — there is no client-callable setPassword
- * in BetterAuth 1.7.3, so we proxy to a server route that holds the
- * session cookie and calls `auth.api.setPassword` server-side. On
- * success the BetterAuth account row is added; `refreshAccounts()` drops
- * the cached list so the new credential surfaces immediately in the UI.
+ * users have no credential account — setting the first password requires
+ * BetterAuth's serverOnly `auth.api.setPassword`, which has no HTTP path
+ * and can only run inside the Astro server. So this calls the same-origin
+ * `POST /api/link-password` route (NOT the FastAPI backend): the
+ * BetterAuth session cookie rides along same-origin and the route calls
+ * setPassword in process. No token mint — the cookie IS the credential.
+ *
+ * Error contract mirrors apiFetch: 401 → AuthRequiredError + re-login
+ * navigation; other failures → ApiError shaped for toUserMessage. On
+ * success `refreshAccounts()` drops the cached list so the new credential
+ * surfaces immediately in the UI.
  */
 export async function linkPassword(newPassword: string): Promise<void> {
-  const res = await apiFetch<{ ok: true }>("/auth/link-password", {
-    method: "POST",
-    body: { newPassword },
-  });
-  if (!res?.ok) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch("/api/link-password", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ newPassword }),
+      credentials: "same-origin",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const text = await res.text();
+  const parsed: unknown = text ? safeJson(text) : null;
+  if (!res.ok) {
+    const body = errorEnvelopeBody(parsed);
+    if (res.status === 401) {
+      throw authRequiredError(body);
+    }
+    throw new ApiError(
+      res.status,
+      body,
+      body?.message ?? res.statusText ?? "Request failed.",
+    );
+  }
+  const ok =
+    typeof parsed === "object" &&
+    parsed !== null &&
+    (parsed as { ok?: unknown }).ok === true;
+  if (!ok) {
     throw new Error("Couldn't link password. Try again.");
   }
   refreshAccounts();
+}
+
+/**
+ * Read the backend-style nested envelope `{ error: { code, message } }`
+ * (app/schemas/common.py; the Astro link-password route emits the same
+ * shape). Distinct from isErrorBody, which reads apiFetch's flat
+ * `{ code, message }` bodies.
+ */
+function errorEnvelopeBody(v: unknown): ApiErrorBody | null {
+  if (typeof v !== "object" || v === null) return null;
+  const inner = (v as { error?: unknown }).error;
+  if (typeof inner !== "object" || inner === null) return null;
+  const { code, message } = inner as { code?: unknown; message?: unknown };
+  if (typeof code !== "string" || typeof message !== "string") return null;
+  return { code, message };
 }
 
 /** Turn TOTP off (no password prompt for Google-only users). */
@@ -860,32 +911,39 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   if (!res.ok) {
     const body = isErrorBody(parsed) ? parsed : null;
     if (res.status === 401) {
-      // Backend rejected the session. Drop any cached token/identity so
-      // the next call re-proves itself, then notify the shell so it can
-      // route to re-login — the gate alone can't see this state.
-      clearAuthCache();
-      // Dispatch deduplicated: many simultaneous 401s only navigate once.
-      // Per T13 the shell already guards against re-entry; this is the
-      // belt to that suspenders so test infra can mock the listener.
-      if (typeof window !== "undefined") {
-        if (!(window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched) {
-          (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = true;
-          window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
-          // Reset on next tick so subsequent distinct sessions can fire.
-          // Guarded: the callback outlives the caller and window may be gone
-          // (SSR teardown, test harness removing its fake window).
-          setTimeout(() => {
-            if (typeof window !== "undefined") {
-              (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = false;
-            }
-          }, 0);
-        }
-      }
-      throw new AuthRequiredError(body);
+      throw authRequiredError(body);
     }
     throw new ApiError(res.status, body, res.statusText || "Request failed.");
   }
   return parsed as T;
+}
+
+/**
+ * Shared 401 handling for backend AND same-origin API calls: the session
+ * is rejected, so drop any cached token/identity (the next call re-proves
+ * itself) and notify the shell so it can route to re-login — the gate
+ * alone can't see this state. Dispatch is deduplicated: many simultaneous
+ * 401s only navigate once.
+ */
+function authRequiredError(body: ApiErrorBody | null): AuthRequiredError {
+  clearAuthCache();
+  // Per T13 the shell already guards against re-entry; this is the
+  // belt to that suspenders so test infra can mock the listener.
+  if (typeof window !== "undefined") {
+    if (!(window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched) {
+      (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = true;
+      window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
+      // Reset on next tick so subsequent distinct sessions can fire.
+      // Guarded: the callback outlives the caller and window may be gone
+      // (SSR teardown, test harness removing its fake window).
+      setTimeout(() => {
+        if (typeof window !== "undefined") {
+          (window as { __pesdacAuthDispatched?: boolean }).__pesdacAuthDispatched = false;
+        }
+      }, 0);
+    }
+  }
+  return new AuthRequiredError(body);
 }
 
 function safeJson(text: string): unknown {

@@ -20,6 +20,7 @@ import {
   HStack,
   Layout,
   LayoutContent,
+  LayoutFooter,
 } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { Button } from "@astryxdesign/core/Button";
@@ -113,20 +114,22 @@ export default class AppErrorBoundary extends Component<Props, State> {
             </LayoutContent>
           }
           footer={
-            <HStack gap={2} vAlign="center">
-              <Button
-                label="Try again"
-                variant="primary"
-                size="sm"
-                onClick={this.handleRetry}
-              />
-              <Button
-                label="Back to home"
-                variant="secondary"
-                size="sm"
-                onClick={this.handleGoHome}
-              />
-            </HStack>
+            <LayoutFooter hasDivider>
+              <HStack gap={2} vAlign="center">
+                <Button
+                  label="Try again"
+                  variant="primary"
+                  size="sm"
+                  onClick={this.handleRetry}
+                />
+                <Button
+                  label="Back to home"
+                  variant="secondary"
+                  size="sm"
+                  onClick={this.handleGoHome}
+                />
+              </HStack>
+            </LayoutFooter>
           }
         />
       </Dialog>

@@ -1,7 +1,10 @@
-// Link-password boundary regression tests (T6).
-// Reuses the `__setFetchForTesting` fetch-router pattern from
-// auth-api.test.ts: no live server, token + API queues, fake window for
-// AUTH_REQUIRED_EVENT dispatch capture.
+// Link-password boundary regression tests (T6, retargeted).
+// linkPassword calls the SAME-ORIGIN Astro route POST /api/link-password
+// (the BetterAuth serverOnly setPassword has no HTTP path, so the old
+// backend proxy could only 404). No token mint, no /api/v1 prefix — the
+// session cookie rides along same-origin. Reuses the
+// `__setFetchForTesting` fetch-swap pattern: no live server, fake window
+// for AUTH_REQUIRED_EVENT dispatch capture.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -17,20 +20,8 @@ import {
   toUserMessage,
   __getAccountsVersionForTesting,
   __resetAuthCachesForTesting,
-  __setApiRootForTesting,
-  __setAuthBaseForTesting,
   __setFetchForTesting,
 } from "../src/lib/auth.ts";
-
-__setAuthBaseForTesting("https://auth.test");
-__setApiRootForTesting("https://api.test");
-
-function tokenOk(token: string): Response {
-  return new Response(JSON.stringify({ token }), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
 
 function apiJson(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -39,26 +30,14 @@ function apiJson(data: unknown, status = 200): Response {
   });
 }
 
-type ApiCall = { url: string; auth: string | null };
+type ApiCall = { url: string; init: RequestInit | undefined };
 
-function makeRouter(
-  tokenQueue: Array<() => Response>,
-  apiQueue: Array<() => Response>,
-  apiLog: ApiCall[],
-  tokenCounter: { value: number },
-): typeof fetch {
+function makeRouter(queue: Array<() => Response>, apiLog: ApiCall[]): typeof fetch {
   return (async (input: unknown, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes("/api/auth/token")) {
-      tokenCounter.value += 1;
-      const next = tokenQueue.shift();
-      if (!next) throw new Error(`token fetch with empty queue: ${url}`);
-      return next();
-    }
-    const headers = (init?.headers ?? {}) as Record<string, string>;
-    apiLog.push({ url, auth: headers.Authorization ?? null });
-    const next = apiQueue.shift();
-    if (!next) throw new Error(`api fetch with empty queue: ${url}`);
+    apiLog.push({ url, init });
+    const next = queue.shift();
+    if (!next) throw new Error(`fetch with empty queue: ${url}`);
     return next();
   }) as typeof fetch;
 }
@@ -144,34 +123,32 @@ test("linkPassword success bumps the accounts generation (visible refetch trigge
   __resetAuthCachesForTesting();
   const before = __getAccountsVersionForTesting();
   const apiLog: ApiCall[] = [];
-  const tokenCounter = { value: 0 };
   const restore = __setFetchForTesting(
-    makeRouter([() => tokenOk("t-link")], [() => apiJson({ ok: true })], apiLog, tokenCounter),
+    makeRouter([() => apiJson({ ok: true })], apiLog),
   );
   try {
     await linkPassword("passwordpassword");
     assert.equal(apiLog.length, 1);
-    assert.ok(apiLog[0].url.endsWith("/api/v1/auth/link-password"), apiLog[0].url);
-    assert.equal(apiLog[0].auth, "Bearer t-link");
+    // Same-origin Astro route: relative URL, no backend prefix, no token.
+    assert.equal(apiLog[0].url, "/api/link-password");
+    assert.equal(apiLog[0].init?.method, "POST");
+    assert.equal(apiLog[0].init?.credentials, "same-origin");
+    const sent = JSON.parse(String(apiLog[0].init?.body));
+    assert.equal(sent.newPassword, "passwordpassword");
     assert.equal(__getAccountsVersionForTesting(), before + 1);
   } finally {
     restore();
   }
 });
 
-test("linkPassword against an upstream-mapped failure throws ApiError with zero auth-required events", async () => {
-  // The backend maps BetterAuth upstream-401 to 500 AUTH_ERROR (T2), so the
-  // modal must toast recoverably instead of logging out to /login.
+test("linkPassword against a server failure throws ApiError with zero auth-required events", async () => {
   __resetAuthCachesForTesting();
   const { events, uninstall } = installFakeWindow();
   const apiLog: ApiCall[] = [];
-  const tokenCounter = { value: 0 };
   const restore = __setFetchForTesting(
     makeRouter(
-      [() => tokenOk("t-mapped")],
       [() => apiJson({ error: { code: "AUTH_ERROR", message: "Couldn't link password. Try again." } }, 500)],
       apiLog,
-      tokenCounter,
     ),
   );
   try {
@@ -181,8 +158,8 @@ test("linkPassword against an upstream-mapped failure throws ApiError with zero 
     } catch (e) {
       caught = e;
     }
-    assert.ok(caught instanceof ApiError, "mapped failure surfaces as ApiError");
-    assert.ok(!(caught instanceof AuthRequiredError), "mapped failure is not a session loss");
+    assert.ok(caught instanceof ApiError, "server failure surfaces as ApiError");
+    assert.ok(!(caught instanceof AuthRequiredError), "server failure is not a session loss");
     assert.equal(apiLog.length, 1);
     assert.equal(
       events.filter((t) => t === AUTH_REQUIRED_EVENT).length,
@@ -196,17 +173,14 @@ test("linkPassword against an upstream-mapped failure throws ApiError with zero 
   }
 });
 
-test("linkPassword against a genuine backend 401 still dispatches exactly one auth-required event", async () => {
+test("linkPassword against a genuine 401 still dispatches exactly one auth-required event", async () => {
   __resetAuthCachesForTesting();
   const { events, uninstall } = installFakeWindow();
   const apiLog: ApiCall[] = [];
-  const tokenCounter = { value: 0 };
   const restore = __setFetchForTesting(
     makeRouter(
-      [() => tokenOk("t-401")],
-      [() => apiJson({ error: { code: "UNAUTHORIZED", message: "Invalid or expired session." } }, 401)],
+      [() => apiJson({ error: { code: "UNAUTHORIZED", message: "Sign in to continue." } }, 401)],
       apiLog,
-      tokenCounter,
     ),
   );
   try {
@@ -225,5 +199,48 @@ test("linkPassword against a genuine backend 401 still dispatches exactly one au
   } finally {
     restore();
     uninstall();
+  }
+});
+
+test("linkPassword surfaces the server's message for 4xx (e.g. already set)", async () => {
+  __resetAuthCachesForTesting();
+  const apiLog: ApiCall[] = [];
+  const restore = __setFetchForTesting(
+    makeRouter(
+      [() => apiJson({ error: { code: "PASSWORD_ALREADY_SET", message: "You already have a password set." } }, 400)],
+      apiLog,
+    ),
+  );
+  try {
+    let caught: unknown = null;
+    try {
+      await linkPassword("passwordpassword");
+    } catch (e) {
+      caught = e;
+    }
+    assert.ok(caught instanceof ApiError, "4xx surfaces as ApiError");
+    assert.equal(toUserMessage(caught, "FALLBACK"), "You already have a password set.");
+  } finally {
+    restore();
+  }
+});
+
+test("linkPassword with ok:false throws the generic link error", async () => {
+  __resetAuthCachesForTesting();
+  const apiLog: ApiCall[] = [];
+  const restore = __setFetchForTesting(
+    makeRouter([() => apiJson({ ok: false })], apiLog),
+  );
+  try {
+    let caught: unknown = null;
+    try {
+      await linkPassword("passwordpassword");
+    } catch (e) {
+      caught = e;
+    }
+    assert.ok(caught instanceof Error, "non-ok body throws");
+    assert.equal(toUserMessage(caught, "FALLBACK"), "Couldn't link password. Try again.");
+  } finally {
+    restore();
   }
 });
