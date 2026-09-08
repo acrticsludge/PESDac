@@ -1,6 +1,11 @@
 "use client";
 
-import { useState, type ReactNode, type ComponentType, type SVGProps } from "react";
+import {
+  useState,
+  type ReactNode,
+  type ComponentType,
+  type SVGProps,
+} from "react";
 import { useToast } from "@astryxdesign/core/Toast";
 
 import {
@@ -69,35 +74,6 @@ import {
   SkeletonCard,
   SkeletonIdentityHeader,
 } from "./SkeletonBlock";
-
-export type ProfileTab =
-  | "profile"
-  | "authentication"
-  | "study"
-  | "assistant"
-  | "shortcuts"
-  | "language"
-  | "privacy"
-  | "legal";
-
-export const TABS: { value: ProfileTab; label: string }[] = [
-  { value: "profile", label: "Profile" },
-  { value: "authentication", label: "Authentication" },
-  { value: "study", label: "Study" },
-  { value: "assistant", label: "Assistant" },
-  { value: "shortcuts", label: "Shortcuts" },
-  { value: "language", label: "Language" },
-  { value: "privacy", label: "Privacy" },
-  { value: "legal", label: "Legal" },
-];
-
-// Deep-linkable tabs: /profile#study etc. Unknown hashes fall back.
-// SSR-safe (no window): server renders the default tab.
-export function tabFromHash(): ProfileTab {
-  if (typeof window === "undefined") return "profile";
-  const hash = window.location.hash.replace(/^#/, "");
-  return TABS.some((t) => t.value === hash) ? (hash as ProfileTab) : "profile";
-}
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 

@@ -5,6 +5,8 @@ import AppLayout from "../../components/layout/AppLayout";
 import InitialSession from "../../components/layout/InitialSession.astro";
 import { SUBJECTS } from "../../lib/chat";
 
+export const prerender = true;
+
 export function getStaticPaths() {
   return SUBJECTS.map((subject) => ({ params: { subject } }));
 }

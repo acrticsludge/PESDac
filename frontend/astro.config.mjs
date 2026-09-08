@@ -9,6 +9,10 @@ const __dirname = dirname(__filename);
 
 // https://astro.build/config
 export default defineConfig({
+  // The Node adapter's preview/runtime handler is only valid for the SSR
+  // output mode. Without this, Astro builds static pages but still emits a
+  // Node server entrypoint, which can fail before the first request.
+  output: 'server',
   integrations: [react()],
   adapter: (await import('@astrojs/node')).default({ mode: 'standalone' }),
   vite: {

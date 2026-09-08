@@ -5,6 +5,8 @@ import AppLayout from "../../../components/layout/AppLayout";
 import InitialSession from "../../../components/layout/InitialSession.astro";
 import { getAllChatPaths } from "../../../lib/chat";
 
+export const prerender = true;
+
 export function getStaticPaths() {
   return getAllChatPaths().map(({ subject, code }) => ({
     params: { subject, code },
