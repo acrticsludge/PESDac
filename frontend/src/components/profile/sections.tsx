@@ -60,6 +60,8 @@ import {
   clearAllChats,
   dumpStore,
   getProfile,
+  getProfileSeedPending,
+  shouldShowIdentitySkeleton,
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
@@ -273,9 +275,19 @@ export function IdentitySection() {
       {/* Identity header + Identity card depend on the server /auth/me
           fetch (or, while it loads, on the BetterAuth session). While
           both are still resolving we render skeletons so the dialog
-          never flashes an empty avatar + "Your name" placeholder. */}
-      {auth.status === "loading" ||
-      serverProfile.status === "loading" ? (
+          never flashes an empty avatar + "Your name" placeholder.
+          Seed-pending (logout/relogin fix): campus/semester/branch read
+          the LOCAL store seeded from /profiles/me — while that seed is
+          in flight the rows would paint empty-then-filled, so skeleton
+          then too. A ready store with genuinely empty values still
+          renders the Select placeholders below (pending vs empty stay
+          visually distinct — see shouldShowIdentitySkeleton).
+          Reactive via useSessionVersion() above. */}
+      {shouldShowIdentitySkeleton(
+        auth.status,
+        serverProfile.status,
+        getProfileSeedPending(),
+      ) ? (
         <>
           <SkeletonIdentityHeader />
           <SkeletonCard title="Identity" rows={5} />

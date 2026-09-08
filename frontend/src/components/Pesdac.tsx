@@ -29,7 +29,12 @@ import type { ProfileTab } from "./profile/profile-tabs";
 import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
 import AppToasts, { type ShowToastFn } from "./AppToasts";
-import { apiLogout, apiGetProfile, useAuth, useProfile, AUTH_REQUIRED_EVENT, toUserMessage } from "../lib/auth";
+import { apiLogout, apiGetProfile, useAuth, useProfile, AUTH_REQUIRED_EVENT, toUserMessage, getAuthEpoch, useAuthEpoch, type LogoutOutcome } from "../lib/auth";
+import {
+  beginLogoutTransition,
+  endLogoutTransition,
+  isLogoutTransition,
+} from "../lib/logout-guard";
 import { tabFromHash } from "./profile/profile-tabs";
 import { isCampus } from "../lib/profile-options";
 import AttachButton from "./chat/AttachButton";
@@ -57,6 +62,11 @@ import {
   writeDraft,
   getProfile,
   updateProfile as updateLocalProfile,
+  clearLocalProfileSeed,
+  getSeededIdentityKey,
+  setSeededIdentityKey,
+  setProfileSeedPending,
+  identitySeedKey,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../lib/session";
@@ -515,36 +525,53 @@ export default function ShellSideNav({
   const authState = useAuth();
   const serverProfile = useProfile();
   const isGateOpen = authState.status === "guest";
-  // Server→local hydration (auth audit G2): the session store is
-  // memory-only and wiped on reload, so seed the onboarding fields from
-  // the server row once per authenticated session. Without this, a saved
-  // onboarding (server onboardingDone=true) is invisible after reload —
-  // the wizard stays closed and the Profile tab renders blanks.
-  // OnboardingDialog mirrors on save; this covers every reload after.
-  const hydratedRef = useRef(false);
+  // Server→local hydration (auth audit G2, logout/relogin fix): the
+  // session store is memory-only and wiped on reload, so seed the
+  // onboarding fields from the server row for every authenticated
+  // identity. Keyed by user id + auth epoch — NOT by island lifetime:
+  // after logout → login in the same persisted shell the epoch has
+  // bumped, so user B always reseeds instead of inheriting user A's
+  // one-shot flag (which was also a cross-identity leak). The write is
+  // guarded against stale resolves (user-A promise landing after user-B
+  // took over). Offline keeps local defaults; the key resets so the
+  // next mount retries.
+  const hydratedKeyRef = useRef<string | null>(null);
+  const authEpoch = useAuthEpoch();
+  const authUserId = authState.status === "authenticated" ? authState.user.id : null;
   useEffect(() => {
-    if (authState.status !== "authenticated" || hydratedRef.current) return;
+    if (authState.status !== "authenticated" || authUserId == null) return;
+    const key = identitySeedKey(authUserId, authEpoch);
+    if (hydratedKeyRef.current === key && getSeededIdentityKey() === key)
+      return;
+    hydratedKeyRef.current = key;
+    setProfileSeedPending(true);
     let cancelled = false;
-    const userId = authState.user.id;
+    const userId = authUserId;
+    const epochAtStart = authEpoch;
     void apiGetProfile(userId)
       .then((server) => {
         if (cancelled) return;
+        if (getAuthEpoch() !== epochAtStart) return;
         updateLocalProfile({
           institution: isCampus(server.campus) ? server.campus : "",
           semester: typeof server.semester === "string" ? server.semester : "",
           branch: typeof server.branch === "string" ? server.branch : "",
           subjects: Array.isArray(server.subjects) ? server.subjects : [],
         });
-        hydratedRef.current = true;
+        setSeededIdentityKey(key);
+        setProfileSeedPending(false);
       })
       .catch(() => {
-        // Offline/backend down: keep local defaults. The flag stays
-        // false so the next mount (or remount) retries.
+        // Offline/backend down: keep local defaults. Reset the key so
+        // the next mount (or remount) retries.
+        if (cancelled) return;
+        hydratedKeyRef.current = null;
+        setProfileSeedPending(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [authState.status]);
+  }, [authState.status, authUserId, authEpoch]);
   // Backend rejected our session (expired/invalid): clear it and
   // route to re-login. Guarded against reentrancy — apiLogout's
   // own backend call 401s too and would re-fire this event.
@@ -556,13 +583,31 @@ export default function ShellSideNav({
   useEffect(() => {
     const onAuthRequired = () => {
       if (authExpiredRef.current) return;
+      // A backend 401 raised by logout's own revocation call races this
+      // handler while the logout window is open — navigation is already
+      // guaranteed there, so stay silent instead of double-toasting.
+      if (isLogoutTransition()) return;
       authExpiredRef.current = true;
+      beginLogoutTransition();
       toastRef.current?.({
         body: "Your session expired. Please log in again.",
         type: "error",
       });
-      void apiLogout().finally(() => {
-        navigate("/login");
+      void apiLogout().finally(async () => {
+        // Reset so a later real expiry in the same island lifetime still
+        // fires (one-shot refs must not survive their flow).
+        authExpiredRef.current = false;
+        clearLocalProfileSeed();
+        // Await the navigation BEFORE closing the logout window (same
+        // guarantee as handleLogout): endLogoutTransition() on an
+        // uncommitted transition would reopen the gate for a frame.
+        try {
+          await navigate("/login");
+        } catch {
+          window.location.assign("/login");
+        }
+        setIsLoggingOut(false);
+        endLogoutTransition();
       });
     };
     window.addEventListener(AUTH_REQUIRED_EVENT, onAuthRequired);
@@ -593,11 +638,33 @@ export default function ShellSideNav({
 // // visit regardless). Backend/BetterAuth revocation failures are reported
 // // back, but never block navigation — the user's session is dead as
 // // far as the UI cares, even if a stale cookie lingered.
+// //
+// // Logout-intent window (logout/relogin fix): opened at click, closed
+// // after navigate("/login") commits. While open the gate stays shut and
+// // epoch-killed fetch rejections stay silent (see AuthGate +
+// // OnboardingDialog); only this function's own server-failed/catch
+// // toasts fire. Navigation is guaranteed on EVERY path — including
+// // logout's own failure — via the bounded race below (apiFetch aborts
+// // at 15s but BetterAuth signOut has no timeout of its own).
+const LOGOUT_TIMEOUT_MS = 15000;
   const handleLogout = async () => {
     if (isLoggingOut) return;
+    beginLogoutTransition();
     setIsLoggingOut(true);
     try {
-      const outcome = await apiLogout();
+      const outcome: LogoutOutcome = await Promise.race([
+        apiLogout(),
+        new Promise<LogoutOutcome>((resolve) =>
+          window.setTimeout(
+            () =>
+              resolve({
+                kind: "server-failed",
+                message: "Couldn't tell the server you logged out.",
+              }),
+            LOGOUT_TIMEOUT_MS,
+          ),
+        ),
+      ]);
       if (outcome.kind === "server-failed") {
         // Honest warning (F1 / T14): local session is gone but the
         // server didn't confirm revocation. User-visible, not a silent
@@ -608,15 +675,24 @@ export default function ShellSideNav({
         });
       }
     } catch (error) {
-      // Local logout still happened; only surface the message.
-      setIsLoggingOut(false);
+      // Local logout still happened; only surface the message — then
+      // still navigate below (a failed revocation must not strand the
+      // user on a guest app route behind the gate).
       toastRef.current?.({
         body: toUserMessage(error, "Couldn't log you out. Try again."),
         type: "error",
       });
-      return;
     }
-    navigate("/login");
+    try {
+      await navigate("/login");
+    } catch {
+      window.location.assign("/login");
+    }
+    // Reset so a persisted island never sticks on "Logging out…" and a
+    // later real expiry still fires.
+    setIsLoggingOut(false);
+    authExpiredRef.current = false;
+    endLogoutTransition();
   };
   // Added interaction state; the existing welcome/composer state remains intact.
   const [selectedChat, setSelectedChat] = useState<string | null>(
@@ -640,6 +716,17 @@ export default function ShellSideNav({
   const [deleteTarget, setDeleteTarget] = useState<
     { kind: "custom" | "demo"; id: string; title: string } | null
   >(null);
+  // Hover tooltips anchored behind an open modal (sidebar Avatar name,
+  // truncated account Texts) have no mouseleave while the dialog covers
+  // them, so an already-showing tooltip sticks above the backdrop with no
+  // way to dismiss. While any modal is open the sidebar tooltips stay
+  // off — flipping the prop unmounts a stuck layer and blocks new hovers.
+  // Tooltips behave exactly as before when no modal is open.
+  const isAnyModalOpen =
+    isProfileOpen ||
+    isOnboardingOpen ||
+    renameTarget != null ||
+    deleteTarget != null;
   // Per-chat pending flag drives the inline Spinner on the side-nav row
   // while a side-nav action (pin/archive/delete) is in flight. Today
   // these are synchronous local-store writes, so the flag only flashes
@@ -1101,9 +1188,10 @@ export default function ShellSideNav({
                         "?"
                       }
                       size="sm"
+                      tooltip={!isAnyModalOpen}
                     />
                     <VStack gap={0.5}>
-                      <Text type="body" weight="bold" maxLines={1}>
+                      <Text type="body" weight="bold" maxLines={1} hasTruncateTooltip={!isAnyModalOpen}>
                         {displayName ||
                           accountEmail ||
                           "?"}
@@ -1113,6 +1201,7 @@ export default function ShellSideNav({
                           type="supporting"
                           color="secondary"
                           maxLines={1}
+                          hasTruncateTooltip={!isAnyModalOpen}
                         >
                           {accountEmail}
                         </Text>

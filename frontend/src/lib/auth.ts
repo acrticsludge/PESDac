@@ -3,6 +3,7 @@ import "./buffer-polyfill.ts"; // Must load before any auth module that uses Buf
 
 import { useEffect, useState } from "react";
 import { authClient } from "./auth-client.ts";
+import { clearLocalProfileSeed } from "./session.ts";
 import {
   mintTokenWithRetry,
   sharedTaggedFetch,
@@ -299,6 +300,11 @@ export async function signOut() {
 }
 
 export async function signInWithGoogle() {
+  // User-A → user-B transition safety (T28, logout/relogin fix): every
+  // sign-in is a different identity. The email signIn/signUp paths
+  // already drop cached /auth/me + accounts promises; social login must
+  // do the same or user-A's cached rows can paint user-B's first screens.
+  clearAuthCache();
   return authClient.signIn.social({ provider: "google" });
 }
 
@@ -867,6 +873,10 @@ export type LogoutOutcome =
  */
 export async function apiLogout(): Promise<LogoutOutcome> {
   clearAuthCache();
+  // Identity hygiene (logout/relogin fix): the local profile seed is a
+  // separate store from the server caches above — without this, user-A's
+  // campus/semester/branch/subjects survive into user-B's session.
+  clearLocalProfileSeed();
   let serverFailed = false;
   let message = "";
   try {

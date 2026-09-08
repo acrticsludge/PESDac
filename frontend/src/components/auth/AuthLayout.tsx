@@ -224,9 +224,15 @@ export default function AuthLayout(props: AuthLayoutProps) {
     setError(null);
     try {
       await signInWithGoogle();
-      // BetterAuth's redirectPlugin triggers window.location.href
-      // navigation before this line; if we reach it, the call settled
-      // without redirecting (rare — popup blocked, server misconfigured).
+      // Success = redirect flight: BetterAuth's redirectPlugin triggers
+      // window.location.href navigation, but the awaiting promise does not
+      // settle synchronously — the old document is still painted. Do NOT
+      // clear isGoogleLoading here: the spinner + "Redirecting to
+      // Google…" must persist until the browser actually leaves. (The old
+      // `finally { setIsGoogleLoading(false) }` erased the loader
+      // mid-flight.) If the call ever settles without redirecting, the
+      // authenticated effect above navigates to /new with the loader on.
+      return;
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : "";
       const haystack = `${raw}`.toLowerCase();
@@ -263,7 +269,8 @@ export default function AuthLayout(props: AuthLayoutProps) {
         message = "Couldn't reach Google. Check your connection and try again.";
       }
       setError({ field: "form", message });
-    } finally {
+      // Error path only: the redirect never started, so the loader must
+      // clear and the typed inline error above renders.
       setIsGoogleLoading(false);
     }
   }

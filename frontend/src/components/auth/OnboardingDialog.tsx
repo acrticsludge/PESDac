@@ -36,6 +36,10 @@ import {
   refreshProfile,
   toUserMessage,
 } from "../../lib/auth";
+import {
+  isLogoutTransition,
+  isTransitionNoise,
+} from "../../lib/logout-guard";
 import { updateProfile as updateLocalProfile } from "../../lib/session";
 import {
   BRANCHES,
@@ -126,6 +130,16 @@ export default function OnboardingDialog({
         setPhase("open");
       } catch (error) {
         if (!cancelled) {
+          // Logout flight (logout/relogin fix): the epoch-killed check
+          // rejects here while navigation to /login is already
+          // guaranteed — stay silent instead of opening the error dialog
+          // over the transition. identity-changed is never a genuine
+          // failure (stale resolve after a user switch), so it stays
+          // silent outside the window too.
+          if (isLogoutTransition() || isTransitionNoise(error)) {
+            setPhase("done");
+            return;
+          }
           setFailure(
             toUserMessage(error, "Couldn't load your profile. Try again."),
           );
