@@ -352,7 +352,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
   // pages mount it here so the card renders themed, not unstyled.
   return (
     <Theme theme={PESDacMockupTheme} mode="dark">
-    <LayerProvider toast={{ position: "topEnd", maxVisible: 3 }}>
+    <LayerProvider toast={{ position: "topStart", maxVisible: 3 }}>
     <Center axis="both" padding={6} style={pageStyle}>
       <style>{LOGIN_SPLIT_CSS}</style>
       <VStack gap={4} width="100%">
