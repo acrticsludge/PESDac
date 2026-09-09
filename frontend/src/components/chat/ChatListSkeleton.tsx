@@ -1,6 +1,7 @@
 "use client";
 
-import { VStack, HStack, Skeleton } from "@astryxdesign/core/Layout";
+import { VStack, HStack } from "@astryxdesign/core/Layout";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 
 /**
  * Chat list skeleton rows mirroring ConversationItem/SideNavItem rhythm.
