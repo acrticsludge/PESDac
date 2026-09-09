@@ -43,6 +43,10 @@ export default defineConfig({
         "react-dom/client",
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
+        "@astryxdesign/core",
+        "@astryxdesign/theme-neutral",
+        "@heroicons/react/24/outline",
+        "cobe",
       ],
     },
     build: {

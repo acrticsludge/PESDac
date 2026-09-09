@@ -26,6 +26,7 @@ import {
 import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
 import { ChatListSkeleton } from "./chat/ChatListSkeleton";
+import { ComposerSkeleton } from "./chat/ComposerSkeleton";
 import type { ProfileTab } from "./profile/profile-tabs";
 import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
@@ -1729,16 +1730,14 @@ const LOGOUT_TIMEOUT_MS = 15000;
                   {/* Actual Astryx Chat Composer                              */}
                   {/* ======================================================== */}
 
-                  {/* Gate: fixed-height skeleton in place of the composer
-                      until user data is ready (no input accepted before
-                      then). Paint-only swap — `welcomeText` and staged
-                      attachments survive in state and restore on ready. */}
-                  {!isUserReady ? (
-                    <VStack aria-busy="true" aria-label="Loading composer">
-                      <Skeleton width="100%" height={184} />
-                    </VStack>
-                  ) : (
-                  <ChatComposer
+{/* Gate: granular skeleton per composer component until user data
+                       is ready (no input accepted before then). Paint-only swap —
+                       `welcomeText` and staged attachments survive in state and
+                       restore on ready. */}
+                   {!isUserReady ? (
+                     <ComposerSkeleton aria-busy="true" aria-label="Loading composer" />
+                   ) : (
+                   <ChatComposer
                     value={welcomeText}
                     onChange={setWelcomeText}
                     onSubmit={handleWelcomeSend}
