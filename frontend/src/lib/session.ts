@@ -562,6 +562,68 @@ export function shouldShowIdentitySkeleton(
   );
 }
 
+// ---- Chat skeleton loading state (spec §6 FR1) ---------------------------------
+
+/** True while chat list hydration is in flight for the current identity. */
+let chatHydratePending = false;
+
+/** Identity key that produced the current chat hydration pending state. */
+let chatHydrateIdentityKey: string | null = null;
+
+/** True while the chat list hydrate is in flight. */
+export function getChatHydratePending(): boolean {
+  return chatHydratePending;
+}
+
+/**
+ * Publish a hydrate-flight edge; reactive via useSessionVersion().
+ * Identity-guarded: a stale resolve cannot clear a newer identity's pending bit.
+ */
+export function setChatHydratePending(
+  pending: boolean,
+  identityKey?: string | null,
+): void {
+  if (pending) {
+    chatHydratePending = true;
+    chatHydrateIdentityKey = identityKey ?? null;
+  } else {
+    // Only clear if identity matches (or no identity guard provided)
+    if (identityKey == null || chatHydrateIdentityKey === identityKey) {
+      chatHydratePending = false;
+      chatHydrateIdentityKey = null;
+    }
+  }
+  emit();
+}
+
+/**
+ * Skeleton predicate for chat list (sidebar).
+ * True iff authenticated && hydratePending && customCount === 0.
+ * Pure and unit-testable.
+ */
+export function shouldShowChatListSkeleton(
+  authStatus: string,
+  hydratePending: boolean,
+  customCount: number,
+): boolean {
+  return authStatus === "authenticated" && hydratePending && customCount === 0;
+}
+
+/**
+ * Skeleton predicate for thread (message list).
+ * True iff explicitFlag === true || (isBacked && msgStatus === "loading" && overlayLen === 0).
+ * Pure and unit-testable.
+ */
+export function shouldShowThreadSkeleton(
+  isBacked: boolean,
+  msgStatus: "idle" | "loading" | "ready" | "failed",
+  overlayLen: number,
+  explicitFlag?: boolean,
+): boolean {
+  if (explicitFlag === true) return true;
+  return isBacked && msgStatus === "loading" && overlayLen === 0;
+}
+
 /**
  * App readiness gate predicates (spec §3.2–§3.3, frozen).
  *
@@ -1116,6 +1178,8 @@ export async function hydrateChats(
 ): Promise<HydrateResult> {
   if (auth == null) return { status: "guest" };
   if (chatHydratedKey === auth.identityKey) return { status: "already" };
+  // Set hydrate pending after guest/already early-returns (identity-guarded)
+  setChatHydratePending(true, auth.identityKey);
   // Order ops: adopt FIRST, then hydrate-replace — an adopted chat is
   // already dropped from memory when the server list lands, so it can
   // never double-list under its old guest code and its new server code.
@@ -1130,6 +1194,7 @@ export async function hydrateChats(
       opts?.notify,
       "Couldn't load your chats. Showing what's on this device.",
     );
+    setChatHydratePending(false, auth.identityKey);
     return { status: "kept-memory" };
   }
   const serverCodes = new Set(server.map((s) => s.code));
@@ -1142,6 +1207,7 @@ export async function hydrateChats(
   // against the hydrated list.
   messageStates.clear();
   chatHydratedKey = auth.identityKey;
+  setChatHydratePending(false, auth.identityKey);
   emit();
   return { status: "ready" };
 }
@@ -1154,5 +1220,7 @@ export function __resetChatBackingForTesting(): void {
   mem.delete(PINS_KEY);
   mem.delete(ARCHIVE_KEY);
   chatHydratedKey = null;
+  chatHydratePending = false;
+  chatHydrateIdentityKey = null;
   messageStates.clear();
 }
