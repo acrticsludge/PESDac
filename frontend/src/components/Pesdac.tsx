@@ -47,7 +47,6 @@ import {
   useCorruptKeys,
   listCustomChats,
   createCustomChat,
-  renameCustomChat,
   deleteCustomChat,
   renameDemoChat,
   demoDisplayLabel,
@@ -58,6 +57,7 @@ import {
   unarchiveChat,
   listArchived,
   type ChatRef,
+  type ChatAuth,
   readDraft,
   writeDraft,
   getProfile,
@@ -67,6 +67,13 @@ import {
   setSeededIdentityKey,
   setProfileSeedPending,
   identitySeedKey,
+  hydrateChats,
+  createChatBacked,
+  renameChatBacked,
+  deleteChatBacked,
+  setPinBacked,
+  setArchivedBacked,
+  isServerChat,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../lib/session";
@@ -572,10 +579,30 @@ export default function ShellSideNav({
       cancelled = true;
     };
   }, [authState.status, authUserId, authEpoch]);
+  // Chat backing identity (spec §5): authenticated identities hydrate
+  // server-side chats; guests and unknown-tag windows (loading status)
+  // never produce one — they stay memory-only with zero fetches.
+  const chatAuth: ChatAuth =
+    authState.status === "authenticated" && authUserId != null
+      ? { userId: authUserId, identityKey: identitySeedKey(authUserId, authEpoch) }
+      : null;
+  const notifyChat = (body: string) =>
+    toastRef.current?.({ body, type: "error" });
+  // Server chat hydrate (spec §5): adopt-then-hydrate-replace per identity,
+  // epoch-gated on the same identitySeedKey as the profile seed (no
+  // parallel identity scheme). Failed hydrates keep the memory paint with
+  // one toast and retry on the next identity transition.
+  const chatHydratedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (chatAuth == null) return;
+    if (chatHydratedRef.current === chatAuth.identityKey) return;
+    chatHydratedRef.current = chatAuth.identityKey;
+    void hydrateChats(chatAuth, { notify: notifyChat });
+  }, [authState.status, authUserId, authEpoch]);
+  const authExpiredRef = useRef(false);
   // Backend rejected our session (expired/invalid): clear it and
   // route to re-login. Guarded against reentrancy — apiLogout's
   // own backend call 401s too and would re-fire this event.
-  const authExpiredRef = useRef(false);
   // Per slice-12: the Logout row needs a visible pending state so
   // the user sees feedback during the round-trip. Re-entry guard
   // matches the row's isDisabled.
@@ -827,43 +854,64 @@ const LOGOUT_TIMEOUT_MS = 15000;
         ? demoDisplayLabel(renameTarget.label)
         : "";
 
-  // Persists rename, then closes the dialog. Both rename helpers are
-  // synchronous local-store writes; the isLoading state stays on for a
-  // tick so the button spinner lands even though the work is instant —
-  // gives consistent feedback if the writes ever become async.
+  // Persists rename, then closes the dialog. The dialog stays open until
+  // persistence succeeds (slice-12): a failed server rename keeps the
+  // original name, fires one toast, and leaves the dialog open to retry.
   const saveRename = async () => {
     if (isRenaming || renameTarget == null) return;
     setIsRenaming(true);
     try {
       if (renameTarget.kind === "custom") {
-        renameCustomChat(renameTarget.code, renameValue);
+        const ok = await renameChatBacked(renameTarget.code, renameValue, chatAuth, {
+          notify: notifyChat,
+        });
+        if (ok) setRenameTarget(null);
       } else {
         renameDemoChat(renameTarget.label, renameValue);
+        setRenameTarget(null);
       }
     } finally {
       setIsRenaming(false);
-      setRenameTarget(null);
     }
   };
 
-  // Delete confirmation handler. Mirrors saveRename's "set/clear in
-  // finally" pattern: both delete paths are local-store writes, so the
-  // pending state is brief — but the AlertDialog now disables confirm
-  // while in flight (and the close-by-cancel paths clear the flag too).
+  // Delete confirmation handler. Server deletes stay non-optimistic
+  // (slice-12): the AlertDialog confirm spins, memory follows on success,
+  // and failure keeps the chat + one toast with the dialog still open.
   const [isDeleting, setIsDeleting] = useState(false);
   const confirmDelete = () => {
     if (isDeleting || deleteTarget == null) return;
+    const target = deleteTarget;
+    if (
+      target.kind === "custom" &&
+      chatAuth != null &&
+      isServerChat(target.id)
+    ) {
+      setIsDeleting(true);
+      void deleteChatBacked(target.id, chatAuth, {
+        notify: notifyChat,
+      }).then((ok) => {
+        setIsDeleting(false);
+        if (!ok) return;
+        if (draftCode === target.id) {
+          setDraftCode(null);
+          setDraftAutoSend(null);
+        }
+        setDeleteTarget(null);
+      });
+      return;
+    }
     setIsDeleting(true);
     try {
-      if (deleteTarget.kind === "custom") {
-        deleteCustomChat(deleteTarget.id);
-        if (draftCode === deleteTarget.id) {
+      if (target.kind === "custom") {
+        deleteCustomChat(target.id);
+        if (draftCode === target.id) {
           setDraftCode(null);
           setDraftAutoSend(null);
         }
       } else {
-        archiveChat({ kind: "demo", id: deleteTarget.id });
-        if (selectedChat === deleteTarget.id) {
+        archiveChat({ kind: "demo", id: target.id });
+        if (selectedChat === target.id) {
           // Client-side transition: the persisted shell re-syncs from the
           // new page's props, so the sidebar never rebuilds.
           navigate("/new");
@@ -899,20 +947,39 @@ const LOGOUT_TIMEOUT_MS = 15000;
     ref.kind === "custom" ? draftCode === ref.id : selectedChat === ref.id;
 
   const archiveAndExit = (ref: ChatRef) => {
+    if (ref.kind === "demo" || chatAuth == null || !isServerChat(ref.id)) {
+      const key = refKeyOf(ref);
+      setRowPending(key, true);
+      try {
+        archiveChat(ref);
+        if (ref.kind === "custom" && draftCode === ref.id) {
+          setDraftCode(null);
+          setDraftAutoSend(null);
+        }
+        if (ref.kind === "demo" && selectedChat === ref.id) {
+          navigate("/new");
+        }
+      } finally {
+        setRowPending(key, false);
+      }
+      return;
+    }
+    // Server-backed archive: optimistic row change, rollback + toast on
+    // failure (slice-12); the open chat only closes on success.
     const key = refKeyOf(ref);
     setRowPending(key, true);
-    try {
-      archiveChat(ref);
-      if (ref.kind === "custom" && draftCode === ref.id) {
-        setDraftCode(null);
-        setDraftAutoSend(null);
+    void setArchivedBacked(ref, true, chatAuth, {
+      notify: notifyChat,
+    }).then((ok) => {
+      try {
+        if (ok && draftCode === ref.id) {
+          setDraftCode(null);
+          setDraftAutoSend(null);
+        }
+      } finally {
+        setRowPending(key, false);
       }
-      if (ref.kind === "demo" && selectedChat === ref.id) {
-        navigate("/new");
-      }
-    } finally {
-      setRowPending(key, false);
-    }
+    });
   };
 
   const startRename = (ref: ChatRef, display: string) => {
@@ -925,7 +992,9 @@ const LOGOUT_TIMEOUT_MS = 15000;
   };
 
   // Listed chats: full menu. Demo Delete archives via confirm
-  // (Archive is instant; Delete asks first).
+  // (Archive is instant; Delete asks first). Server-backed customs
+  // write through with row pending + rollback (slice-12); demos and
+  // guest customs keep today's synchronous key-set path.
   const listedMenu = (ref: ChatRef, display: string): ChatMenuItem[] => {
     const key = refKeyOf(ref);
     const wrap = (fn: () => void): ChatMenuItem["onClick"] => () => {
@@ -936,13 +1005,34 @@ const LOGOUT_TIMEOUT_MS = 15000;
         setRowPending(key, false);
       }
     };
+    const wrapAsync = (
+      fn: () => Promise<boolean>,
+    ): ChatMenuItem["onClick"] => () => {
+      setRowPending(key, true);
+      void fn().finally(() => setRowPending(key, false));
+    };
+    const pinItem: ChatMenuItem =
+      ref.kind === "demo" || chatAuth == null || !isServerChat(ref.id)
+        ? {
+            label: isPinnedHere(ref) ? "Unpin" : "Pin",
+            onClick: wrap(() => togglePin(ref)),
+          }
+        : {
+            label: isPinnedHere(ref) ? "Unpin" : "Pin",
+            onClick: wrapAsync(() =>
+              setPinBacked(ref, !isPinnedHere(ref), chatAuth, {
+                notify: notifyChat,
+              }),
+            ),
+          };
+    const archiveItem: ChatMenuItem = {
+      label: "Archive",
+      onClick: () => archiveAndExit(ref),
+    };
     return [
-      {
-        label: isPinnedHere(ref) ? "Unpin" : "Pin",
-        onClick: wrap(() => togglePin(ref)),
-      },
+      pinItem,
       { label: "Rename", onClick: () => startRename(ref, display) },
-      { label: "Archive", onClick: () => archiveAndExit(ref) },
+      archiveItem,
       {
         label: "Delete",
         onClick: () =>
@@ -965,8 +1055,25 @@ const LOGOUT_TIMEOUT_MS = 15000;
         setRowPending(key, false);
       }
     };
+    const wrapAsync = (
+      fn: () => Promise<boolean>,
+    ): ChatMenuItem["onClick"] => () => {
+      setRowPending(key, true);
+      void fn().finally(() => setRowPending(key, false));
+    };
+    const unarchiveItem: ChatMenuItem =
+      ref.kind === "demo" || chatAuth == null || !isServerChat(ref.id)
+        ? { label: "Unarchive", onClick: wrap(() => unarchiveChat(ref)) }
+        : {
+            label: "Unarchive",
+            onClick: wrapAsync(() =>
+              setArchivedBacked(ref, false, chatAuth, {
+                notify: notifyChat,
+              }),
+            ),
+          };
     return [
-      { label: "Unarchive", onClick: wrap(() => unarchiveChat(ref)) },
+      unarchiveItem,
       ...(ref.kind === "custom"
         ? [
             {
@@ -1023,14 +1130,37 @@ const LOGOUT_TIMEOUT_MS = 15000;
     const subject = category ?? (mode && mode !== "auto" ? mode : "CN");
     // @ tokens stay in the sent text (responder scopes on them) but out of
     // the sidebar title.
-    const chat = createCustomChat(subject, stripReferenceTokens(text) || text);
+    const title = stripReferenceTokens(text) || text;
+    if (chatAuth == null) {
+      // Guest path: memory-only, byte-identical to today's behavior.
+      const chat = createCustomChat(subject, title);
+      const staged = attachments;
+      setSelectedChat(null);
+      setAttachments([]);
+      // Send clears the composer via ChatComposer's own onChange.
+      revokeStaged(staged);
+      setDraftCode(chat.code);
+      setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
+      return;
+    }
+    // Authenticated path: the server row is created first (no temp code
+    // to reconcile); failure keeps the composer text + one toast.
     const staged = attachments;
-    setSelectedChat(null);
     setAttachments([]);
-    // Send clears the composer via ChatComposer's own onChange.
-    revokeStaged(staged);
-    setDraftCode(chat.code);
-    setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
+    void createChatBacked(subject, title, chatAuth, {
+      notify: notifyChat,
+    }).then((chat) => {
+      if (chat == null) {
+        setWelcomeText(text);
+        setAttachments(staged);
+        return;
+      }
+      setSelectedChat(null);
+      // Send clears the composer via ChatComposer's own onChange.
+      revokeStaged(staged);
+      setDraftCode(chat.code);
+      setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
+    });
   };
 
   const removeStaged = (id: string) => {
@@ -1152,10 +1282,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
   return (
     <Theme theme={PESDacMockupTheme} mode="dark">
       {/* Layer host for toasts (F7): useToast() SSR-throws without it.
-          Toast viewport is anchored top-right with a 3-toast cap, so
+          Toast viewport is anchored top-left with a 3-toast cap, so
           transient errors (slice 12E / 15) and success notices land
           where the eye is, not in a bottom-left fallback. */}
-      <LayerProvider toast={{ position: "topEnd", maxVisible: 3 }}>
+      <LayerProvider toast={{ position: "topStart", maxVisible: 3 }}>
       <AppShell
         contentPadding={0}
         /* ================================================================== */
@@ -1463,6 +1593,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
               thread={thread}
               sessionKey={key}
               autoSend={draftThread ? (draftAutoSend ?? undefined) : undefined}
+              notify={notifyChat}
             />
           ) : (
           <Layout
