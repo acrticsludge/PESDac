@@ -79,6 +79,17 @@ def create_app(validate: bool = True) -> FastAPI:
         logger.info("422 %s %s", request.method, request.url.path)
         # Pydantic ctx values hold exception objects (not JSON-serializable).
         details = json.loads(json.dumps(exc.errors(), default=str))
+        # User-facing redaction (error-copy audit): `input` echoes the raw
+        # request value verbatim (unbounded replay of user data) and `ctx`
+        # carries validator internals (constraint values, str()-coerced
+        # exceptions). Keep only the structural keys the UI needs to say
+        # *which field* failed and why. Allowlist, not denylist, so future
+        # Pydantic keys fail closed (dropped) instead of shipping.
+        details = [
+            {k: v for k, v in item.items() if k in ("loc", "msg", "type")}
+            for item in details
+            if isinstance(item, dict)
+        ]
         return JSONResponse(
             status_code=422,
             content=error_body("VALIDATION_ERROR", "Invalid request.", details=details),
