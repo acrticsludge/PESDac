@@ -25,6 +25,7 @@ import {
 } from "../lib/attachments";
 import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
+import { ChatListSkeleton } from "./chat/ChatListSkeleton";
 import type { ProfileTab } from "./profile/profile-tabs";
 import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
@@ -68,6 +69,8 @@ import {
   setProfileSeedPending,
   getProfileSeedPending,
   getChatHydratedKey,
+  getChatHydratePending,
+  shouldShowChatListSkeleton,
   userReady,
   chatReady,
   identitySeedKey,
@@ -499,29 +502,6 @@ function ConversationItem({
   );
 }
 
-// App readiness gate (spec §4–§5): Astryx Skeleton rows mirroring the
-// ConversationItem/SideNavItem rhythm (icon + label + menu dot, fixed
-// sizes so the skeleton→live swap holds layout). Rendered in place of
-// custom chat rows while the gate holds; demo rows render disabled
-// instead (never skeletoned). Presentational only — no fetching.
-function ChatGateSkeletons({ rows }: { rows: number }) {
-  if (rows <= 0) return null;
-  return (
-    <VStack gap={0.5} aria-busy="true" aria-label="Loading chats">
-      {Array.from({ length: rows }, (_, i) => (
-        <HStack key={i} gap={2} vAlign="center" padding={1}>
-          <Skeleton width={20} height={20} radius="rounded" index={i} />
-          <Skeleton width={140} height={14} index={i} />
-          <span style={{ marginLeft: "auto", display: "inline-flex" }}>
-            <Skeleton width={16} height={16} radius="rounded" index={i} />
-          </span>
-        </HStack>
-      ))}
-    </VStack>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
 /*                              Main component                                */
 /* -------------------------------------------------------------------------- */
 
@@ -833,6 +813,22 @@ const LOGOUT_TIMEOUT_MS = 15000;
   );
   const isChatReady = chatReady(chatAuth, getChatHydratedKey());
   const chatRowsLive = isUserReady && isChatReady;
+
+  // Chat skeleton loading (spec §6 FR2): use predicate + row-count clamp
+  const hydratePending = getChatHydratePending();
+  const showChatListSkeleton = shouldShowChatListSkeleton(
+    authState.status,
+    hydratePending,
+    customs.length,
+  );
+  const lastKnownCustomsRef = useRef(customs.length);
+  // Update lastKnown when we have customs (pre-hydrate snapshot)
+  if (customs.length > 0) {
+    lastKnownCustomsRef.current = customs.length;
+  }
+  const skeletonRows = showChatListSkeleton
+    ? Math.min(Math.max(lastKnownCustomsRef.current ?? 1, 1), 3)
+    : 0;
 
   const [mode, setMode] = useState<string | null>(
     initialSubjectValue ?? "auto",
@@ -1541,8 +1537,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
                       />
                     );
                   })}
-                  {!chatRowsLive && (
-                    <ChatGateSkeletons
+                  {showChatListSkeleton && (
+                    <ChatListSkeleton
                       rows={
                         pinnedRows.filter((r) => r.ref.kind === "custom").length
                       }
@@ -1558,8 +1554,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
                   fixed 2-row block keeps the sidebar visibly loading while
                   the gate holds. Unmounts on ready (ready-empty renders the
                   real empty list, never a skeleton). */}
-              {!chatRowsLive && customs.length === 0 && (
-                <ChatGateSkeletons rows={2} />
+              {showChatListSkeleton && customs.length === 0 && (
+                <ChatListSkeleton rows={2} />
               )}
               {WORKSPACES.map((workspace) => {
                 const demoChats = workspace.chats.filter(
@@ -1632,7 +1628,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                         );
                       })
                       ) : (
-                        <ChatGateSkeletons rows={workspaceCustoms.length} />
+                        <ChatListSkeleton rows={workspaceCustoms.length} />
                       )}
                     </VStack>
                   </SideNavItem>
@@ -1659,8 +1655,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
                       />
                     );
                   })}
-                  {!chatRowsLive && (
-                    <ChatGateSkeletons
+                  {showChatListSkeleton && (
+                    <ChatListSkeleton
                       rows={
                         archivedRows.filter((r) => r.ref.kind === "custom")
                           .length
