@@ -68,6 +68,8 @@ import {
   ChevronDownIcon,
 } from "@heroicons/react/24/outline";
 
+import { ThreadSkeleton } from "./ThreadSkeleton";
+
 import type {
   Artifact,
   AssistantBlock,
@@ -115,6 +117,7 @@ import {
   getChatMessagesStatus,
   persistAppendedBlock,
   persistTruncate,
+  shouldShowThreadSkeleton,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../../lib/session";
@@ -442,30 +445,6 @@ const threadReferenceTrigger: ChatComposerTrigger = {
     variant: "blue",
   }),
 };
-
-// Loading shell for server-backed history (spec §5: loading → skeleton
-// per the slice-12 mapping). Astryx Skeleton rows inside the real
-// assistant message shells; the composer below stays live.
-function SkeletonThread() {
-  return (
-    <>
-      {[0, 1].map((i) => (
-        <ChatMessage
-          key={i}
-          sender="assistant"
-          avatar={<Avatar name="PESDac" size="md" />}
-        >
-          <ChatMessageBubble variant="ghost">
-            <VStack gap={2}>
-              <Skeleton width={280} height={12} />
-              <Skeleton width={200} height={12} />
-            </VStack>
-          </ChatMessageBubble>
-        </ChatMessage>
-      ))}
-    </>
-  );
-}
 
 // Plain-text extraction for retry/regenerate (non-text bubbles contribute
 // nothing — attachments travel on the saved user message already).
@@ -811,7 +790,7 @@ export default function ThreadView({
   const showHistorySkeleton =
     !isAppReady ||
     isHistoryLoading === true ||
-    (isBacked && historyStatus === "loading" && overlay.length === 0);
+    shouldShowThreadSkeleton(isBacked, historyStatus, overlay.length);
   const autoSendRef = useRef<typeof autoSend>(autoSend);
   useEffect(() => {
     if (!isBacked) return;
@@ -1854,7 +1833,7 @@ export default function ThreadView({
                 >
                   <ChatMessageList isStreaming={live != null}>
                     {showHistorySkeleton ? (
-                      <SkeletonThread />
+                      <ThreadSkeleton />
                     ) : (
                       <>
                     {blocks.map((block, i) => {
