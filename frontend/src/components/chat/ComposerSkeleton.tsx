@@ -1,6 +1,7 @@
 "use client";
 
-import { VStack, HStack, Skeleton } from "@astryxdesign/core/Layout";
+import { VStack, HStack } from "@astryxdesign/core/Layout";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Icon } from "@astryxdesign/core/Icon";
 import { ChatComposerInput } from "@astryxdesign/core/Chat";
 import { TextInput } from "@astryxdesign/core/TextInput";
