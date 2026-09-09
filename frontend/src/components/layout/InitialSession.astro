@@ -3,31 +3,47 @@
 // React island renders as "guest" or "authenticated" on first paint
 // instead of waiting for a `/api/auth/get-session` round-trip.
 //
+// Contract (three serialized states, mutually distinguishable):
+// - user object: the middleware proved a session (id/email/name/
+//   twoFactorEnabled subset, JSON-safe).
+// - literal `null`: PROVED guest (getSession affirmatively returned no
+//   session — typically fast: no cookie, no DB work). The client may
+//   resolve `guest` instantly (slice-11 fast path).
+// - literal `"unknown"`: the middleware GAVE UP (800ms timeout or
+//   throw) and proved nothing. The client must resolve `loading` and
+//   wait for the live session check — resolving `guest` here is the
+//   refresh-while-authed gate flash. `null` must never be reused for
+//   this state.
+//
 // The page's <head> reads `Astro.locals.session / .user` (set by
-// middleware/auth.ts). We serialize a JSON-safe subset: id, email,
-// name, twoFactorEnabled. Anything else the React app needs is
+// middleware/auth.ts): either `undefined` (unknown) serializes as
+// `"unknown"`. Anything else the React app needs is
 // fetched lazily via useProfile() / apiGetMe() after hydration.
 //
 // The `client:load` islands on the page hydrate AFTER this script
 // has been parsed (script tags are blocking; the React island is
 // loaded async by `client:load`). On read, the client must handle
 // the case where the script is absent (auth pages, transit
-// navigation that re-runs only the islands, dev HMR).
+// navigation that re-runs only the islands, dev HMR) — absent also
+// resolves `loading` but stays distinguishable from unknown for
+// logging/tests (see readInitialSessionTag in lib/auth.ts).
 ---
 <script
   is:inline
   type="application/json"
   id="pesdac:initial-session"
   set:html={JSON.stringify(
-    Astro.locals.session && Astro.locals.user
-      ? {
-          id: Astro.locals.user.id,
-          email: Astro.locals.user.email,
-          name: Astro.locals.user.name,
-          twoFactorEnabled:
-            (Astro.locals.user as { twoFactorEnabled?: boolean })
-              .twoFactorEnabled === true,
-        }
-      : null,
+    Astro.locals.session === undefined || Astro.locals.user === undefined
+      ? "unknown"
+      : Astro.locals.session && Astro.locals.user
+        ? {
+            id: Astro.locals.user.id,
+            email: Astro.locals.user.email,
+            name: Astro.locals.user.name,
+            twoFactorEnabled:
+              (Astro.locals.user as { twoFactorEnabled?: boolean })
+                .twoFactorEnabled === true,
+          }
+        : null,
   )}
 />

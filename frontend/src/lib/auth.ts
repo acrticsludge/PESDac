@@ -188,15 +188,21 @@ export function bumpAuthEpoch(): void {
 
 /**
  * Reads the JSON embedded by `<InitialSession />` on the server.
- * Tri-state: present-guest (literal `null`), present-user (validated
- * object), or absent (missing tag, malformed or wrong-shape JSON).
- * Absent fails closed — useAuth() treats it as loading, never guest,
- * so a missing hint can't open the gate over a valid session. The
+ * Quad-state: present-guest (literal `null`), present-user (validated
+ * object), present-unknown (literal `"unknown"` — the middleware gave
+ * up and proved nothing), or absent (missing tag, malformed or
+ * wrong-shape JSON). Absent and unknown share the `loading` outcome
+ * but stay distinguishable (`unknown: true` only on the unknown tag)
+ * for logging/tests — `null` is never reused for gave-up. Both fail
+ * closed: useAuth() treats them as loading, never guest, so a missing
+ * or gave-up hint can't open the gate over a valid session. The
  * cache is keyed by raw tag contents (Astro-transition safe).
  */
 export type InitialSessionTag = {
   present: boolean;
   user: SessionUser | null;
+  /** Set only on the `"unknown"` tag (middleware gave up). */
+  unknown?: true;
 };
 
 let initialSessionCache: { raw: string; value: InitialSessionTag } | undefined;
@@ -215,21 +221,29 @@ export function readInitialSessionTag(): InitialSessionTag {
   if (initialSessionCache?.raw === raw) return initialSessionCache.value;
   let value: InitialSessionTag;
   try {
-    const parsed = JSON.parse(raw) as SessionUser | null;
+    const parsed: unknown = JSON.parse(raw);
+    const record =
+      typeof parsed === "object" && parsed !== null
+        ? (parsed as Record<string, unknown>)
+        : null;
     value =
       parsed === null
         ? { present: true, user: null }
-        : parsed && typeof parsed.id === "string" && typeof parsed.email === "string"
-          ? {
-              present: true,
-              user: {
-                id: parsed.id,
-                email: parsed.email,
-                name: parsed.name ?? "",
-                twoFactorEnabled: parsed.twoFactorEnabled === true,
-              },
-            }
-          : { present: false, user: null };
+        : parsed === "unknown"
+          ? { present: true, user: null, unknown: true }
+          : record !== null &&
+              typeof record.id === "string" &&
+              typeof record.email === "string"
+            ? {
+                present: true,
+                user: {
+                  id: record.id,
+                  email: record.email,
+                  name: typeof record.name === "string" ? record.name : "",
+                  twoFactorEnabled: record.twoFactorEnabled === true,
+                },
+              }
+            : { present: false, user: null };
   } catch {
     value = { present: false, user: null };
   }
@@ -243,8 +257,11 @@ export function readInitialSessionTag(): InitialSessionTag {
  * document.cookie can't gate staleness; the epoch bumps in exactly
  * one place (clearAuthCache, itself only called on identity
  * transitions), making any mismatch proof the tag is stale.
- * Mismatch and absent tags fail closed to loading — never a gate
- * flash over a live session, never a false authenticated paint.
+ * Mismatch, absent, and unknown tags all fail closed to loading —
+ * never a gate flash over a live session, never a false
+ * authenticated paint. Unknown (the middleware gave up, proving
+ * nothing) resolves loading on match AND mismatch: the live session
+ * check owns that window, exactly the pre-slice-11 behavior.
  * BFCache restores keep tag+epoch together, so a stale tag can
  * survive restore; accepted (the live session converges on resolve).
  */
@@ -257,6 +274,9 @@ export function resolveInitialAuth(
     return "loading";
   }
   if (!tag.present) {
+    return "loading";
+  }
+  if (tag.unknown) {
     return "loading";
   }
   if (tag.user) {
@@ -322,10 +342,11 @@ export function useAuth(): AuthState {
     if (initial === "guest") {
       return { status: "guest" };
     }
-    // No server hint, or the hint predates an in-page identity
-    // transition: the client is still authoritative-checking the
-    // cookie. Never classify that window as guest: AuthGate would open a
-    // destructive-looking create-account prompt over a valid session.
+    // No server hint, the middleware gave up (unknown tag), or the hint
+    // predates an in-page identity transition: the client is still
+    // authoritative-checking the cookie. Never classify that window as
+    // guest: AuthGate would open a destructive-looking create-account
+    // prompt over a valid session.
     return { status: "loading" };
   }
 
@@ -906,6 +927,129 @@ export class AuthServiceError extends Error {
     this.code = "auth-service-unavailable";
     this.reason = reason;
     this.retry = retry;
+  }
+}
+
+// ---- Onboarding-check silent retry (auth-loading-flash fix, S2) -------------
+//
+// The post-login onboarding check is a READ (apiGetMe + apiGetProfile), so
+// silent retries are safe and idempotent — mutations (rename/link/password)
+// never auto-retry. A single transient failure (cold backend: token mint +
+// JWKS + Neon cold start) must never open the required "Couldn't load your
+// profile" dialog; the `checking` phase already renders null, which IS the
+// loading state through retries. Bounded: 3 attempts total, backoff 300ms
+// then 900ms, 429 retried once after Retry-After capped at 5s. The retryable
+// set is closed (anything else fails fast to current handling on EVERY
+// attempt, not just the first).
+
+/** Total attempts for one onboarding check, including the initial try. */
+export const ONBOARDING_CHECK_MAX_ATTEMPTS = 3;
+
+/** Silent backoff before retry N+1 (index N-1): 300ms, then 900ms. */
+export const ONBOARDING_CHECK_RETRY_DELAYS_MS: readonly number[] = [300, 900];
+
+/** Upper bound for a server-asked Retry-After wait on 429. */
+export const ONBOARDING_CHECK_RETRY_AFTER_CAP_MS = 5000;
+
+export type OnboardingRetryDecision =
+  | { retry: true; delayMs: number }
+  | { retry: false };
+
+function isAbortError(error: unknown): boolean {
+  if (
+    typeof DOMException !== "undefined" &&
+    error instanceof DOMException &&
+    error.name === "AbortError"
+  ) {
+    return true;
+  }
+  return error instanceof Error && error.name === "AbortError";
+}
+
+/**
+ * Pure retry policy for one failed onboarding-check attempt. `attemptsUsed`
+ * is 1-based (1 = the initial try just failed). `retryAfterMs` carries a
+ * server-asked wait when the caller has one (apiFetch does not surface
+ * Retry-After headers, so OnboardingDialog passes none and 429s take the
+ * backoff slot). No timers inside — the caller sleeps on `delayMs`.
+ */
+export function onboardingRetryDecision(
+  error: unknown,
+  attemptsUsed: number,
+  opts: { retryAfterMs?: number } = {},
+): OnboardingRetryDecision {
+  if (attemptsUsed >= ONBOARDING_CHECK_MAX_ATTEMPTS) {
+    return { retry: false };
+  }
+  const backoff =
+    ONBOARDING_CHECK_RETRY_DELAYS_MS[
+      Math.min(attemptsUsed - 1, ONBOARDING_CHECK_RETRY_DELAYS_MS.length - 1)
+    ] ?? 900;
+  // Terminal first: 401s belong to the re-login flow; identity-changed is
+  // stale-resolve noise the logout guard silences, never a real failure.
+  if (error instanceof AuthRequiredError) {
+    return { retry: false };
+  }
+  if (error instanceof Error && error.message === "identity-changed") {
+    return { retry: false };
+  }
+  if (error instanceof ApiError) {
+    if (error.status === 401) {
+      return { retry: false };
+    }
+    if (error.status === 429) {
+      // Retry ONCE: only the first failure may wait out a rate limit.
+      // (The link-password precedent sends Retry-After; cap at 5s.)
+      if (attemptsUsed > 1) {
+        return { retry: false };
+      }
+      const wait = opts.retryAfterMs ?? backoff;
+      return {
+        retry: true,
+        delayMs: Math.min(wait, ONBOARDING_CHECK_RETRY_AFTER_CAP_MS),
+      };
+    }
+    if (error.status >= 500) {
+      return { retry: true, delayMs: backoff };
+    }
+    // 400/403/404: real problems — retry won't help.
+    return { retry: false };
+  }
+  // Token-mint outage: the session is alive, the mint side is down.
+  if (error instanceof AuthServiceError) {
+    return { retry: true, delayMs: backoff };
+  }
+  // Never reached the server (DNS/refused/offline) or timed out.
+  if (error instanceof TypeError || isAbortError(error)) {
+    return { retry: true, delayMs: backoff };
+  }
+  return { retry: false };
+}
+
+/**
+ * Bounded retry runner sharing `onboardingRetryDecision` with the dialog
+ * effect (the policy cannot drift between them). `sleep` is injected so
+ * tests prove the bound with a fake clock — no real timers in unit tests.
+ * Resolves with the first success; throws the last failure on exhaustion
+ * (the caller renders the current error path for it, byte-identical).
+ */
+export async function runWithOnboardingRetry<T>(
+  task: () => Promise<T>,
+  sleep: (ms: number) => Promise<void>,
+  opts: { retryAfterMs?: number } = {},
+): Promise<T> {
+  let attemptsUsed = 0;
+  for (;;) {
+    try {
+      return await task();
+    } catch (error) {
+      attemptsUsed += 1;
+      const decision = onboardingRetryDecision(error, attemptsUsed, opts);
+      if (!decision.retry) {
+        throw error;
+      }
+      await sleep(decision.delayMs);
+    }
   }
 }
 
