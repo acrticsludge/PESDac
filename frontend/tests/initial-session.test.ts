@@ -202,3 +202,92 @@ test("latch: a fresh mount after a transition trusts the current tag again", () 
     "authenticated",
   );
 });
+
+// ---- Unknown state (auth-loading-flash fix: middleware gave up) --------------
+// Appended, never edited above: the six resolver cells and all reader cells
+// above stay byte-identical (AC2 pins the genuine-guest instant path).
+
+test("resolver: present-unknown + unchanged epoch -> loading (fail closed, S1)", () => {
+  const epoch = getAuthEpoch();
+  assert.equal(
+    resolveInitialAuth(
+      { present: true, user: null, unknown: true },
+      epoch,
+      epoch,
+    ),
+    "loading",
+  );
+});
+
+test("resolver: present-unknown + epoch mismatch -> loading", () => {
+  const latched = getAuthEpoch();
+  assert.equal(
+    resolveInitialAuth(
+      { present: true, user: null, unknown: true },
+      latched,
+      latched + 1,
+    ),
+    "loading",
+  );
+});
+
+test("resolver: unknown and absent share the loading outcome but stay distinguishable", () => {
+  const epoch = getAuthEpoch();
+  const unknownTag = { present: true, user: null, unknown: true } as const;
+  const absentTag = { present: false, user: null } as const;
+  assert.equal(resolveInitialAuth(unknownTag, epoch, epoch), "loading");
+  assert.equal(resolveInitialAuth(absentTag, epoch, epoch), "loading");
+  assert.notDeepEqual(unknownTag, absentTag);
+});
+
+test("tag reader: literal \"unknown\" is present-unknown (never guest, never absent)", () => {
+  const restore = installDocumentStub(JSON.stringify("unknown"));
+  try {
+    assert.deepEqual(readInitialSessionTag(), {
+      present: true,
+      user: null,
+      unknown: true,
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("tag reader: proved-guest null carries no unknown flag (instant-guest pin)", () => {
+  const restore = installDocumentStub("null");
+  try {
+    const tag = readInitialSessionTag();
+    assert.deepEqual(tag, { present: true, user: null });
+    assert.equal("unknown" in tag, false);
+  } finally {
+    restore();
+  }
+});
+
+test("tag reader: user object carries no unknown flag", () => {
+  const restore = installDocumentStub(
+    JSON.stringify(userFixture("u-test-8")),
+  );
+  try {
+    const tag = readInitialSessionTag();
+    assert.equal(tag.present, true);
+    assert.equal(tag.user?.id, "u-test-8");
+    assert.equal("unknown" in tag, false);
+  } finally {
+    restore();
+  }
+});
+
+test("latch: bumped epoch forces loading for a stale unknown tag too", () => {
+  const latched = getAuthEpoch();
+  const staleUnknown = { present: true, user: null, unknown: true } as const;
+  assert.equal(
+    resolveInitialAuth(staleUnknown, latched, getAuthEpoch()),
+    "loading",
+  );
+  bumpAuthEpoch();
+  assert.equal(
+    resolveInitialAuth(staleUnknown, latched, getAuthEpoch()),
+    "loading",
+  );
+});
