@@ -20,6 +20,7 @@ import { Section } from "@astryxdesign/core/Section";
 import { Markdown } from "@astryxdesign/core/Markdown";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Button } from "@astryxdesign/core/Button";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
@@ -97,6 +98,7 @@ import {
   useCorruptKeys,
   getProfile,
   getOverlay,
+  setOverlay,
   appendBlocks,
   removeLastOverlayBlock,
   truncateOverlay,
@@ -106,9 +108,17 @@ import {
   setFeedback,
   feedbackKey,
   type FeedbackVote,
+  type ChatAuth,
+  identitySeedKey,
+  isServerChat,
+  loadChatMessages,
+  getChatMessagesStatus,
+  persistAppendedBlock,
+  persistTruncate,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
 } from "../../lib/session";
+import { useAuth, useAuthEpoch } from "../../lib/auth";
 import { planResponse, type ResponseMode } from "../../lib/responder";
 
 /* -------------------------------------------------------------------------- */
@@ -433,6 +443,30 @@ const threadReferenceTrigger: ChatComposerTrigger = {
   }),
 };
 
+// Loading shell for server-backed history (spec §5: loading → skeleton
+// per the slice-12 mapping). Astryx Skeleton rows inside the real
+// assistant message shells; the composer below stays live.
+function SkeletonThread() {
+  return (
+    <>
+      {[0, 1].map((i) => (
+        <ChatMessage
+          key={i}
+          sender="assistant"
+          avatar={<Avatar name="PESDac" size="md" />}
+        >
+          <ChatMessageBubble variant="ghost">
+            <VStack gap={2}>
+              <Skeleton width={280} height={12} />
+              <Skeleton width={200} height={12} />
+            </VStack>
+          </ChatMessageBubble>
+        </ChatMessage>
+      ))}
+    </>
+  );
+}
+
 // Plain-text extraction for retry/regenerate (non-text bubbles contribute
 // nothing — attachments travel on the saved user message already).
 function userBlockText(block: UserBlock): string {
@@ -689,10 +723,21 @@ export default function ThreadView({
   thread,
   sessionKey,
   autoSend,
+  isHistoryLoading,
+  notify,
 }: {
   thread: Thread;
   sessionKey: string;
   autoSend?: string | { text: string; attachments?: Attachment[] };
+  /**
+   * Server history fetch in flight (persistence stream-C drives this).
+   * Renders skeleton turns in the real message shells instead of blocks;
+   * composer stays live. Defaults false — zero behavior change until a
+   * caller passes true.
+   */
+  isHistoryLoading?: boolean;
+  /** Error surfacing for server write-through (one toast per failure). */
+  notify?: (body: string) => void;
 }) {
   // Answer depth (answer-depth spec): profile default wins over the seed
   // voice; the toggle overrides per thread for the session. Seed
@@ -732,6 +777,38 @@ export default function ThreadView({
   const corruptKeys = useCorruptKeys();
   const overlay = getOverlay(sessionKey);
   const blocks = [...thread.blocks, ...overlay];
+
+  // Server backing (spec §5): authenticated custom chats persist every
+  // leg; guests, demos, and guest-era customs stay memory-only (the
+  // persist helpers no-op before any fetch there — no behavior change).
+  const authState = useAuth();
+  const authEpoch = useAuthEpoch();
+  const chatAuth: ChatAuth =
+    authState.status === "authenticated"
+      ? {
+          userId: authState.user.id,
+          identityKey: identitySeedKey(authState.user.id, authEpoch),
+        }
+      : null;
+  const isBacked = chatAuth != null && isServerChat(sessionKey);
+
+  // Open-chat message load (spec §5): server turns load once per opened
+  // custom chat — skeleton while loading, memory paint + one toast on
+  // failure. Fresh server-created chats (autoSend) skip the list leg:
+  // their turns are provably empty at mount.
+  const historyStatus = isBacked ? getChatMessagesStatus(sessionKey) : "idle";
+  const showHistorySkeleton =
+    isHistoryLoading === true ||
+    (isBacked && historyStatus === "loading" && overlay.length === 0);
+  const autoSendRef = useRef<typeof autoSend>(autoSend);
+  useEffect(() => {
+    if (!isBacked) return;
+    if (autoSendRef.current) return;
+    void loadChatMessages(sessionKey, chatAuth, { notify });
+    // Load once per opened chat (remounts per sessionKey). chatAuth is
+    // identity-scoped inside the loader; notify is a stable bridge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionKey, isBacked]);
 
   // Follow-ups from the latest assistant turn (live turns persist theirs).
   const followUps = (() => {
@@ -895,6 +972,25 @@ export default function ThreadView({
         : t,
     );
 
+  // Assistant-side persist (spec §5): the block paints optimistically,
+  // then the server leg lands at stream completion (stop persists the
+  // partial — same path). Failure rolls back ONLY the assistant block +
+  // one toast; the user message is preserved (slice-12). Guests/demos
+  // no-op inside the helper (memory-only, no fetch).
+  const appendAndPersist = (block: Block) => {
+    if (!isBacked) {
+      appendBlocks(sessionKey, [block]);
+      return;
+    }
+    const snapshot = getOverlay(sessionKey);
+    appendBlocks(sessionKey, [block]);
+    void persistAppendedBlock(sessionKey, block, chatAuth, { notify }).then(
+      (ok) => {
+        if (!ok) setOverlay(sessionKey, snapshot);
+      },
+    );
+  };
+
   const finalizeTurn = (
     tools: ToolCall[],
     text: string,
@@ -903,19 +999,17 @@ export default function ThreadView({
   ) => {
     const trimmed = text.trim();
     if (trimmed) {
-      appendBlocks(sessionKey, [
-        {
-          from: "assistant",
-          bubbles: [{ type: "markdown", md: trimmed }],
-          toolCalls: settleTools(tools),
-          followUps,
-          time: new Date().toISOString(),
-          footer: `PESDac · ${thread.subject}`,
-        },
-      ]);
+      appendAndPersist({
+        from: "assistant",
+        bubbles: [{ type: "markdown", md: trimmed }],
+        toolCalls: settleTools(tools),
+        followUps,
+        time: new Date().toISOString(),
+        footer: `PESDac · ${thread.subject}`,
+      });
     } else if (retryText) {
       // Empty model response: say so with a retry, never go silent.
-      appendBlocks(sessionKey, [makeErrorBlock("empty", retryText)]);
+      appendAndPersist(makeErrorBlock("empty", retryText));
     }
     setLive(null);
   };
@@ -926,7 +1020,7 @@ export default function ThreadView({
   const failTurn = (tools: ToolCall[], partial: string, retryText: string) => {
     const block = makeErrorBlock("failed", retryText, partial);
     block.toolCalls = settleTools(tools);
-    appendBlocks(sessionKey, [block]);
+    appendAndPersist(block);
     setLive(null);
   };
 
@@ -943,7 +1037,7 @@ export default function ThreadView({
       return;
     }
     if (plan.error === "empty" && !opts?.forceOk) {
-      appendBlocks(sessionKey, [makeErrorBlock("empty", text)]);
+      appendAndPersist(makeErrorBlock("empty", text));
       return;
     }
     const failAt = plan.error === "stream-failed" && !opts?.forceOk;
@@ -979,13 +1073,37 @@ export default function ThreadView({
     setSendError(null);
     // Edited resend: drop the edited user turn and everything after it;
     // the normal path below appends the replacement and streams again.
+    // Backed chats persist the truncate first (edit = truncate-from-index
+    // + resend): the replacement appends only after the server leg lands,
+    // since seq order is append-order. Failure restores the exact prior
+    // paint + one toast and keeps the edit open to retry.
     if (editingIndex != null) {
-      truncateOverlay(
-        sessionKey,
-        Math.max(0, editingIndex - thread.blocks.length),
-      );
+      const keep = Math.max(0, editingIndex - thread.blocks.length);
+      if (isBacked) {
+        const snapshot = getOverlay(sessionKey);
+        truncateOverlay(sessionKey, keep);
+        setEditingIndex(null);
+        void persistTruncate(sessionKey, keep, chatAuth, { notify }).then(
+          (ok) => {
+            if (!ok) {
+              setOverlay(sessionKey, snapshot);
+              return;
+            }
+            appendAndStream(text, staged);
+          },
+        );
+        return;
+      }
+      truncateOverlay(sessionKey, keep);
       setEditingIndex(null);
     }
+    appendAndStream(text, staged);
+  };
+
+  // User-side of a turn: optimistic paint, then (backed chats) one persist
+  // per appended block in order; failure rolls back to the exact prior
+  // paint + one toast and the assistant never starts.
+  const appendAndStream = (text: string, staged: StagedFile[]) => {
     // Send clears the composer via ChatComposer's own onChange.
     // Day break: new messages on a later day than the last one get a
     // "Today · Subject" divider first (mockup label; backend sends real dates).
@@ -1000,29 +1118,47 @@ export default function ThreadView({
         break;
       }
     }
-    appendBlocks(sessionKey, [
-      ...(needsDayDivider
-        ? [
-            {
-              from: "system",
-              text: dayDividerLabel("Today", thread.subject),
-              variant: "divider",
-            } as const,
-          ]
-        : []),
-      {
-        from: "user",
-        bubbles: [{ type: "text", text }],
-        ...(staged.length > 0
-          ? { attachments: staged.map((s) => s.att) }
-          : {}),
-        time: new Date().toISOString(),
-      },
-    ]);
+    const divider: Block | null = needsDayDivider
+      ? {
+          from: "system",
+          text: dayDividerLabel("Today", thread.subject),
+          variant: "divider",
+        }
+      : null;
+    const userBlock: Block = {
+      from: "user",
+      bubbles: [{ type: "text", text }],
+      ...(staged.length > 0
+        ? { attachments: staged.map((s) => s.att) }
+        : {}),
+      time: new Date().toISOString(),
+    };
+    const fresh: Block[] = divider ? [divider, userBlock] : [userBlock];
+    if (!isBacked) {
+      appendBlocks(sessionKey, fresh);
+      // Staged files travel with this message; clear the drawer either way.
+      setAttachments([]);
+      revokeStaged(staged);
+      startTurn(text);
+      return;
+    }
+    const snapshot = getOverlay(sessionKey);
+    appendBlocks(sessionKey, fresh);
     // Staged files travel with this message; clear the drawer either way.
     setAttachments([]);
     revokeStaged(staged);
-    startTurn(text);
+    void (async () => {
+      for (const block of fresh) {
+        const ok = await persistAppendedBlock(sessionKey, block, chatAuth, {
+          notify,
+        });
+        if (!ok) {
+          setOverlay(sessionKey, snapshot);
+          return;
+        }
+      }
+      startTurn(text);
+    })();
   };
 
   // Edit a session-added user turn via the composer (static demo tails
@@ -1066,6 +1202,25 @@ export default function ThreadView({
       const text =
         last.error?.retryText ?? lastUserText(blocks.slice(0, -1));
       if (!text) return;
+      // Regenerate = delete-last + rerun: the overlay index maps to the
+      // server seq (append-order, dense). Failure restores the exact
+      // prior paint + one toast and the rerun never starts.
+      if (isBacked) {
+        const snapshot = getOverlay(sessionKey);
+        if (!removeLastOverlayBlock(sessionKey)) return;
+        const fromSeq = getOverlay(sessionKey).length;
+        void persistTruncate(sessionKey, fromSeq, chatAuth, { notify }).then(
+          (ok) => {
+            if (!ok) {
+              setOverlay(sessionKey, snapshot);
+              return;
+            }
+            setSendError(null);
+            startTurn(text);
+          },
+        );
+        return;
+      }
       if (!removeLastOverlayBlock(sessionKey)) return;
       setSendError(null);
       startTurn(text);
@@ -1129,7 +1284,8 @@ export default function ThreadView({
   };
 
   // First message typed on welcome: run it once the thread mounts.
-  const autoSendRef = useRef<typeof autoSend>(autoSend);
+  // (autoSendRef is declared with the backing block above: the history
+  // load consults it to skip the list leg on fresh chats.)
 
   // Global shortcuts (no deps: re-subscribe each render for fresh state).
   useEffect(() => {
@@ -1674,6 +1830,10 @@ export default function ThreadView({
                   }
                 >
                   <ChatMessageList isStreaming={live != null}>
+                    {showHistorySkeleton ? (
+                      <SkeletonThread />
+                    ) : (
+                      <>
                     {blocks.map((block, i) => {
                       if (block.from === "system") {
                         return findRow(
@@ -1743,6 +1903,8 @@ export default function ThreadView({
                           ))
                         )}
                       </HStack>
+                        )}
+                      </>
                     )}
                   </ChatMessageList>
                 </ChatLayout>

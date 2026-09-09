@@ -16,12 +16,29 @@ import type { Block, Thread } from "../content/threads/types";
 // Astro/Vite resolves both forms, so keep the suffixed form.
 import { CHAT_CODES, dayDividerLabel } from "./chat.ts";
 import { isCampus } from "./profile-options.ts";
+import {
+  apiAppendMessage,
+  apiCreateChat,
+  apiDeleteChat,
+  apiListChats,
+  apiListMessages,
+  apiPatchChat,
+  apiTruncateMessages,
+  type ServerChat,
+  type ServerMessage,
+} from "./chat-sync.ts";
 
 export type CustomChat = {
   code: string;
   subject: string;
   title: string;
   createdAt: string;
+  // Server-backed rows (Phase 2): present only on chats hydrated from or
+  // created through the server. Guest customs never carry these — their
+  // absence is the guest-originated marker (adopt + key-set fallback).
+  isPinned?: boolean;
+  isArchived?: boolean;
+  updatedAt?: string;
 };
 
 const CHATS_KEY = "pesdac-custom-chats-v1";
@@ -274,6 +291,12 @@ function readKeys(key: string): string[] {
 }
 
 export function isPinned(ref: ChatRef): boolean {
+  if (ref.kind === "custom") {
+    const chat = listCustomChats().find((c) => c.code === ref.id);
+    // Server flags rule once present (post-hydrate); pre-migration guest
+    // rows carry no flags and keep today's key-set reads.
+    if (chat?.isPinned !== undefined) return chat.isPinned;
+  }
   return readKeys(PINS_KEY).includes(refKey(ref));
 }
 
@@ -288,12 +311,28 @@ export function togglePin(ref: ChatRef) {
 }
 
 export function listPinned(): ChatRef[] {
-  return readKeys(PINS_KEY)
+  const customs = listCustomChats();
+  const flaggedIds = new Set(
+    customs.filter((c) => c.isPinned !== undefined).map((c) => c.code),
+  );
+  const fromFlags: ChatRef[] = customs
+    .filter((c) => c.isPinned === true)
+    .map((c) => ({ kind: "custom" as const, id: c.code }));
+  const fromKeys = readKeys(PINS_KEY)
     .map(parseRefKey)
-    .filter((r): r is ChatRef => r != null);
+    .filter((r): r is ChatRef => r != null)
+    // Retired custom key-sets never resurface: customs carrying server
+    // flags read from flags; key-sets cover demos + pre-migration guests.
+    .filter((r) => r.kind === "demo" || !flaggedIds.has(r.id));
+  return [...fromFlags, ...fromKeys];
 }
 
 export function isArchived(ref: ChatRef): boolean {
+  if (ref.kind === "custom") {
+    const chat = listCustomChats().find((c) => c.code === ref.id);
+    // Same flags-rule as isPinned above.
+    if (chat?.isArchived !== undefined) return chat.isArchived;
+  }
   return readKeys(ARCHIVE_KEY).includes(refKey(ref));
 }
 
@@ -321,9 +360,19 @@ export function unarchiveChat(ref: ChatRef) {
 }
 
 export function listArchived(): ChatRef[] {
-  return readKeys(ARCHIVE_KEY)
+  const customs = listCustomChats();
+  const flaggedIds = new Set(
+    customs.filter((c) => c.isArchived !== undefined).map((c) => c.code),
+  );
+  const fromFlags: ChatRef[] = customs
+    .filter((c) => c.isArchived === true)
+    .map((c) => ({ kind: "custom" as const, id: c.code }));
+  const fromKeys = readKeys(ARCHIVE_KEY)
     .map(parseRefKey)
-    .filter((r): r is ChatRef => r != null);
+    .filter((r): r is ChatRef => r != null)
+    // Same retirement rule as listPinned above.
+    .filter((r) => r.kind === "demo" || !flaggedIds.has(r.id));
+  return [...fromFlags, ...fromKeys];
 }
 
 const DEFAULT_REFERENCES = [
@@ -539,4 +588,535 @@ export function clearAllChats() {
   writeJSON(CHATS_KEY, []);
   writeJSON(OVERLAY_KEY, {});
   emit();
+}
+
+// ---- Server backing (chat persistence Phase 2, spec §5) -------------------
+//
+// Memory stays the synchronous render cache (reads above are unchanged);
+// when authenticated, mutations write through to the server with snapshot
+// rollback + one toast (slice-12 contract). Guests stay memory-only:
+// every backing entry early-returns before any fetch, so the guest path
+// is byte-identical to today's behavior. `unknown`-tag windows never
+// hydrate: callers only build a ChatAuth for `authenticated` status —
+// `loading`/`guest` never produce one (fail closed to current behavior).
+
+/** Authenticated identity for chat backing; null = guest/unknown (memory-only). */
+export type ChatAuth = { userId: string; identityKey: string } | null;
+
+/** Error surfacing (components pass their toast bridge; tests record calls). */
+export type ChatNotify = (body: string) => void;
+
+function isAuthFailure(error: unknown): boolean {
+  // 401s flow through the existing global envelope handler (apiFetch
+  // dispatches AUTH_REQUIRED_EVENT + re-login), so backing adds no error
+  // UI beyond it. Detected structurally — importing auth.ts here would
+  // close an auth→session→chat-sync→auth cycle at module-eval time
+  // (auth already imports this module for clearLocalProfileSeed).
+  if (typeof error === "object" && error !== null) {
+    const record = error as { name?: unknown; status?: unknown };
+    if (record.name === "AuthRequiredError") return true;
+    if (record.status === 401) return true;
+  }
+  return false;
+}
+
+function notifyFailure(
+  error: unknown,
+  notify: ChatNotify | undefined,
+  body: string,
+): void {
+  if (notify == null || isAuthFailure(error)) return;
+  notify(body);
+}
+
+function fromServerChat(row: ServerChat): CustomChat {
+  return {
+    code: row.code,
+    subject: row.subject,
+    title: row.title,
+    createdAt: row.createdAt,
+    isPinned: row.isPinned,
+    isArchived: row.isArchived,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** True when the code is a server-backed custom row (flags present). */
+export function isServerChat(code: string): boolean {
+  return listCustomChats().some(
+    (c) => c.code === code && c.updatedAt !== undefined,
+  );
+}
+
+/** Replace a chat's overlay blocks wholesale (rollback + server-load apply). */
+export function setOverlay(code: string, blocks: Block[]) {
+  const all = readJSON<Record<string, Block[]>>(OVERLAY_KEY, {});
+  all[code] = [...blocks];
+  writeJSON(OVERLAY_KEY, all);
+  emit();
+}
+
+// Hydration + message-load state (identity-scoped: entries carry the
+// identityKey that produced them, TaggedCache philosophy — a stale
+// user-A resolve can never satisfy user-B, same as the profile seed).
+let chatHydratedKey: string | null = null;
+
+type MessageLoadState = {
+  status: "loading" | "ready" | "failed";
+  identityKey: string;
+};
+const messageStates = new Map<string, MessageLoadState>();
+
+/** Identity key that produced the current hydrated chat list (if any). */
+export function getChatHydratedKey(): string | null {
+  return chatHydratedKey;
+}
+
+/** Load status for one chat's server turns (drives the open-chat skeleton). */
+export function getChatMessagesStatus(
+  code: string,
+): "idle" | "loading" | "ready" | "failed" {
+  return messageStates.get(code)?.status ?? "idle";
+}
+
+// Block ⇄ message-row serialization. The server stores each turn as a
+// serialized Block payload (spec §3.1 content JSONB); role mirrors
+// Block.from exactly. `seq` is server-assigned — memory order stays
+// append-order and no seq is ever synthesized client-side.
+function blockToMessage(block: Block): {
+  role: "user" | "assistant" | "system";
+  content: unknown;
+} {
+  return { role: block.from, content: block };
+}
+
+function messageToBlock(m: ServerMessage): Block | null {
+  const c = m.content;
+  if (typeof c === "object" && c !== null) {
+    const b = c as Partial<Block>;
+    if (b.from === "user" || b.from === "assistant" || b.from === "system") {
+      return c as Block;
+    }
+  }
+  // Never synthesize turns from payloads we don't understand — skip the
+  // row and keep the memory paint (fail closed).
+  return null;
+}
+
+// ---- Container mutations (write-through, snapshot rollback + toast) --------
+
+export async function createChatBacked(
+  subject: string,
+  title: string,
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<CustomChat | null> {
+  if (auth == null) return createCustomChat(subject, title);
+  const clean = title.trim().slice(0, 34) || "New chat";
+  try {
+    const chat = fromServerChat(await apiCreateChat(subject, clean));
+    writeJSON(CHATS_KEY, [...listCustomChats(), chat]);
+    emit();
+    return chat;
+  } catch (error) {
+    notifyFailure(error, opts?.notify, "Couldn't create that chat. Try again.");
+    return null;
+  }
+}
+
+export async function renameChatBacked(
+  code: string,
+  title: string,
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<boolean> {
+  const clean = title.trim().slice(0, 34);
+  if (!clean) return false;
+  if (auth == null || !isServerChat(code)) {
+    renameCustomChat(code, title);
+    return true;
+  }
+  const before = listCustomChats();
+  renameCustomChat(code, clean); // optimistic paint (sync, emits)
+  try {
+    const row = await apiPatchChat(code, { title: clean });
+    writeJSON(
+      CHATS_KEY,
+      listCustomChats().map((c) =>
+        c.code === code
+          ? { ...c, title: row.title, updatedAt: row.updatedAt }
+          : c,
+      ),
+    );
+    emit();
+    return true;
+  } catch (error) {
+    writeJSON(CHATS_KEY, before); // exact rollback
+    emit();
+    notifyFailure(error, opts?.notify, "Couldn't rename that chat. Try again.");
+    return false;
+  }
+}
+
+// Delete stays non-optimistic (slice-12): the server leg lands first,
+// memory follows; failure keeps the chat + one toast.
+export async function deleteChatBacked(
+  code: string,
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<boolean> {
+  if (auth == null || !isServerChat(code)) {
+    deleteCustomChat(code);
+    return true;
+  }
+  try {
+    await apiDeleteChat(code);
+  } catch (error) {
+    notifyFailure(error, opts?.notify, "Couldn't delete that chat. Try again.");
+    return false;
+  }
+  deleteCustomChat(code);
+  return true;
+}
+
+export async function setPinBacked(
+  ref: ChatRef,
+  pinned: boolean,
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<boolean> {
+  if (ref.kind === "demo" || auth == null || !isServerChat(ref.id)) {
+    const now = isPinned(ref);
+    if (now !== pinned) togglePin(ref);
+    return true;
+  }
+  const prev = listCustomChats().find((c) => c.code === ref.id);
+  if (prev?.isPinned === pinned) return true;
+  writeJSON(
+    CHATS_KEY,
+    listCustomChats().map((c) =>
+      c.code === ref.id ? { ...c, isPinned: pinned } : c,
+    ),
+  );
+  emit();
+  try {
+    const row = await apiPatchChat(ref.id, { isPinned: pinned });
+    writeJSON(
+      CHATS_KEY,
+      listCustomChats().map((c) =>
+        c.code === ref.id
+          ? { ...c, isPinned: row.isPinned, updatedAt: row.updatedAt }
+          : c,
+      ),
+    );
+    emit();
+    return true;
+  } catch (error) {
+    writeJSON(
+      CHATS_KEY,
+      listCustomChats().map((c) => (c.code === ref.id && prev ? prev : c)),
+    );
+    emit();
+    notifyFailure(
+      error,
+      opts?.notify,
+      pinned ? "Couldn't pin that chat. Try again." : "Couldn't unpin that chat. Try again.",
+    );
+    return false;
+  }
+}
+
+export async function setArchivedBacked(
+  ref: ChatRef,
+  archived: boolean,
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<boolean> {
+  if (ref.kind === "demo" || auth == null || !isServerChat(ref.id)) {
+    const now = isArchived(ref);
+    if (archived && !now) archiveChat(ref);
+    else if (!archived && now) unarchiveChat(ref);
+    return true;
+  }
+  const prev = listCustomChats().find((c) => c.code === ref.id);
+  if (prev?.isArchived === archived) return true;
+  // Archiving unpins (mirrors archiveChat: a chat lives in one place).
+  writeJSON(
+    CHATS_KEY,
+    listCustomChats().map((c) =>
+      c.code === ref.id
+        ? { ...c, isArchived: archived, isPinned: archived ? false : c.isPinned }
+        : c,
+    ),
+  );
+  emit();
+  try {
+    const row = await apiPatchChat(
+      ref.id,
+      archived ? { isArchived: true, isPinned: false } : { isArchived: false },
+    );
+    writeJSON(
+      CHATS_KEY,
+      listCustomChats().map((c) =>
+        c.code === ref.id
+          ? {
+              ...c,
+              isArchived: row.isArchived,
+              isPinned: row.isPinned,
+              updatedAt: row.updatedAt,
+            }
+          : c,
+      ),
+    );
+    emit();
+    return true;
+  } catch (error) {
+    writeJSON(
+      CHATS_KEY,
+      listCustomChats().map((c) => (c.code === ref.id && prev ? prev : c)),
+    );
+    emit();
+    notifyFailure(
+      error,
+      opts?.notify,
+      archived ? "Couldn't archive that chat. Try again." : "Couldn't restore that chat. Try again.",
+    );
+    return false;
+  }
+}
+
+// ---- Turn persistence (guests/demos no-op before any fetch) ----------------
+
+export async function persistAppendedBlock(
+  code: string,
+  block: Block,
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<boolean> {
+  if (auth == null || !isServerChat(code)) return true;
+  const m = blockToMessage(block);
+  try {
+    await apiAppendMessage(code, m);
+    return true;
+  } catch (error) {
+    notifyFailure(error, opts?.notify, "Couldn't save that message. Try again.");
+    return false;
+  }
+}
+
+export async function persistTruncate(
+  code: string,
+  fromSeq: number,
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<boolean> {
+  if (auth == null || !isServerChat(code)) return true;
+  try {
+    await apiTruncateMessages(code, fromSeq);
+    return true;
+  } catch (error) {
+    notifyFailure(error, opts?.notify, "Couldn't update that chat. Try again.");
+    return false;
+  }
+}
+
+// ---- Message load (open-chat loads once; failure keeps memory paint) -------
+
+export async function loadChatMessages(
+  code: string,
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<Block[]> {
+  if (auth == null || !isServerChat(code)) return getOverlay(code);
+  const current = messageStates.get(code);
+  if (
+    current &&
+    current.identityKey === auth.identityKey &&
+    current.status !== "failed"
+  ) {
+    return getOverlay(code); // ready or in-flight: memory paint rules
+  }
+  messageStates.set(code, { status: "loading", identityKey: auth.identityKey });
+  emit();
+  try {
+    const rows = await apiListMessages(code);
+    const blocks = rows
+      .map(messageToBlock)
+      .filter((b): b is Block => b !== null);
+    setOverlay(code, blocks);
+    messageStates.set(code, { status: "ready", identityKey: auth.identityKey });
+    emit();
+    return blocks;
+  } catch (error) {
+    messageStates.set(code, { status: "failed", identityKey: auth.identityKey });
+    emit();
+    notifyFailure(
+      error,
+      opts?.notify,
+      "Couldn't load this chat's history. Showing what's on this device.",
+    );
+    return getOverlay(code);
+  }
+}
+
+// ---- Hydrate + adopt + pin/archive migration --------------------------------
+
+export type HydrateResult =
+  | { status: "guest" }
+  | { status: "already" }
+  | { status: "ready" }
+  | { status: "kept-memory" };
+
+function dropMemoryChat(code: string) {
+  writeJSON(
+    CHATS_KEY,
+    listCustomChats().filter((c) => c.code !== code),
+  );
+  const all = readJSON<Record<string, Block[]>>(OVERLAY_KEY, {});
+  delete all[code];
+  writeJSON(OVERLAY_KEY, all);
+  const key = `c:${code}`;
+  writeJSON(
+    PINS_KEY,
+    readKeys(PINS_KEY).filter((k) => k !== key),
+  );
+  writeJSON(
+    ARCHIVE_KEY,
+    readKeys(ARCHIVE_KEY).filter((k) => k !== key),
+  );
+}
+
+// Guest→login adopt (best-effort, bounded): memory customs at first
+// authenticated hydrate are POSTed — container + overlay blocks in order —
+// then dropped from memory. Per-chat all-or-nothing: any failure keeps
+// that chat's memory copy untouched for the next login. A partial server
+// write (container created, later leg failed) can leave a server row
+// whose retry duplicates it — exact-once adopt needs idempotency keys,
+// which the frozen §3/§4 contract doesn't offer (reported, not worked
+// around here).
+async function adoptGuestChats(opts?: { notify?: ChatNotify }): Promise<void> {
+  const candidates = listCustomChats().filter((c) => c.updatedAt === undefined);
+  for (const chat of candidates) {
+    const blocks = getOverlay(chat.code);
+    const pinned = readKeys(PINS_KEY).includes(`c:${chat.code}`);
+    const archived = readKeys(ARCHIVE_KEY).includes(`c:${chat.code}`);
+    try {
+      const created = await apiCreateChat(chat.subject, chat.title);
+      for (const block of blocks) {
+        const m = blockToMessage(block);
+        await apiAppendMessage(created.code, m);
+      }
+      if (pinned || archived) {
+        await apiPatchChat(created.code, {
+          ...(pinned ? { isPinned: true } : {}),
+          ...(archived ? { isArchived: true, isPinned: false } : {}),
+        });
+      }
+      dropMemoryChat(chat.code);
+      emit();
+    } catch (error) {
+      if (isAuthFailure(error)) return; // global flow owns 401s; keep memory
+      // Skip the chat — memory stays for the next login (no toast per
+      // chat; hydrate reports once if the list leg itself fails).
+      void opts;
+    }
+  }
+}
+
+// First-sync pin/archive migration: one PATCH per memory-flagged chat
+// present in the server list, once. Afterwards the key-sets retire (the
+// `c:` refs are deleted below — flags rule) while demo (`d:`) refs stay,
+// since demos never sync and keep key-set reads.
+async function migratePinArchiveFlags(
+  serverCodes: Set<string>,
+  opts?: { notify?: ChatNotify },
+): Promise<void> {
+  const pins = new Set(
+    readKeys(PINS_KEY)
+      .filter((k) => k.startsWith("c:"))
+      .map((k) => k.slice(2)),
+  );
+  const archived = new Set(
+    readKeys(ARCHIVE_KEY)
+      .filter((k) => k.startsWith("c:"))
+      .map((k) => k.slice(2)),
+  );
+  const targets = [...new Set([...pins, ...archived])].filter((id) =>
+    serverCodes.has(id),
+  );
+  if (targets.length > 0) {
+    try {
+      for (const id of targets) {
+        await apiPatchChat(id, {
+          isPinned: pins.has(id),
+          isArchived: archived.has(id),
+        });
+      }
+    } catch (error) {
+      // Keep the sets untouched so the next hydrate retries.
+      notifyFailure(
+        error,
+        opts?.notify,
+        "Couldn't sync your pinned chats. They'll retry next login.",
+      );
+      return;
+    }
+  }
+  // RETIREMENT: server flags are now authoritative for custom chats — the
+  // memory `c:` key-sets retire (deleted) here. Demo refs are preserved.
+  writeJSON(
+    PINS_KEY,
+    readKeys(PINS_KEY).filter((k) => !k.startsWith("c:")),
+  );
+  writeJSON(
+    ARCHIVE_KEY,
+    readKeys(ARCHIVE_KEY).filter((k) => !k.startsWith("c:")),
+  );
+}
+
+export async function hydrateChats(
+  auth: ChatAuth,
+  opts?: { notify?: ChatNotify },
+): Promise<HydrateResult> {
+  if (auth == null) return { status: "guest" };
+  if (chatHydratedKey === auth.identityKey) return { status: "already" };
+  // Order ops: adopt FIRST, then hydrate-replace — an adopted chat is
+  // already dropped from memory when the server list lands, so it can
+  // never double-list under its old guest code and its new server code.
+  await adoptGuestChats(opts);
+  let server: ServerChat[];
+  try {
+    server = await apiListChats();
+  } catch (error) {
+    // Failed hydrate keeps the memory paint + one toast.
+    notifyFailure(
+      error,
+      opts?.notify,
+      "Couldn't load your chats. Showing what's on this device.",
+    );
+    return { status: "kept-memory" };
+  }
+  const serverCodes = new Set(server.map((s) => s.code));
+  // Failed-adopt memory customs (still pending for the next login) are
+  // preserved alongside the server truth — never wiped by the replace.
+  const pending = listCustomChats().filter((c) => !serverCodes.has(c.code));
+  writeJSON(CHATS_KEY, [...server.map(fromServerChat), ...pending]);
+  await migratePinArchiveFlags(serverCodes, opts);
+  // Turn caches belong to the previous world — drop them so turns reload
+  // against the hydrated list.
+  messageStates.clear();
+  chatHydratedKey = auth.identityKey;
+  emit();
+  return { status: "ready" };
+}
+
+// ---- Test hooks -------------------------------------------------------------
+
+export function __resetChatBackingForTesting(): void {
+  mem.delete(CHATS_KEY);
+  mem.delete(OVERLAY_KEY);
+  mem.delete(PINS_KEY);
+  mem.delete(ARCHIVE_KEY);
+  chatHydratedKey = null;
+  messageStates.clear();
 }
