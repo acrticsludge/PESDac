@@ -100,6 +100,17 @@ async def get_current_user(
             display_name=name.strip()[:80],
         ),
     )
+    # Display-name re-mirror (FR2, human-approved): BetterAuth owns the
+    # name, and a rename via POST /api/auth/update-user touches no PESDac
+    # write path — only the JWT `name` claim moves. Re-mirror here so
+    # every authenticated read (notably GET /auth/me) converges without
+    # a schema change. Write-only-on-diff: converged requests skip the
+    # UPDATE entirely, and an empty claim never wipes a stored name.
+    fresh_name = name.strip()[:80]
+    if fresh_name and user.display_name != fresh_name:
+        user.display_name = fresh_name
+        db.commit()
+        db.refresh(user)
     return user
 
 

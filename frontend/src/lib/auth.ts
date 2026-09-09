@@ -35,6 +35,13 @@ export const MIN_PASSWORD_LENGTH = 8;
  */
 export const MAX_PASSWORD_LENGTH = 128;
 
+/**
+ * Maximum display-name length. Mirrors the backend `users.display_name`
+ * `[:80]` mirror truncation (app/deps.py); the Identity form enforces it
+ * inline so over-long input never costs a round trip.
+ */
+export const MAX_DISPLAY_NAME_LENGTH = 80;
+
 // ---- Types -----------------------------------------------------------------
 
 export type AuthUser = {
@@ -582,6 +589,64 @@ export async function changePassword(
 }
 
 /**
+ * Transport for `authClient.updateUser`, injectable in tests. The
+ * generated client is a Proxy (see updateDisplayName): stubbing its
+ * method by assignment is silently ignored, so the override lives here.
+ * Null restores the production client. The setter sits with the other
+ * `__*ForTesting` hooks at the bottom of this module.
+ */
+export type UpdateUserTransport = (args: { name: string }) => Promise<{
+  data: unknown;
+  error: { message?: string; status?: number } | null;
+}>;
+
+let updateUserOverride: UpdateUserTransport | null = null;
+
+/**
+ * Rename the current user (BetterAuth-owned identity, per T20).
+ * Sends ONLY `{ name }` — the server rejects `email` in updateUser
+ * (EMAIL_CAN_NOT_BE_UPDATED). Trimmed first; empty/over-long inputs
+ * throw before any request (zero-request validation, slice-14 rule).
+ *
+ * Error contract mirrors changePassword (facade returns void, throws
+ * Error with the server message or fallback) plus one addition: a 401
+ * means the session died mid-edit, so it routes through the shared
+ * 401 path (cache drop + exactly-once re-login signal) instead of
+ * surfacing as a form error. On success the cached /auth/me row is
+ * dropped so the next useProfile() reader sees the renamed row.
+ */
+export async function updateDisplayName(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("Enter a display name.");
+  }
+  if (trimmed.length > MAX_DISPLAY_NAME_LENGTH) {
+    throw new Error(
+      `Display name must be at most ${MAX_DISPLAY_NAME_LENGTH} characters.`,
+    );
+  }
+  // The generated BetterAuth client is a Proxy serving init-time closures
+  // (see dist/client/proxy.mjs): its methods can't be reassigned, and its
+  // bundled fetch bypasses the __setFetchForTesting swap. Tests inject via
+  // __setUpdateUserForTesting below; production always takes this branch.
+  const res = updateUserOverride
+    ? await updateUserOverride({ name: trimmed })
+    : await authClient.updateUser({ name: trimmed });
+  if (res.error) {
+    // BetterAuth client errors carry the HTTP status alongside the
+    // message (same shape the session atom checks for 401s).
+    const status = (res.error as { status?: unknown }).status;
+    if (status === 401) {
+      throw authRequiredError(null);
+    }
+    throw new Error(
+      res.error.message ?? "Couldn't save your name. Try again.",
+    );
+  }
+  refreshProfile();
+}
+
+/**
  * Attach an email+password credential to the current user. Google-only
  * users have no credential account — setting the first password requires
  * BetterAuth's serverOnly `auth.api.setPassword`, which has no HTTP path
@@ -694,10 +759,35 @@ export async function apiGetMe(currentUserId: string): Promise<AuthUser> {
   });
 }
 
+/**
+ * Observable generation for the server identity row. Mirrors the
+ * linked-account generation above: refreshProfile() drops the caches AND
+ * bumps this counter; useProfile() subscribes, so a rename visibly
+ * refetches without a reload. (Previously the cache was dropped with no
+ * subscriber update, and mounted readers kept showing stale rows until
+ * reload.) Identity scoping is preserved: apiGetMe still drops
+ * cross-identity resolves.
+ */
+let profileVersion = 0;
+const profileListeners = new Set<() => void>();
+
+/** Current profile generation (test introspection only). */
+export function __getProfileVersionForTesting(): number {
+  return profileVersion;
+}
+
 /** Drop the cached /auth/me (logout, 401, or after saving onboarding). */
 export function refreshProfile(): void {
   currentMeCache = null;
   currentProfileCache = null;
+  profileVersion += 1;
+  profileListeners.forEach((notify) => {
+    try {
+      notify();
+    } catch {
+      // A stale listener must not break the refresh for the rest.
+    }
+  });
 }
 
 export type ProfileState =
@@ -714,6 +804,18 @@ export type ProfileState =
 export function useProfile(): ProfileState {
   const auth = useAuth();
   const [state, setState] = useState<ProfileState>({ status: "loading" });
+  // Re-run the fetch when refreshProfile() bumps the generation
+  // (onboarding save, display-name rename) — not just when the
+  // identity changes.
+  const [version, setVersion] = useState(profileVersion);
+
+  useEffect(() => {
+    const notify = () => setVersion(profileVersion);
+    profileListeners.add(notify);
+    return () => {
+      profileListeners.delete(notify);
+    };
+  }, []);
 
   useEffect(() => {
     if (auth.status === "loading") return;
@@ -735,7 +837,7 @@ export function useProfile(): ProfileState {
     return () => {
       cancelled = true;
     };
-  }, [auth.status, auth.status === "authenticated" ? auth.user.id : null]);
+  }, [auth.status, auth.status === "authenticated" ? auth.user.id : null, version]);
 
   return state;
 }
@@ -1143,6 +1245,13 @@ export function __resetAuthCachesForTesting(): void {
   currentProfileCache = null;
   currentAccountsCache = null;
   inFlightToken = null;
+  updateUserOverride = null;
+}
+
+export function __setUpdateUserForTesting(
+  impl: UpdateUserTransport | null,
+): void {
+  updateUserOverride = impl;
 }
 
 /**
