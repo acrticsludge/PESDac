@@ -11,7 +11,13 @@ interface ImportMeta {
 
 declare namespace App {
   interface Locals {
-    user: import("better-auth").User | null;
-    session: import("better-auth").Session | null;
+    // Triple-state session (auth-loading-flash fix): `null` is a PROVED
+    // guest (getSession affirmatively returned no session); `undefined`
+    // is UNKNOWN (the middleware gave up — 800ms timeout or throw — and
+    // proved nothing). SSR readers must treat both as falsy (unknown is
+    // null-safe: pages that can't wait keep guest behavior); only
+    // InitialSession.astro distinguishes them for the client tag.
+    user: import("better-auth").User | null | undefined;
+    session: import("better-auth").Session | null | undefined;
   }
 }
