@@ -725,6 +725,7 @@ export default function ThreadView({
   autoSend,
   isHistoryLoading,
   notify,
+  isAppReady = true,
 }: {
   thread: Thread;
   sessionKey: string;
@@ -738,6 +739,13 @@ export default function ThreadView({
   isHistoryLoading?: boolean;
   /** Error surfacing for server write-through (one toast per failure). */
   notify?: (body: string) => void;
+  /**
+   * App readiness gate (spec §4, driven by Pesdac): false while user data
+   * loads — the message list skeletons (existing history-skeleton branch)
+   * and the composer + its menus disable. Defaults true so any other
+   * caller sees today's behavior unchanged.
+   */
+  isAppReady?: boolean;
 }) {
   // Answer depth (answer-depth spec): profile default wins over the seed
   // voice; the toggle overrides per thread for the session. Seed
@@ -797,7 +805,11 @@ export default function ThreadView({
   // failure. Fresh server-created chats (autoSend) skip the list leg:
   // their turns are provably empty at mount.
   const historyStatus = isBacked ? getChatMessagesStatus(sessionKey) : "idle";
+  // Gate: !isAppReady forces the skeleton branch even when chat data is
+  // ready (never a live thread over an unproven identity). U && !C keeps
+  // the existing history-load behavior below unchanged.
   const showHistorySkeleton =
+    !isAppReady ||
     isHistoryLoading === true ||
     (isBacked && historyStatus === "loading" && overlay.length === 0);
   const autoSendRef = useRef<typeof autoSend>(autoSend);
@@ -1070,6 +1082,9 @@ export default function ThreadView({
   const handleSend = (value: string, staged: StagedFile[] = attachments) => {
     const text = value.trim();
     if (!text || live) return;
+    // Gate: the composer is disabled while user data loads; this guard
+    // covers any programmatic send path. Drafts are preserved (no clear).
+    if (!isAppReady) return;
     setSendError(null);
     // Edited resend: drop the edited user turn and everything after it;
     // the normal path below appends the replacement and streams again.
@@ -1277,8 +1292,11 @@ export default function ThreadView({
     setAttachments((prev) => prev.filter((s) => s.att.id !== id));
   };
 
-  // Files from picker, drop, or paste all land in the drawer.
+  // Files from picker, drop, or paste all land in the drawer. Gated:
+  // staging new files while user data loads is dropped (no state change;
+  // the picker itself is native). Removing staged files stays live.
   const stageIntoDrawer = (files: File[]) => {
+    if (!isAppReady) return;
     if (files.length === 0) return;
     setAttachments((prev) => [...prev, ...stageFiles(files)]);
   };
@@ -1687,6 +1705,7 @@ export default function ThreadView({
                       onSubmit={handleSend}
                       onStop={handleStop}
                       isStopShown={live != null}
+                      isDisabled={!isAppReady}
                       status={
                         sendError
                           ? { type: "warning", message: sendError.message }
@@ -1749,6 +1768,7 @@ export default function ThreadView({
                             variant="ghost"
                             size="sm"
                             isIconOnly
+                            isDisabled={!isAppReady}
                             icon={
                               <Icon icon={MagnifyingGlassIcon} size="sm" />
                             }
@@ -1762,6 +1782,7 @@ export default function ThreadView({
                               size: "sm",
                               icon: <Icon icon={AtSymbolIcon} size="sm" />,
                               isIconOnly: true,
+                              isDisabled: !isAppReady,
                             }}
                             hasChevron={false}
                             menuWidth={240}
@@ -1780,6 +1801,7 @@ export default function ThreadView({
                                 <Icon icon={EllipsisHorizontalIcon} size="sm" />
                               ),
                               isIconOnly: true,
+                              isDisabled: !isAppReady,
                             }}
                             hasChevron={false}
                             menuWidth={240}
@@ -1805,6 +1827,7 @@ export default function ThreadView({
                                   : "Auto",
                             variant: "ghost",
                             size: "sm",
+                            isDisabled: !isAppReady,
                           }}
                           items={[
                             {

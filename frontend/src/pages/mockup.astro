@@ -1,19 +1,45 @@
 ---
 import "../styles/global.css";
-import { Theme } from "@astryxdesign/core/theme";
-import { PESDacMockupTheme } from "../theme/PESDacMockupTheme";
-import MockupGallery from "../components/mockup/MockupGallery";
+import MockBackground from "../components/background/MockBackground";
 ---
 
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
-    <title>PESDac — Brand directions</title>
+    <title>PESDac — Mock Background</title>
+    <style is:inline>
+      html { color-scheme: dark; }
+      :root {
+        --color-background-body: #1b1b1b;
+      }
+      html, body {
+        background-color: #1b1b1b !important;
+        color: #fafafa !important;
+        font-family: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+        color-scheme: dark !important;
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        overflow: hidden;
+      }
+    </style>
   </head>
+
   <body>
-    <Theme theme={PESDacMockupTheme} mode="dark">
-      <MockupGallery client:load />
-    </Theme>
+    <div style="position: relative; width: 100%; height: 100vh; overflow: hidden;">
+      <MockBackground />
+
+      {/* Minimal content overlay to show the grey + patterns clearly */}
+      <div style="position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 2rem; pointer-events: none;">
+        <h1 style="font-size: 2.5rem; font-weight: 600; letter-spacing: -0.02em; margin: 0; color: #fafafa; opacity: 0.95;">Mock Background</h1>
+        <p style="font-size: 1rem; color: #a3a3a3; margin: 0; opacity: 0.8; max-width: 420px; text-align: center; line-height: 1.5;">
+          Minimalist white / grey offsets. Subtle rotation + hover. Try hovering anywhere.
+        </p>
+        <div style="display: flex; gap: 1rem; pointer-events: auto;">
+          <a href="/new" style="padding: 0.6rem 1.2rem; border: 1px solid #FFFFFF1A; border-radius: 0.5rem; color: #fafafa; text-decoration: none; font-size: 0.875rem; transition: border-color 0.2s;">Back to /new</a>
+        </div>
+      </div>
+    </div>
   </body>
 </html>
