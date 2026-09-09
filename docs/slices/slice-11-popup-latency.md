@@ -239,3 +239,41 @@ first-call JWT mint cost shows up in the user's network timings.
 This slice is **N+1** (the next one). It comes after Slice 8 and
 before FINAL. Implementation is incremental — Step 1 alone fixes
 the 5–10s AuthGate delay; the other steps are progressive wins.
+
+## T1 verdict — Step 2 NO-GO (2026-09-09, proxy measurement)
+
+Spec `docs/reasonix/specs/slice11-step2-profile-prefetch.md` §6 FR1
+gates Step 2 on a GO verdict (post-Step-1 chain p50 > ~1s
+attributable to token+me+profile). No browser/DevTools session was
+available, so T1 ran as a server-leg proxy on the live dev servers
+(single listener per port: :4321 Astro, :8000 FastAPI), judged
+against a production-like baseline per instruction — warm dev-SSR
+numbers are quoted raw, and the 3–8s cold-dev SSR overhead from the
+table above is discounted to zero (production serves these routes
+from the Node server without HMR/compilation).
+
+Proxy timings (curl, 3 runs each, unauthenticated baselines):
+
+| Leg | Run 1 | Run 2 | Run 3 | Production-like? |
+|---|---|---|---|---|
+| `GET /api/auth/get-session` (guest, Astro SSR) | 7ms (200) | 7ms | 7ms | dev route, warm — no 3–8s overhead present |
+| `GET /api/auth/token` (guest, Astro SSR) | 9ms (401) | 8ms | 7ms | reject path only, not a mint |
+| `GET /api/v1/auth/me` (no bearer, FastAPI direct) | 213ms (401) | 217ms | 207ms | yes — FastAPI has no dev-SSR inflation |
+| `GET /api/v1/profiles/me` (no bearer, FastAPI direct) | 233ms (401) | 231ms | 233ms | yes — same |
+
+Production estimate for the signed-in post-Step-1 chain
+(`useSession` converges instantly from the embedded tag, so ~0;
+one token mint + `apiGetMe`/`apiGetProfile` sharing the cached
+token, backend legs effectively parallel): ~0 + mint (unmeasurable
+without a session; slice estimate 100–300ms in prod) + ~250ms
+backend wall ≈ ~450ms, roughly half the ~1s GO threshold. Even at
+2× safety margin it lands in the ±200ms gray zone, which defaults
+to NO-GO. The token mint alone was not shown to dominate (guest
+reject path is 8ms; a real mint needs a session to time), so this
+is NO-GO, not ROUTE-TO-4.
+
+Verdict: **NO-GO — Step 2 is not built.** Zero code diff. Revisit
+only if real browser timings (session-resolved → dialog-open split
+by leg) show the chain p50 > ~1s in production-like serving, or if
+the token mint itself proves dominant (that routes to a Step 4
+spec, not this one).
