@@ -65,7 +65,7 @@ import {
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
-import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, linkPassword, refreshAccounts, apiDeleteAccount, apiFetch, apiUpdateProfile, toUserMessage, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from "../../lib/auth";
+import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, linkPassword, refreshAccounts, apiDeleteAccount, apiFetch, apiUpdateProfile, updateDisplayName, toUserMessage, AuthRequiredError, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH, MAX_DISPLAY_NAME_LENGTH } from "../../lib/auth";
 import { navigate } from "astro:transitions/client";
 import {
   BRANCHES,
@@ -180,8 +180,17 @@ export function IdentitySection() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSavingIdentity, setIsSavingIdentity] = useState(false);
-  // TODO(BetterAuth): email + displayName are account-owned — read-only
-  // when authenticated. Logged out the local store remains editable.
+  // Display-name rename (BetterAuth-owned, T20): the draft is null while
+  // pristine so the field always shows the live row; renamedTo trusts our
+  // own confirmed write while the caches converge (twoFactorOn precedent
+  // in AuthenticationSection below).
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [isSavingName, setIsSavingName] = useState(false);
+  const [renamedTo, setRenamedTo] = useState<string | null>(null);
+  // TODO(BetterAuth): email is account-owned — read-only when
+  // authenticated. displayName renames through updateUser. Logged out the
+  // local store remains editable.
   // Server row wins; while it loads, the session name/email stand in so
   // the rows stay read-only instead of flickering to editable inputs.
   const serverUser =
@@ -193,6 +202,14 @@ export function IdentitySection() {
   const authUser = serverUser;
   const displayName = authUser?.displayName || profile.displayName;
   const email = authUser?.email || profile.email;
+  // Live name: our confirmed rename wins only while the row still
+  // disagrees — once the refetched /auth/me lands, the row owns it
+  // again (self-healing; a concurrent rename elsewhere can't stick).
+  const currentName =
+    renamedTo != null && displayName !== renamedTo ? renamedTo : displayName;
+  const draftName = nameDraft ?? currentName ?? "";
+  const trimmedDraft = draftName.trim();
+  const isNameDirty = trimmedDraft !== (currentName ?? "").trim();
 
   // Delete the PESDac identity (users + profile + chats), then the
   // BetterAuth sign-in record. T22/T31: backend-first ordering — the
@@ -270,6 +287,43 @@ export function IdentitySection() {
     }
   }
 
+  // Rename the BetterAuth-owned display name (slice-14 shape: field
+  // `status` owns validation, `onEnter` submits, server failures toast).
+  // Empty/over-long/unchanged inputs cost zero requests; the value is
+  // preserved across failures. A 401 rides the untouched global flow —
+  // the wrapper already dispatched it, so neither a form error nor a
+  // second toast may fire here.
+  async function handleSaveDisplayName() {
+    if (isSavingName) return;
+    setNameError(null);
+    if (!trimmedDraft) {
+      setNameError("Enter a display name.");
+      return;
+    }
+    if (trimmedDraft.length > MAX_DISPLAY_NAME_LENGTH) {
+      setNameError(
+        `Display name must be at most ${MAX_DISPLAY_NAME_LENGTH} characters.`,
+      );
+      return;
+    }
+    if (!isNameDirty) return;
+    setIsSavingName(true);
+    try {
+      await updateDisplayName(trimmedDraft);
+      setRenamedTo(trimmedDraft);
+      setNameDraft(null);
+      toast({ body: "Display name saved.", type: "info" });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) return;
+      toast({
+        body: toUserMessage(error, "Couldn't save your name. Try again."),
+        type: "error",
+      });
+    } finally {
+      setIsSavingName(false);
+    }
+  }
+
   return (
     <VStack gap={5}>
       {/* Identity header + Identity card depend on the server /auth/me
@@ -297,13 +351,13 @@ export function IdentitySection() {
       <>
       <HStack gap={3} vAlign="center">
         <Avatar
-          name={displayName || email || "?"}
+          name={currentName || email || "?"}
           size="lg"
           shape="circle"
         />
         <VStack gap={0}>
           <Text type="body" weight="semibold">
-            {displayName || "Your name"}
+            {currentName || "Your name"}
           </Text>
           <Text type="supporting" color="secondary">
             {email || "you@example.com"}
@@ -322,9 +376,48 @@ export function IdentitySection() {
             icon={UserIcon}
             control={
               authUser != null ? (
-                <Text type="body" maxLines={1}>
-                  {displayName || "—"}
-                </Text>
+                <VStack gap={1.5}>
+                  <TextInput
+                    label="Display name"
+                    isLabelHidden
+                    size="sm"
+                    width={CONTROL_WIDTH}
+                    placeholder="Your name"
+                    value={draftName}
+                    isDisabled={isSavingName}
+                    isLoading={isSavingName}
+                    onChange={(value) => {
+                      setNameDraft(value);
+                      setNameError(null);
+                    }}
+                    status={
+                      nameError != null
+                        ? { type: "error", message: nameError }
+                        : undefined
+                    }
+                    onEnter={() => {
+                      void handleSaveDisplayName();
+                    }}
+                  />
+                  <HStack
+                    vAlign="center"
+                    style={{
+                      width: CONTROL_WIDTH,
+                      justifyContent: "flex-end",
+                    }}
+                  >
+                    <Button
+                      label="Save display name"
+                      variant="primary"
+                      size="sm"
+                      isLoading={isSavingName}
+                      isDisabled={!isNameDirty || isSavingName}
+                      clickAction={() => void handleSaveDisplayName()}
+                    >
+                      Save
+                    </Button>
+                  </HStack>
+                </VStack>
               ) : (
                 <TextInput
                   label="Display name"
