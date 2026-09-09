@@ -33,6 +33,7 @@ import {
   apiGetMe,
   apiGetProfile,
   apiUpdateProfile,
+  onboardingRetryDecision,
   refreshProfile,
   toUserMessage,
 } from "../../lib/auth";
@@ -107,43 +108,64 @@ export default function OnboardingDialog({
     let cancelled = false;
     const userId = auth.user.id;
     (async () => {
-      try {
-        const [me, profile] = await Promise.all([
-          apiGetMe(userId),
-          apiGetProfile(userId),
-        ]);
-        if (cancelled) return;
-        if (me.onboardingDone) {
-          setPhase("done");
+      // Bounded silent retry (auth-loading-flash fix, S2): transient
+      // failures (cold backend) retry per onboardingRetryDecision while
+      // `checking` keeps rendering null — no dialog swap mid-retry. The
+      // loop restarts whenever this effect re-runs (identity change via
+      // authUserId, manual retry via attempt), so attempts never leak
+      // across identities. Exhaustion falls into the error path below,
+      // unchanged.
+      let attemptsUsed = 0;
+      for (;;) {
+        try {
+          const [me, profile] = await Promise.all([
+            apiGetMe(userId),
+            apiGetProfile(userId),
+          ]);
+          if (cancelled) return;
+          if (me.onboardingDone) {
+            setPhase("done");
+            return;
+          }
+          setCampus(isCampus(profile.campus) ? profile.campus : "");
+          setSemester(
+            typeof profile.semester === "string" ? profile.semester : "",
+          );
+          setBranch(typeof profile.branch === "string" ? profile.branch : "");
+          setSubjects(
+            Array.isArray(profile.subjects)
+              ? profile.subjects.filter(isSubject)
+              : [],
+          );
+          setPhase("open");
           return;
-        }
-        setCampus(isCampus(profile.campus) ? profile.campus : "");
-        setSemester(
-          typeof profile.semester === "string" ? profile.semester : "",
-        );
-        setBranch(typeof profile.branch === "string" ? profile.branch : "");
-        setSubjects(
-          Array.isArray(profile.subjects)
-            ? profile.subjects.filter(isSubject)
-            : [],
-        );
-        setPhase("open");
-      } catch (error) {
-        if (!cancelled) {
+        } catch (error) {
+          if (cancelled) return;
+          attemptsUsed += 1;
           // Logout flight (logout/relogin fix): the epoch-killed check
           // rejects here while navigation to /login is already
           // guaranteed — stay silent instead of opening the error dialog
           // over the transition. identity-changed is never a genuine
           // failure (stale resolve after a user switch), so it stays
-          // silent outside the window too.
+          // silent outside the window too. Runs on EVERY attempt's
+          // failure, including silent retries, not just the first.
           if (isLogoutTransition() || isTransitionNoise(error)) {
             setPhase("done");
             return;
+          }
+          const decision = onboardingRetryDecision(error, attemptsUsed);
+          if (decision.retry) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, decision.delayMs),
+            );
+            if (cancelled) return;
+            continue;
           }
           setFailure(
             toUserMessage(error, "Couldn't load your profile. Try again."),
           );
           setPhase("error");
+          return;
         }
       }
     })();
