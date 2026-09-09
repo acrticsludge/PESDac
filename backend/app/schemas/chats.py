@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app import security
 from app.models.catalog import SUBJECT_CODES
 from app.models.chats import DEMO_LABELS
+
+# Serialized-content cap (spec §3.2): appends whose JSON-serialized
+# `content` exceeds this are rejected with 422, never 500.
+MESSAGE_CONTENT_MAX_BYTES = 100 * 1024
 
 
 class ChatCreate(BaseModel):
@@ -72,6 +79,33 @@ class Pagination(BaseModel):
     limit: int
     offset: int
     total: int
+
+
+class MessageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant", "system"]
+    content: dict[str, Any]
+
+    @field_validator("content")
+    @classmethod
+    def _content_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(v).encode("utf-8")) > MESSAGE_CONTENT_MAX_BYTES:
+            raise ValueError("Content exceeds 100KB.")
+        return v
+
+
+class MessageOut(BaseModel):
+    id: str
+    seq: int
+    role: str
+    content: dict[str, Any]
+    createdAt: str
+
+
+class MessageListOut(BaseModel):
+    data: list[MessageOut]
+    pagination: "Pagination"
 
 
 class DemoPut(BaseModel):
