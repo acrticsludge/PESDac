@@ -563,6 +563,42 @@ export function shouldShowIdentitySkeleton(
 }
 
 /**
+ * App readiness gate predicates (spec §3.2–§3.3, frozen).
+ *
+ * `userReady`: `loading` blocks on either signal; `error` settles (fail
+ * open — the existing profile-error UI owns recovery, the gate must never
+ * lock the user out). Guests lift the moment the guest proof lands
+ * (`guest`/`guest` + seed never pends → ready in typically one frame).
+ *
+ * `chatReady`: guests have no server chats (always ready); authenticated
+ * identities are ready only for the current identity key — stale keys
+ * (post-logout, pre-hydrate) and pre-hydrate null are not ready.
+ *
+ * Pure and unit-tested (`frontend/tests/app-ready-gate.test.ts`); callers
+ * read the live signals render-direct next to the existing
+ * `listCustomChats()` reads (reactive via `useSessionVersion()`).
+ */
+export function userReady(
+  authStatus: string,
+  profileStatus: string,
+  seedPending: boolean,
+): boolean {
+  return (
+    authStatus !== "loading" &&
+    profileStatus !== "loading" &&
+    !seedPending
+  );
+}
+
+export function chatReady(
+  auth: ChatAuth,
+  hydratedKey: string | null,
+): boolean {
+  if (auth == null) return true;
+  return hydratedKey === auth.identityKey;
+}
+
+/**
  * Logout hygiene (called from apiLogout): drop the old identity's
  * campus/semester/branch/subjects seed and retag to logged-out so the
  * next login reseeds from scratch. Preference fields (language, weekly

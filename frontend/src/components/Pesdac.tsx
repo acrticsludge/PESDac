@@ -66,6 +66,10 @@ import {
   getSeededIdentityKey,
   setSeededIdentityKey,
   setProfileSeedPending,
+  getProfileSeedPending,
+  getChatHydratedKey,
+  userReady,
+  chatReady,
   identitySeedKey,
   hydrateChats,
   createChatBacked,
@@ -446,6 +450,7 @@ function ConversationItem({
   menu,
   icon,
   isPending,
+  isDisabled,
 }: {
   label: string;
   isSelected?: boolean;
@@ -453,11 +458,12 @@ function ConversationItem({
   menu: ChatMenuItem[];
   icon?: ReactNode | IconType;
   isPending?: boolean;
+  isDisabled?: boolean;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const showMenu = isHovered || isMenuOpen;
+  const showMenu = (isHovered || isMenuOpen) && !isDisabled;
 
   return (
     <Stack
@@ -468,9 +474,10 @@ function ConversationItem({
         label={label}
         href="#"
         isSelected={isSelected}
+        isDisabled={isDisabled}
         icon={isPending ? <Spinner size="sm" /> : icon}
         onClick={(event) => {
-          if (isPending) {
+          if (isPending || isDisabled) {
             event.preventDefault();
             return;
           }
@@ -489,6 +496,28 @@ function ConversationItem({
         }
       />
     </Stack>
+  );
+}
+
+// App readiness gate (spec §4–§5): Astryx Skeleton rows mirroring the
+// ConversationItem/SideNavItem rhythm (icon + label + menu dot, fixed
+// sizes so the skeleton→live swap holds layout). Rendered in place of
+// custom chat rows while the gate holds; demo rows render disabled
+// instead (never skeletoned). Presentational only — no fetching.
+function ChatGateSkeletons({ rows }: { rows: number }) {
+  if (rows <= 0) return null;
+  return (
+    <VStack gap={0.5} aria-busy="true" aria-label="Loading chats">
+      {Array.from({ length: rows }, (_, i) => (
+        <HStack key={i} gap={2} vAlign="center" padding={1}>
+          <Skeleton width={20} height={20} radius="rounded" index={i} />
+          <Skeleton width={140} height={14} index={i} />
+          <span style={{ marginLeft: "auto", display: "inline-flex" }}>
+            <Skeleton width={16} height={16} radius="rounded" index={i} />
+          </span>
+        </HStack>
+      ))}
+    </VStack>
   );
 }
 
@@ -790,6 +819,20 @@ const LOGOUT_TIMEOUT_MS = 15000;
     archivedKeys.has(`${ref.kind}:${ref.id}`);
   const storageOk = useStorageHealth();
   const corruptKeys = useCorruptKeys();
+  // App readiness gate (spec §3–§4, frozen): render-direct reads next to
+  // the listCustomChats() reads above — reactive via the same
+  // useSessionVersion() subscription, no new context or effect chain.
+  // U = user data settled; C = chat list hydrated for this identity.
+  // Chat rows skeleton on !(U && C) — !U forces skeletons even when C
+  // holds (never a live list over an unproven identity).
+  const seedPending = getProfileSeedPending();
+  const isUserReady = userReady(
+    authState.status,
+    serverProfile.status,
+    seedPending,
+  );
+  const isChatReady = chatReady(chatAuth, getChatHydratedKey());
+  const chatRowsLive = isUserReady && isChatReady;
 
   const [mode, setMode] = useState<string | null>(
     initialSubjectValue ?? "auto",
@@ -934,6 +977,9 @@ const LOGOUT_TIMEOUT_MS = 15000;
       : demoDisplayLabel(ref.id);
 
   const openRef = (ref: ChatRef) => {
+    // Gate: demo navigation is disabled while user data loads. Custom
+    // rows are unreachable here while gated (skeletoned, not rendered).
+    if (ref.kind === "demo" && !isUserReady) return;
     if (ref.kind === "custom") {
       setDraftCode(ref.id);
       setDraftAutoSend(null);
@@ -1103,6 +1149,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // every other code deep-links to the same welcome shell with the
   // correct subject + selection until its thread is built.
   const openConversation = (label: string) => {
+    // Gate: demo navigation is disabled while user data loads.
+    if (!isUserReady) return;
     setSelectedChat(label);
     setDraftCode(null);
     const subject = getChatSubject(label);
@@ -1126,6 +1174,9 @@ const LOGOUT_TIMEOUT_MS = 15000;
   const handleWelcomeSend = (value: string) => {
     const text = value.trim();
     if (!text) return;
+    // Gate: the welcome composer is skeleton-swapped (unreachable) while
+    // user data loads; this guard covers any programmatic send path.
+    if (!isUserReady) return;
     // Mockup default: unscoped chats file under CN until backend scopes them.
     const subject = category ?? (mode && mode !== "auto" ? mode : "CN");
     // @ tokens stay in the sent text (responder scopes on them) but out of
@@ -1236,6 +1287,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
   /* ---------------------------------------------------------------------- */
 
   const applySuggestion = (prompt: string) => {
+    // Gate: suggestion cards are disabled while user data loads.
+    if (!isUserReady) return;
     const input = composerInputRef.current;
 
     if (!input) {
@@ -1258,6 +1311,9 @@ const LOGOUT_TIMEOUT_MS = 15000;
   /* ---------------------------------------------------------------------- */
 
   const insertReference = (item: (typeof REFERENCE_ITEMS)[number]) => {
+    // Gate: the reference menu is unreachable while user data loads
+    // (composer skeleton-swapped); this guard covers the same path.
+    if (!isUserReady) return;
     const input = composerInputRef.current;
 
     if (!input) {
@@ -1358,8 +1414,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
                   label="Settings"
                   icon={Cog6ToothIcon}
                   href="#"
+                  isDisabled={!isUserReady}
                   onClick={(event) => {
                     event.preventDefault();
+                    if (!isUserReady) return;
                     openProfile("profile");
                   }}
                 />
@@ -1368,8 +1426,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
                   label="My Profile"
                   icon={UserCircleIcon}
                   href="#"
+                  isDisabled={!isUserReady}
                   onClick={(event) => {
                     event.preventDefault();
+                    if (!isUserReady) return;
                     openProfile("profile");
                   }}
                 />
@@ -1407,8 +1467,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
                 icon={PlusIcon}
                 href="#"
                 isSelected={selectedChat === null}
+                isDisabled={!isUserReady}
                 onClick={(event) => {
                   event.preventDefault();
+                  if (!isUserReady) return;
                   startNewChat();
                 }}
               />
@@ -1418,8 +1480,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
                 icon={MagnifyingGlassIcon}
                 href="#"
                 isSelected={isSearchOpen}
+                isDisabled={!isUserReady}
                 onClick={(event) => {
                   event.preventDefault();
+                  if (!isUserReady) return;
                   setIsSearchOpen((v) => !v);
                   setSearchQuery("");
                 }}
@@ -1460,22 +1524,43 @@ const LOGOUT_TIMEOUT_MS = 15000;
             {pinnedRows.length > 0 && (
               <SideNavSection title="Pinned">
                 <VStack gap={0.5}>
-                  {pinnedRows.map(({ ref, title }) => (
-                    <ConversationItem
-                      key={`${ref.kind}:${ref.id}`}
-                      label={title}
-                      icon={BookmarkIcon}
-                      isSelected={isRefOpen(ref)}
-                      isPending={isRowPending(ref)}
-                      onClick={() => openRef(ref)}
-                      menu={listedMenu(ref, title)}
+                  {pinnedRows.map(({ ref, title }) => {
+                    // Gated custom rows are covered by the skeleton block
+                    // below (never a live list over an unproven identity).
+                    if (ref.kind === "custom" && !chatRowsLive) return null;
+                    return (
+                      <ConversationItem
+                        key={`${ref.kind}:${ref.id}`}
+                        label={title}
+                        icon={BookmarkIcon}
+                        isSelected={isRefOpen(ref)}
+                        isPending={isRowPending(ref)}
+                        isDisabled={ref.kind === "demo" && !isUserReady}
+                        onClick={() => openRef(ref)}
+                        menu={listedMenu(ref, title)}
+                      />
+                    );
+                  })}
+                  {!chatRowsLive && (
+                    <ChatGateSkeletons
+                      rows={
+                        pinnedRows.filter((r) => r.ref.kind === "custom").length
+                      }
                     />
-                  ))}
+                  )}
                 </VStack>
               </SideNavSection>
             )}
 
             <SideNavSection title="Subjects" isHeaderHidden>
+              {/* Cold-load placeholder: memory is empty before the first
+                  hydrate, so per-row skeletons would render nothing — a
+                  fixed 2-row block keeps the sidebar visibly loading while
+                  the gate holds. Unmounts on ready (ready-empty renders the
+                  real empty list, never a skeleton). */}
+              {!chatRowsLive && customs.length === 0 && (
+                <ChatGateSkeletons rows={2} />
+              )}
               {WORKSPACES.map((workspace) => {
                 const demoChats = workspace.chats.filter(
                   (chat) =>
@@ -1519,12 +1604,14 @@ const LOGOUT_TIMEOUT_MS = 15000;
                             label={display}
                             isSelected={chat.label === selectedChat}
                             isPending={isRowPending(ref)}
+                            isDisabled={!isUserReady}
                             onClick={() => openConversation(chat.label)}
                             menu={listedMenu(ref, display)}
                           />
                         );
                       })}
-                      {workspaceCustoms.map((c) => {
+                      {chatRowsLive ? (
+                        workspaceCustoms.map((c) => {
                         const ref: ChatRef = {
                           kind: "custom",
                           id: c.code,
@@ -1543,7 +1630,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
                             menu={listedMenu(ref, c.title)}
                           />
                         );
-                      })}
+                      })
+                      ) : (
+                        <ChatGateSkeletons rows={workspaceCustoms.length} />
+                      )}
                     </VStack>
                   </SideNavItem>
                 );
@@ -1553,16 +1643,30 @@ const LOGOUT_TIMEOUT_MS = 15000;
             {archivedRows.length > 0 && (
               <SideNavSection title="Archived">
                 <VStack gap={0.5}>
-                  {archivedRows.map(({ ref, title }) => (
-                    <ConversationItem
-                      key={`${ref.kind}:${ref.id}`}
-                      label={title}
-                      isSelected={isRefOpen(ref)}
-                      isPending={isRowPending(ref)}
-                      onClick={() => openRef(ref)}
-                      menu={archivedMenu(ref, title)}
+                  {archivedRows.map(({ ref, title }) => {
+                    // Same rule as Pinned above: gated customs skeleton,
+                    // demos render disabled.
+                    if (ref.kind === "custom" && !chatRowsLive) return null;
+                    return (
+                      <ConversationItem
+                        key={`${ref.kind}:${ref.id}`}
+                        label={title}
+                        isSelected={isRefOpen(ref)}
+                        isPending={isRowPending(ref)}
+                        isDisabled={ref.kind === "demo" && !isUserReady}
+                        onClick={() => openRef(ref)}
+                        menu={archivedMenu(ref, title)}
+                      />
+                    );
+                  })}
+                  {!chatRowsLive && (
+                    <ChatGateSkeletons
+                      rows={
+                        archivedRows.filter((r) => r.ref.kind === "custom")
+                          .length
+                      }
                     />
-                  ))}
+                  )}
                 </VStack>
               </SideNavSection>
             )}
@@ -1594,6 +1698,9 @@ const LOGOUT_TIMEOUT_MS = 15000;
               sessionKey={key}
               autoSend={draftThread ? (draftAutoSend ?? undefined) : undefined}
               notify={notifyChat}
+              // App readiness gate (spec §4): the thread skeletons and
+              // disables its composer while user data loads.
+              isAppReady={isUserReady}
             />
           ) : (
           <Layout
@@ -1626,6 +1733,15 @@ const LOGOUT_TIMEOUT_MS = 15000;
                   {/* Actual Astryx Chat Composer                              */}
                   {/* ======================================================== */}
 
+                  {/* Gate: fixed-height skeleton in place of the composer
+                      until user data is ready (no input accepted before
+                      then). Paint-only swap — `welcomeText` and staged
+                      attachments survive in state and restore on ready. */}
+                  {!isUserReady ? (
+                    <VStack aria-busy="true" aria-label="Loading composer">
+                      <Skeleton width="100%" height={184} />
+                    </VStack>
+                  ) : (
                   <ChatComposer
                     value={welcomeText}
                     onChange={setWelcomeText}
@@ -1777,6 +1893,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                     }
                     sendActions={<ChatDictationButton dictation={dictation} />}
                   />
+                  )}
 
                   {/* ======================================================== */}
                   {/* Subject quick filters                                   */}
@@ -1786,7 +1903,11 @@ const LOGOUT_TIMEOUT_MS = 15000;
                     <ToggleButtonGroup
                       label="Subject"
                       value={category}
+                      isDisabled={!isUserReady}
                       onChange={(value) => {
+                        // Gate: subject toggles are disabled while user
+                        // data loads (zero visual change beyond disabled).
+                        if (!isUserReady) return;
                         setCategory(value);
                         // Mirror the mode menu: picking a subject scopes
                         // the mode; clearing returns to Auto.
@@ -1842,6 +1963,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                             label={suggestion.heading}
                             variant="muted"
                             padding={3}
+                            isDisabled={!isUserReady}
                             onClick={() => applySuggestion(suggestion.prompt)}
                           >
                             <VStack gap={0.5}>

@@ -40,6 +40,31 @@ _HTTP_CODE_BY_STATUS: dict[int, str] = {
 logger = logging.getLogger("pesdac")
 
 
+def _cors_error_headers(request: Request) -> dict[str, str]:
+    """CORS headers for error responses, mirroring CORSMiddleware.
+
+    Reproduced cause (TestClient, allowlisted Origin): success/4xx legs
+    built by routes carry `Access-Control-Allow-Origin`, but responses
+    built by these exception handlers intermittently do not — the
+    BaseHTTPMiddleware security-headers layer sits outside
+    CORSMiddleware and re-sends the collected response, which can drop
+    the injected ACAO on the exception path. Without these headers the
+    browser masks every 4xx/5xx as a CORS failure ("No
+    'Access-Control-Allow-Origin' header"), hiding the real status plus
+    the 500 reference the frontend needs. Non-browser callers (no
+    Origin) and disallowed origins get no headers — identical to the
+    middleware's own behavior.
+    """
+    origin = request.headers.get("origin")
+    if not origin or origin not in config.FRONTEND_ORIGINS:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
+
+
 def create_app(validate: bool = True) -> FastAPI:
     if validate:
         config.validate_startup(require_db=True)
@@ -93,6 +118,7 @@ def create_app(validate: bool = True) -> FastAPI:
         return JSONResponse(
             status_code=422,
             content=error_body("VALIDATION_ERROR", "Invalid request.", details=details),
+            headers=_cors_error_headers(request),
         )
 
     @app.exception_handler(HTTPException)
@@ -110,10 +136,13 @@ def create_app(validate: bool = True) -> FastAPI:
         else:
             message = str(detail) if detail is not None else "Request failed."
         code = _HTTP_CODE_BY_STATUS.get(exc.status_code, "ERROR")
+        headers = _cors_error_headers(request)
+        if exc.headers:
+            headers.update(exc.headers)
         return JSONResponse(
             status_code=exc.status_code,
             content=error_body(code, message),
-            headers=exc.headers,
+            headers=headers,
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -136,6 +165,7 @@ def create_app(validate: bool = True) -> FastAPI:
             content=error_body(
                 "INTERNAL", f"Something went wrong. Reference: {ref}."
             ),
+            headers=_cors_error_headers(request),
         )
 
     app.include_router(health.router, prefix="/api/v1")
