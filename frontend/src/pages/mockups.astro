@@ -1,0 +1,35 @@
+---
+import "../styles/global.css";
+import ThreadLoaderMockups from "../components/chat/ThreadLoaderMockups";
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>PESDac — Thread loader mockups</title>
+    <style is:inline>
+      html { color-scheme: dark; }
+      :root {
+        --color-background-body: #1b1b1b;
+      }
+      html, body {
+        background-color: #1b1b1b !important;
+        color: #fafafa !important;
+        font-family: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+        color-scheme: dark !important;
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div style="display: flex; flex-direction: column; gap: 1.5rem; padding: 2.5rem 1.5rem 4rem;">
+      <div style="max-width: 720px; margin-inline: auto; width: 100%;">
+        <a href="/new" style="color: #a3a3a3; text-decoration: none; font-size: 0.875rem;">← Back to /new</a>
+      </div>
+      <ThreadLoaderMockups client:load />
+    </div>
+  </body>
+</html>

@@ -68,7 +68,7 @@ import {
   ChevronDownIcon,
 } from "@heroicons/react/24/outline";
 
-import { ThreadSkeleton } from "./ThreadSkeleton";
+import { ThreadHistoryLoader } from "./ThreadHistoryLoader";
 
 import type {
   Artifact,
@@ -1839,7 +1839,7 @@ export default function ThreadView({
                 >
                   <ChatMessageList isStreaming={live != null}>
                     {showHistorySkeleton ? (
-                      <ThreadSkeleton />
+                      <ThreadHistoryLoader />
                     ) : (
                       <>
                     {blocks.map((block, i) => {
