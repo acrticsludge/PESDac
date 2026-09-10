@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -30,6 +30,29 @@ class Chat(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
+    # Lean-list columns (chat-history-lean-storage FR2): sidebar/search/count
+    # render from these — bodies are fetched only on open. `preview` is the
+    # latest turn's text snippet (<=280 chars); `msg_count`/`last_seq` track
+    # the message window. All three are maintained in the same txn that
+    # touches `updated_at` on append/truncate (see routers/chats.py).
+    preview: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    msg_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_seq: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (
+        # Sidebar/search ordering (`is_pinned DESC, updated_at DESC` scoped
+        # by user + archive flag). Mirrors `ix_chats_user_updated` in
+        # migration 0007 (the 0001 `ix_chats_user_list` covers the same key
+        # prefix on existing deploys; 0007 supersedes it with DESC ordering).
+        Index(
+            "ix_chats_user_updated",
+            "user_id",
+            "is_archived",
+            "is_pinned",
+            "updated_at",
+        ),
+    )
+
     # Back-reference for User.chats delete cascade (see models/users.py).
     user: Mapped["User"] = relationship("User", back_populates="chats")
     # ORM-level delete cascade: `db.delete(chat)` removes its messages in

@@ -4,7 +4,7 @@ Cross-user code → 404 (no existence oracle). No message bodies in this slice.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -16,11 +16,91 @@ from app import rate_limit, security
 from app.db import get_db
 from app.deps import check_mutation_origin, get_current_user
 from app.models.chats import Chat, Message
+from app.models.profiles import Profile
 from app.models.users import User
 from app.schemas.chats import ChatCreate, ChatPatch, MessageCreate
 from app.schemas.common import error_body
 
 router = APIRouter(prefix="/chats", tags=["chats"])
+
+# Latest-turn snippet cap (spec FR2: preview TEXT <= 280 chars).
+PREVIEW_MAX_CHARS = 280
+
+# Render-only Block keys (spec FR1 — stripped client-side by Stream B).
+# Excluded from previews so pre-strip rows don't leak timestamps/footers;
+# structural keys (from/type/...) excluded so the snippet is prose only.
+_PREVIEW_SKIP_KEYS = frozenset({
+    "time", "toolCallsExpanded", "toolCallsAfter", "footer",
+    "retryText", "from", "type", "variant", "language",
+    "artifactId", "id", "mime", "file", "src",
+})
+
+
+def _preview_from_content(content: object, limit: int = PREVIEW_MAX_CHARS) -> str:
+    """Flatten a stored Block payload to a <=280-char prose snippet."""
+    parts: list[str] = []
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _PREVIEW_SKIP_KEYS:
+                    continue
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+        elif isinstance(node, str):
+            text = " ".join(node.split())
+            if text:
+                parts.append(text)
+
+    walk(content)
+    return " ".join(parts)[:limit]
+
+
+# Nightly-purge windows per profiles.retention (models/profiles.py
+# RETENTIONS — note the spec FR4 names `30d | 90d | 1y` do NOT match the
+# shipped values; the code values below rule). "forever" keeps everything
+# and is absent by design; "session" purges anything older than the run.
+RETENTION_MAX_AGE = {
+    "1 year": timedelta(days=365),
+    "30 days": timedelta(days=30),
+    "session": timedelta(days=0),
+}
+
+
+def _as_aware(dt: datetime) -> datetime:
+    if dt.tzinfo is None:  # SQLite (tests) returns naive; prod is tz-aware
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def purge_expired_chats(db: Session, now: datetime | None = None) -> dict[str, int]:
+    """Nightly-purge worker body (FR4): delete per-user chats older than
+    their `profiles.retention` window. Messages cascade via the ORM
+    delete path (SQLite-safe; the DB FK is the prod safety net).
+    No scheduler is wired — there is no job infra in this repo (see
+    final report); call this from the nightly runner when one lands.
+    Returns `{retention: deleted}` for the windows that had users.
+    """
+    moment = _as_aware(now) if now is not None else datetime.now(timezone.utc)
+    purged: dict[str, int] = {}
+    for retention, max_age in RETENTION_MAX_AGE.items():
+        cutoff = moment - max_age
+        user_ids = db.scalars(
+            select(Profile.user_id).where(Profile.retention == retention)
+        ).all()
+        if not user_ids:
+            continue
+        count = 0
+        for chat in db.scalars(select(Chat).where(Chat.user_id.in_(user_ids))).all():
+            if _as_aware(chat.updated_at) < cutoff:
+                db.delete(chat)
+                count += 1
+        purged[retention] = count
+    if any(purged.values()):
+        db.commit()
+    return purged
 
 
 def _iso(dt: datetime) -> str:
@@ -34,6 +114,11 @@ def _out(chat: Chat) -> dict:
         "code": chat.code, "subject": chat.subject, "title": chat.title,
         "isPinned": chat.is_pinned, "isArchived": chat.is_archived,
         "createdAt": _iso(chat.created_at), "updatedAt": _iso(chat.updated_at),
+        # getattr fallbacks: pre-0007 rows (or branches without the
+        # migration) render as title-only rows — rollback-safe per §13.
+        "preview": getattr(chat, "preview", None) or "",
+        "msgCount": getattr(chat, "msg_count", None) or 0,
+        "lastSeq": getattr(chat, "last_seq", None) or 0,
     }
 
 
@@ -160,14 +245,24 @@ async def append_message(code: str, body: MessageCreate, request: Request, resul
         return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Chat not found."))
     for _ in range(3):
         next_seq = db.scalar(select(func.max(Message.seq)).where(Message.chat_id == chat.id))
+        next_seq = 0 if next_seq is None else next_seq + 1
         msg = Message(
             chat_id=chat.id,
-            seq=0 if next_seq is None else next_seq + 1,
+            seq=next_seq,
             role=body.role,
             content=body.content,
         )
-        # Touch the container so sidebar ordering keeps working.
+        # Touch the container so sidebar ordering keeps working; the
+        # lean-list columns ride the same txn (FR2). Counts derive from the
+        # pre-add total so a retry after a lost append race converges on
+        # the winner's max instead of double-counting.
+        existing = db.scalar(
+            select(func.count()).select_from(Message).where(Message.chat_id == chat.id)
+        ) or 0
         chat.updated_at = datetime.now(timezone.utc)
+        chat.msg_count = existing + 1
+        chat.last_seq = next_seq
+        chat.preview = _preview_from_content(body.content)
         db.add(msg)
         try:
             db.commit()
@@ -225,5 +320,23 @@ async def truncate_messages(
         .filter(Message.chat_id == chat.id, Message.seq >= from_seq)
         .delete(synchronize_session=False)
     )
+    # Recompute the lean-list columns in the same txn (FR2) + touch
+    # ordering so the sidebar reflects the truncation.
+    remaining = db.scalars(
+        select(Message)
+        .where(Message.chat_id == chat.id)
+        .order_by(Message.seq.desc())
+        .limit(1)
+    ).all()
+    chat.msg_count = (
+        db.scalar(select(func.count()).select_from(Message).where(Message.chat_id == chat.id)) or 0
+    )
+    if remaining:
+        chat.last_seq = remaining[0].seq
+        chat.preview = _preview_from_content(remaining[0].content)
+    else:
+        chat.last_seq = 0
+        chat.preview = ""
+    chat.updated_at = datetime.now(timezone.utc)
     db.commit()
     return {"data": {"deleted": count}, "pagination": {"limit": 0, "offset": 0, "total": count}}
