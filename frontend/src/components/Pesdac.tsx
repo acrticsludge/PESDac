@@ -72,6 +72,9 @@ import {
   getProfileSeedPending,
   getChatHydratedKey,
   getChatHydratePending,
+  getChatHydrateFailed,
+  getHydrateSyncError,
+  getCreateSyncError,
   shouldShowChatListSkeleton,
   userReady,
   chatReady,
@@ -608,7 +611,12 @@ export default function ShellSideNav({
     if (chatAuth == null) return;
     if (chatHydratedRef.current === chatAuth.identityKey) return;
     chatHydratedRef.current = chatAuth.identityKey;
-    void hydrateChats(chatAuth, { notify: notifyChat });
+    // kept-memory releases the gate (no auto-retry — the effect never
+    // re-fires on its own): the next mount/identity transition or a
+    // user-initiated Retry can hydrate again.
+    void hydrateChats(chatAuth, { notify: notifyChat }).then((result) => {
+      if (result.status === "kept-memory") chatHydratedRef.current = null;
+    });
   }, [authState.status, authUserId, authEpoch]);
   const authExpiredRef = useRef(false);
   // Backend rejected our session (expired/invalid): clear it and
@@ -825,6 +833,13 @@ const LOGOUT_TIMEOUT_MS = 15000;
   );
   const isChatReady = chatReady(chatAuth, getChatHydratedKey());
   const chatRowsLive = isUserReady && isChatReady;
+  // Chat sync error surface (chat-error-display spec §4): hydrate failure
+  // releases the spinner gate below and paints the welcome composer error.
+  // The user's own failed create wins over the background hydrate failure;
+  // guests never see either (zero fetches on the guest path).
+  const hydrateFailed = getChatHydrateFailed();
+  const welcomeSyncError =
+    chatAuth != null ? (getCreateSyncError() ?? getHydrateSyncError()) : null;
 
   // Chat skeleton loading: frozen predicate (session.ts) decides the
   // window; Pinned/Archived/Subjects sections use their own snapshot
@@ -1896,7 +1911,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
               thread={thread}
               sessionKey={key}
               autoSend={draftThread ? (draftAutoSend ?? undefined) : undefined}
-              isHistoryLoading={provisionalThread != null}
+              isHistoryLoading={provisionalThread != null && !hydrateFailed}
               notify={notifyChat}
               // App readiness gate (spec §4): the thread skeletons and
               // disables its composer while user data loads.
@@ -1940,25 +1955,31 @@ const LOGOUT_TIMEOUT_MS = 15000;
                    {!isUserReady ? (
                      <ComposerSkeleton aria-busy="true" aria-label="Loading composer" />
                    ) : (
-                   <ChatComposer
-                    value={welcomeText}
-                    onChange={setWelcomeText}
-                    onSubmit={handleWelcomeSend}
-                    status={
-                      !storageOk
-                        ? {
-                            type: "warning",
-                            message:
-                              "History isn't saving in this browser — new chats will be lost on reload.",
-                          }
-                        : corruptKeys.length > 0
-                          ? {
-                              type: "warning",
-                              message:
-                                "Saved data looked damaged, so chats may be incomplete — new messages still save normally.",
-                            }
-                          : undefined
-                    }
+                    <ChatComposer
+                     value={welcomeText}
+                     onChange={setWelcomeText}
+                     onSubmit={handleWelcomeSend}
+                     statusPosition={welcomeSyncError != null ? "top" : undefined}
+                     status={
+                       welcomeSyncError != null
+                         ? {
+                             type: "error",
+                             message: welcomeSyncError,
+                           }
+                         : !storageOk
+                           ? {
+                               type: "warning",
+                               message:
+                                 "History isn't saving in this browser — new chats will be lost on reload.",
+                             }
+                           : corruptKeys.length > 0
+                             ? {
+                                 type: "warning",
+                                 message:
+                                   "Saved data looked damaged, so chats may be incomplete — new messages still save normally.",
+                               }
+                             : undefined
+                     }
                     placeholder={
                       category
                         ? `Ask something about ${category}...`

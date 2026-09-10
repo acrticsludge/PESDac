@@ -115,6 +115,11 @@ import {
   isServerChat,
   loadChatMessages,
   getChatMessagesStatus,
+  getChatSyncError,
+  getHydrateSyncError,
+  getChatHydrateFailed,
+  clearChatSyncError,
+  hydrateChats,
   persistAppendedBlock,
   persistTruncate,
   shouldShowThreadSkeleton,
@@ -791,6 +796,28 @@ export default function ThreadView({
     !isAppReady ||
     isHistoryLoading === true ||
     shouldShowThreadSkeleton(isBacked, historyStatus, overlay.length);
+  // Persistent sync-error surface (chat-error-display spec §4): per-chat
+  // history/persist failures win; the provisional deep-link thread (never
+  // backed, empty paint, list never landed) falls back to the hydrate
+  // error. 401s record neither (global re-login owns them); guests and
+  // demos never set either signal, so both stay null there.
+  const chatSyncError = getChatSyncError(sessionKey);
+  const isProvisionalHistory =
+    !isBacked &&
+    chatAuth != null &&
+    overlay.length === 0 &&
+    thread.blocks.length === 0 &&
+    getChatHydrateFailed();
+  const syncErrorMessage =
+    chatSyncError ?? (isProvisionalHistory ? getHydrateSyncError() : null);
+  // Loader suppression: a recorded sync error unmounts the loader and the
+  // memory paint shows. Retry clears the signal first, so the spinner
+  // honestly returns only for the new fetch.
+  const showHistoryLoader = showHistorySkeleton && syncErrorMessage == null;
+  const showHistoryRetry =
+    !showHistoryLoader &&
+    (isProvisionalHistory ||
+      (historyStatus === "failed" && chatSyncError != null));
   const autoSendRef = useRef<typeof autoSend>(autoSend);
   useEffect(() => {
     if (!isBacked) return;
@@ -1177,6 +1204,27 @@ export default function ThreadView({
     const { text } = sendError;
     setSendError(null);
     startTurn(text, { forceOk: true });
+  };
+
+  // History Retry (user-initiated only — no timers, no effect loops):
+  // re-calls loadChatMessages with the same { notify }. The per-chat
+  // signal clears first so the loader honestly returns for the new fetch
+  // (re-set + one toast on failure). Provisional deep links re-run the
+  // list leg first — loadChatMessages alone is a no-op for a code the
+  // store never saw.
+  const handleHistoryRetry = () => {
+    if (chatAuth == null) return;
+    if (isProvisionalHistory) {
+      void hydrateChats(chatAuth, { notify }).then((result) => {
+        if (result.status !== "kept-memory") {
+          clearChatSyncError(sessionKey);
+          void loadChatMessages(sessionKey, chatAuth, { notify });
+        }
+      });
+      return;
+    }
+    clearChatSyncError(sessionKey);
+    void loadChatMessages(sessionKey, chatAuth, { notify });
   };
 
   // Regenerate lives beside the assistant message's copy action, never on
@@ -1691,22 +1739,29 @@ export default function ThreadView({
                       onStop={handleStop}
                       isStopShown={live != null}
                       isDisabled={!isAppReady}
+                      statusPosition={
+                        syncErrorMessage != null && sendError == null
+                          ? "top"
+                          : undefined
+                      }
                       status={
                         sendError
                           ? { type: "warning", message: sendError.message }
-                          : !storageOk
-                            ? {
-                                type: "warning",
-                                message:
-                                  "History isn't saving in this browser — new messages will be lost on reload.",
-                              }
-                            : corruptKeys.length > 0
+                          : syncErrorMessage != null
+                            ? { type: "error", message: syncErrorMessage }
+                            : !storageOk
                               ? {
                                   type: "warning",
                                   message:
-                                    "Saved data looked damaged, so this chat started fresh — history may be incomplete.",
+                                    "History isn't saving in this browser — new messages will be lost on reload.",
                                 }
-                              : undefined
+                              : corruptKeys.length > 0
+                                ? {
+                                    type: "warning",
+                                    message:
+                                      "Saved data looked damaged, so this chat started fresh — history may be incomplete.",
+                                  }
+                                : undefined
                       }
                       placeholder={
                         composerMode === "deep"
@@ -1838,10 +1893,23 @@ export default function ThreadView({
                   }
                 >
                   <ChatMessageList isStreaming={live != null}>
-                    {showHistorySkeleton ? (
+                    {showHistoryLoader ? (
                       <ThreadHistoryLoader />
                     ) : (
                       <>
+                    {showHistoryRetry && (
+                      <HStack gap={2} vAlign="center" hAlign="center">
+                        <Button
+                          label="Retry"
+                          variant="ghost"
+                          size="sm"
+                          icon={
+                            <Icon icon={ArrowPathIcon} size="sm" />
+                          }
+                          onClick={handleHistoryRetry}
+                        />
+                      </HStack>
+                    )}
                     {blocks.map((block, i) => {
                       if (block.from === "system") {
                         return findRow(
