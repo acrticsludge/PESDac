@@ -777,6 +777,44 @@ export function getChatMessagesStatus(
   return messageStates.get(code)?.status ?? "idle";
 }
 
+// ---- Sync-error signal (chat-error-display spec §4–§5) -----------------------
+//
+// Every chat sync failure fires the existing toast (unchanged) AND records a
+// persistent composer error here. Copy reuses the toast strings verbatim —
+// the signal stores the exact body passed to `notify`, so no new copy.
+// Render-direct reads (same pattern as `getChatMessagesStatus`): components
+// read beside their existing session reads, reactive via `useSessionVersion`.
+// 401s stay silent (the global AUTH_REQUIRED flow owns them) — neither toast
+// nor signal. Cleared on the matching success; never on a timer.
+let hydrateSyncError: string | null = null;
+const chatSyncErrors = new Map<string, string>();
+let createSyncError: string | null = null;
+
+/** Persistent hydrate error for the welcome/provisional composers (if any). */
+export function getHydrateSyncError(): string | null {
+  return hydrateSyncError;
+}
+
+/** True while a hydrate failure is unrecovered (spinner gate + Retry). */
+export function getChatHydrateFailed(): boolean {
+  return hydrateSyncError != null;
+}
+
+/** Persistent per-chat sync error: history/persist failures (if any). */
+export function getChatSyncError(code: string): string | null {
+  return chatSyncErrors.get(code) ?? null;
+}
+
+/** Persistent create error for the welcome composer (if any). */
+export function getCreateSyncError(): string | null {
+  return createSyncError;
+}
+
+/** Optimistic clear before a user-initiated history Retry (re-set on failure). */
+export function clearChatSyncError(code: string): void {
+  if (chatSyncErrors.delete(code)) emit();
+}
+
 // Block ⇄ message-row serialization. The server stores each turn as a
 // serialized Block payload (spec §3.1 content JSONB); role mirrors
 // Block.from exactly. `seq` is server-assigned — memory order stays
@@ -845,10 +883,17 @@ export async function createChatBacked(
   try {
     const chat = fromServerChat(await apiCreateChat(subject, clean));
     writeJSON(CHATS_KEY, [...listCustomChats(), chat]);
+    if (createSyncError != null) {
+      createSyncError = null;
+    }
     emit();
     return chat;
   } catch (error) {
     notifyFailure(error, opts?.notify, "Couldn't create that chat. Try again.");
+    if (!isAuthFailure(error)) {
+      createSyncError = "Couldn't create that chat. Try again.";
+      emit();
+    }
     return null;
   }
 }
@@ -1026,9 +1071,14 @@ export async function persistAppendedBlock(
   const m = blockToMessage(block);
   try {
     await apiAppendMessage(code, m);
+    if (chatSyncErrors.delete(code)) emit();
     return true;
   } catch (error) {
     notifyFailure(error, opts?.notify, "Couldn't save that message. Try again.");
+    if (!isAuthFailure(error)) {
+      chatSyncErrors.set(code, "Couldn't save that message. Try again.");
+      emit();
+    }
     return false;
   }
 }
@@ -1042,9 +1092,14 @@ export async function persistTruncate(
   if (auth == null || !isServerChat(code)) return true;
   try {
     await apiTruncateMessages(code, fromSeq);
+    if (chatSyncErrors.delete(code)) emit();
     return true;
   } catch (error) {
     notifyFailure(error, opts?.notify, "Couldn't update that chat. Try again.");
+    if (!isAuthFailure(error)) {
+      chatSyncErrors.set(code, "Couldn't update that chat. Try again.");
+      emit();
+    }
     return false;
   }
 }
@@ -1074,6 +1129,7 @@ export async function loadChatMessages(
       .filter((b): b is Block => b !== null);
     setOverlay(code, blocks);
     messageStates.set(code, { status: "ready", identityKey: auth.identityKey });
+    chatSyncErrors.delete(code);
     emit();
     return blocks;
   } catch (error) {
@@ -1084,6 +1140,13 @@ export async function loadChatMessages(
       opts?.notify,
       "Couldn't load this chat's history. Showing what's on this device.",
     );
+    if (!isAuthFailure(error)) {
+      chatSyncErrors.set(
+        code,
+        "Couldn't load this chat's history. Showing what's on this device.",
+      );
+      emit();
+    }
     return getOverlay(code);
   }
 }
@@ -1225,6 +1288,10 @@ export async function hydrateChats(
       opts?.notify,
       "Couldn't load your chats. Showing what's on this device.",
     );
+    if (!isAuthFailure(error)) {
+      hydrateSyncError = "Couldn't load your chats. Showing what's on this device.";
+      emit();
+    }
     setChatHydratePending(false, auth.identityKey);
     return { status: "kept-memory" };
   }
@@ -1238,6 +1305,9 @@ export async function hydrateChats(
   // against the hydrated list.
   messageStates.clear();
   chatHydratedKey = auth.identityKey;
+  if (hydrateSyncError != null) {
+    hydrateSyncError = null;
+  }
   setChatHydratePending(false, auth.identityKey);
   emit();
   return { status: "ready" };
@@ -1254,4 +1324,7 @@ export function __resetChatBackingForTesting(): void {
   chatHydratePending = false;
   chatHydrateIdentityKey = null;
   messageStates.clear();
+  hydrateSyncError = null;
+  chatSyncErrors.clear();
+  createSyncError = null;
 }
