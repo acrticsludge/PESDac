@@ -941,6 +941,19 @@ export async function renameChatBacked(
   renameCustomChat(code, clean); // optimistic paint (sync, emits)
   try {
     const row = await apiPatchChat(code, { title: clean });
+    // Last-intent-wins (P1-5): a newer intent confirmed since dispatch
+    // carries a greater updatedAt — drop this stale resolve instead of
+    // painting last-resolver-wins. A delete since dispatch removes the
+    // code — stay gone (P1-4 membership).
+    const latest = listCustomChats().find((c) => c.code === code);
+    if (latest == null) return false;
+    if (
+      latest.updatedAt != null &&
+      row.updatedAt != null &&
+      Date.parse(latest.updatedAt) > Date.parse(row.updatedAt)
+    ) {
+      return true;
+    }
     writeJSON(
       CHATS_KEY,
       listCustomChats().map((c) =>
@@ -952,6 +965,11 @@ export async function renameChatBacked(
     emit();
     return true;
   } catch (error) {
+    // Membership BEFORE any rollback (P1-4): a delete that landed while
+    // the rename was in flight must keep the chat gone — restoring
+    // `before` would resurrect it. (Per-row snapshot is Phase 3; here
+    // only the guard is added.)
+    if (!listCustomChats().some((c) => c.code === code)) return false;
     writeJSON(CHATS_KEY, before); // exact rollback
     emit();
     notifyFailure(error, opts?.notify, "Couldn't rename that chat. Try again.");
@@ -1002,6 +1020,15 @@ export async function setPinBacked(
   emit();
   try {
     const row = await apiPatchChat(ref.id, { isPinned: pinned });
+    const latest = listCustomChats().find((c) => c.code === ref.id);
+    if (latest == null) return false;
+    if (
+      latest.updatedAt != null &&
+      row.updatedAt != null &&
+      Date.parse(latest.updatedAt) > Date.parse(row.updatedAt)
+    ) {
+      return true;
+    }
     writeJSON(
       CHATS_KEY,
       listCustomChats().map((c) =>
@@ -1013,16 +1040,22 @@ export async function setPinBacked(
     emit();
     return true;
   } catch (error) {
-    writeJSON(
-      CHATS_KEY,
-      listCustomChats().map((c) => (c.code === ref.id && prev ? prev : c)),
-    );
-    emit();
-    notifyFailure(
-      error,
-      opts?.notify,
-      pinned ? "Couldn't pin that chat. Try again." : "Couldn't unpin that chat. Try again.",
-    );
+    // Membership gates the whole failure path (P1-4): when the row is gone
+    // (delete landed mid-flight) there is nothing to roll back AND nothing
+    // to report — a toast about a deleted chat is noise. Matches rename's
+    // silent-false above.
+    if (listCustomChats().some((c) => c.code === ref.id)) {
+      writeJSON(
+        CHATS_KEY,
+        listCustomChats().map((c) => (c.code === ref.id && prev ? prev : c)),
+      );
+      emit();
+      notifyFailure(
+        error,
+        opts?.notify,
+        pinned ? "Couldn't pin that chat. Try again." : "Couldn't unpin that chat. Try again.",
+      );
+    }
     return false;
   }
 }
@@ -1056,6 +1089,15 @@ export async function setArchivedBacked(
       ref.id,
       archived ? { isArchived: true, isPinned: false } : { isArchived: false },
     );
+    const latest = listCustomChats().find((c) => c.code === ref.id);
+    if (latest == null) return false;
+    if (
+      latest.updatedAt != null &&
+      row.updatedAt != null &&
+      Date.parse(latest.updatedAt) > Date.parse(row.updatedAt)
+    ) {
+      return true;
+    }
     writeJSON(
       CHATS_KEY,
       listCustomChats().map((c) =>
@@ -1072,16 +1114,19 @@ export async function setArchivedBacked(
     emit();
     return true;
   } catch (error) {
-    writeJSON(
-      CHATS_KEY,
-      listCustomChats().map((c) => (c.code === ref.id && prev ? prev : c)),
-    );
-    emit();
-    notifyFailure(
-      error,
-      opts?.notify,
-      archived ? "Couldn't archive that chat. Try again." : "Couldn't restore that chat. Try again.",
-    );
+    // Same membership gate as pin above (P1-4): no row ⇒ no rollback, no toast.
+    if (listCustomChats().some((c) => c.code === ref.id)) {
+      writeJSON(
+        CHATS_KEY,
+        listCustomChats().map((c) => (c.code === ref.id && prev ? prev : c)),
+      );
+      emit();
+      notifyFailure(
+        error,
+        opts?.notify,
+        archived ? "Couldn't archive that chat. Try again." : "Couldn't restore that chat. Try again.",
+      );
+    }
     return false;
   }
 }
@@ -1148,24 +1193,47 @@ export async function loadChatMessages(
     return getOverlay(code); // ready or in-flight: memory paint rules
   }
   messageStates.set(code, { status: "loading", identityKey: auth.identityKey });
+  // Overlay marker at dispatch: post-dispatch appends (a just-sent turn)
+  // live beyond this length and must survive the resolve (P1-6 merge).
+  const overlayLenAtDispatch = getOverlay(code).length;
   emit();
   try {
     const rows = await apiListMessages(code);
     // P0-3: an identity transition since dispatch clears messageStates —
     // a missing or identity-mismatched entry proves this resolve is stale
     // (previous identity's turns). Drop it instead of painting over the
-    // new identity's store. (Phase 2 generalizes this to epoch guards.)
+    // new identity's store. A delete since dispatch removes the code —
+    // drop too, never resurrect its overlay (P1-4 membership).
     if (messageStates.get(code)?.identityKey !== auth.identityKey) {
+      messageStates.delete(code);
+      return getOverlay(code);
+    }
+    if (!listCustomChats().some((c) => c.code === code)) {
+      messageStates.delete(code);
+      return getOverlay(code);
+    }
+    // Post-dispatch truncate (edit/regenerate) shrank the overlay below its
+    // dispatch length: the fetched rows predate it and would resurrect cut
+    // turns. Keep the truncated paint and mark ready; a fresh open refetches.
+    if (getOverlay(code).length < overlayLenAtDispatch) {
+      messageStates.set(code, { status: "ready", identityKey: auth.identityKey });
+      chatSyncErrors.delete(code);
+      emit();
       return getOverlay(code);
     }
     const blocks = rows
       .map(messageToBlock)
       .filter((b): b is Block => b !== null);
-    setOverlay(code, blocks);
+    // Merge-not-clobber (P1-6): server truth as the base, post-dispatch
+    // appends re-applied as the tail — never a wholesale overwrite that
+    // wipes a just-sent message (which resends as a duplicate).
+    const tail = getOverlay(code).slice(overlayLenAtDispatch);
+    const merged = [...blocks, ...tail];
+    setOverlay(code, merged);
     messageStates.set(code, { status: "ready", identityKey: auth.identityKey });
     chatSyncErrors.delete(code);
     emit();
-    return blocks;
+    return merged;
   } catch (error) {
     // Stale-drop (P0-3) applies to non-401 failures only. Our own 401
     // routes through clearAuthCache — which resets this state — yet must
@@ -1174,6 +1242,11 @@ export async function loadChatMessages(
     // bypassing the drop here cannot leak turns across identities.
     if (!isAuthFailure(error)) {
       if (messageStates.get(code)?.identityKey !== auth.identityKey) {
+        messageStates.delete(code);
+        return getOverlay(code);
+      }
+      if (!listCustomChats().some((c) => c.code === code)) {
+        messageStates.delete(code);
         return getOverlay(code);
       }
     }
