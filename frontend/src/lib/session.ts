@@ -781,11 +781,29 @@ export function getChatMessagesStatus(
 // serialized Block payload (spec §3.1 content JSONB); role mirrors
 // Block.from exactly. `seq` is server-assigned — memory order stays
 // append-order and no seq is ever synthesized client-side.
+// Wire strip (chat-history-lean-storage FR1, safe subset): drop render-only
+// expansion state before POST so it is never stored in JSONB + TOAST.
+// `time`/`footer`/`error.retryText` are KEPT — ThreadView renders them
+// directly (`ThreadView.tsx:1458,1541` Timestamp from `block.time`, `:1544`
+// `block.footer` with no fallback, `:1535` Retry via `error.retryText`),
+// so stripping them would regress reload timestamps, footers, and
+// post-reload Retry. Filed as defects; do NOT extend this strip until
+// render fallbacks land. Deep-clones: the memory paint is never mutated.
+export function toWireBlock(block: Block): Block {
+  const wire = JSON.parse(JSON.stringify(block)) as Record<string, unknown>;
+  delete wire.toolCallsExpanded;
+  delete wire.toolCallsAfter;
+  if (Array.isArray(wire.followUps) && wire.followUps.length === 0) {
+    delete wire.followUps;
+  }
+  return wire as unknown as Block;
+}
+
 function blockToMessage(block: Block): {
   role: "user" | "assistant" | "system";
   content: unknown;
 } {
-  return { role: block.from, content: block };
+  return { role: block.from, content: toWireBlock(block) };
 }
 
 function messageToBlock(m: ServerMessage): Block | null {
