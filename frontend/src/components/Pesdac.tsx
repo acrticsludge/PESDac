@@ -88,6 +88,10 @@ import {
   isServerChat,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
+  LAST_KNOWN_SUBJECT_COUNTS_KEY,
+  LAST_KNOWN_PINNED_COUNT_KEY,
+  LAST_KNOWN_ARCHIVED_COUNT_KEY,
+  LAST_KNOWN_SNAPSHOT_AT_KEY,
 } from "../lib/session";
 
 import { AppShell } from "@astryxdesign/core/AppShell";
@@ -858,17 +862,21 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // localStorage (counts only, no titles — and only for authenticated
   // sessions, so guest sessions never seed it); while pending — or while
   // auth is still unresolved — read it back so ONLY the workspaces that
-  // will receive rows skeleton. The key is intentionally NOT namespaced
-  // by identity: the identity key is unknowable during the loading
-  // window, which is exactly when the snapshot is needed. SSR reads none
-  // (matches the "SSR renders empty" doctrine above).
-  const LAST_KNOWN_SUBJECT_COUNTS_KEY = "pesdac:lastKnownChatsBySubject";
-  // Pinned/Archived loader counts (spec FR1): transient localStorage
-  // counts only, no titles — same write/read lifecycle as the subject
-  // snapshot above. Pinned = pinned && !archived customs; archived =
-  // archived customs (archived wins when both flags hold).
-  const LAST_KNOWN_PINNED_COUNT_KEY = "pesdac:lastKnownPinnedCount";
-  const LAST_KNOWN_ARCHIVED_COUNT_KEY = "pesdac:lastKnownArchivedCount";
+  // will receive rows skeleton. The keys live in `lib/session.ts` (single
+  // source) and are wiped on every identity transition by the store reset —
+  // never namespaced by identity: the identity key is unknowable during the
+  // loading window, which is exactly when the snapshot is needed, and a
+  // last-user pointer would reintroduce the leak. SSR reads none (matches
+  // the "SSR renders empty" doctrine above).
+  const SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  const stampSnapshotWrite = () => {
+    try {
+      window.localStorage.setItem(LAST_KNOWN_SNAPSHOT_AT_KEY, String(Date.now()));
+    } catch {
+      // Storage failure must never wedge render — that section just
+      // renders no skeleton rows.
+    }
+  };
   // Write-if-changed cache: the snapshot is serialized every render but
   // localStorage is touched only when it differs from what was last
   // written (or what's already stored) — spam-reloads with unchanged
@@ -900,6 +908,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
       ref.current = value;
       try {
         window.localStorage.setItem(key, String(value));
+        stampSnapshotWrite();
       } catch {
         // Storage failure must never wedge render — that section just
         // renders no skeleton rows.
@@ -943,6 +952,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
             LAST_KNOWN_SUBJECT_COUNTS_KEY,
             serialized,
           );
+          stampSnapshotWrite();
         } catch {
           // Storage failure must never wedge render — that workspace just
           // renders no skeleton rows.
@@ -966,9 +976,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // reloads read as "I have no chats" before the skeleton ever appeared.
   // Cover the unresolved window too; `skeletonRowsFor` returns 0 without
   // a snapshot, so first-timers see zero skeletons, and known guests never
-  // skeleton (`showWorkspaceSkeleton` is false once status resolves). The
-  // irreducible residue: an unresolved window on a browser holding a stale
-  // snapshot may flash rows that vanish when the session proves guest.
+  // skeleton (`showWorkspaceSkeleton` is false once status resolves).
+  // Residue closed by the caching Fix 1 transition wipe: post-transition
+  // heaps hold no foreign snapshot, and pre-fix snapshots without a
+  // timestamp are cleared by the age-cap above before any read.
   const authUnresolved = authState.status === "loading";
   const showWorkspaceSkeleton = showChatListSkeleton || authUnresolved;
   const readCountSnapshot = (key: string): number => {
@@ -983,7 +994,31 @@ const LOGOUT_TIMEOUT_MS = 15000;
   let lastKnownBySubject: Record<string, number> = {};
   let lastKnownPinnedCount = 0;
   let lastKnownArchivedCount = 0;
+  // 24 h age cap: a snapshot older than the cap (or with no timestamp,
+  // e.g. pre-fix snapshots) is cleared + read as empty — never painted.
+  let snapshotFresh = false;
   if (showWorkspaceSkeleton && typeof window !== "undefined") {
+    try {
+      const atRaw = window.localStorage.getItem(LAST_KNOWN_SNAPSHOT_AT_KEY);
+      const at = atRaw == null ? Number.NaN : Number(atRaw);
+      snapshotFresh =
+        Number.isFinite(at) && Date.now() - at <= SNAPSHOT_MAX_AGE_MS;
+    } catch {
+      snapshotFresh = false;
+    }
+    if (!snapshotFresh) {
+      try {
+        window.localStorage.removeItem(LAST_KNOWN_SUBJECT_COUNTS_KEY);
+        window.localStorage.removeItem(LAST_KNOWN_PINNED_COUNT_KEY);
+        window.localStorage.removeItem(LAST_KNOWN_ARCHIVED_COUNT_KEY);
+        window.localStorage.removeItem(LAST_KNOWN_SNAPSHOT_AT_KEY);
+      } catch {
+        // Storage failure must never wedge render — that section just
+        // renders no skeleton rows.
+      }
+    }
+  }
+  if (showWorkspaceSkeleton && snapshotFresh && typeof window !== "undefined") {
     try {
       lastKnownBySubject =
         (JSON.parse(
