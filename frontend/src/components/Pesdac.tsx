@@ -11,6 +11,7 @@ import {
   getChatByCode,
   getChatCode,
   getChatSubject,
+  isChatCodeFormat,
   isSubject,
 } from "../lib/chat";
 import {
@@ -735,8 +736,18 @@ const LOGOUT_TIMEOUT_MS = 15000;
   const [selectedChat, setSelectedChat] = useState<string | null>(
     initialChat?.label ?? null,
   );
-  // Custom (session) conversation open in-place (mockup: no URL for customs).
-  const [draftCode, setDraftCode] = useState<string | null>(null);
+  // Custom conversations deep-link via /subject/[subject]/[code] (same
+  // scheme as demos; custom codes never collide with demo codes — genCode
+  // avoids TAKEN demo codes). On a direct load the store is empty until
+  // hydrate, so seed draftCode from the URL and let the thread appear when
+  // customs land.
+  const initialCustomCode =
+    initialCode != null &&
+    getChatByCode(initialCode) == null &&
+    isChatCodeFormat(initialCode)
+      ? initialCode
+      : null;
+  const [draftCode, setDraftCode] = useState<string | null>(initialCustomCode);
   // Draft auto-send: first message typed on welcome, sent on thread mount.
   const [draftAutoSend, setDraftAutoSend] = useState<{
     text: string;
@@ -831,6 +842,83 @@ const LOGOUT_TIMEOUT_MS = 15000;
     ? Math.min(Math.max(lastKnownCustomsRef.current ?? 1, 1), 3)
     : 0;
 
+  // Per-workspace skeleton placement (fan-out fix): the session store is
+  // memory-backed, so on reload the per-subject distribution is unknowable
+  // from `customs` alone — a total count would skeleton every workspace.
+  // While authed customs are live, snapshot per-subject counts to
+  // localStorage (counts only, no titles — and only for authenticated
+  // sessions, so guest sessions never seed it); while pending — or while
+  // auth is still unresolved — read it back so ONLY the workspaces that
+  // will receive rows skeleton. The key is intentionally NOT namespaced
+  // by identity: the identity key is unknowable during the loading
+  // window, which is exactly when the snapshot is needed. SSR reads none
+  // (matches the "SSR renders empty" doctrine above).
+  const LAST_KNOWN_SUBJECT_COUNTS_KEY = "pesdac:lastKnownChatsBySubject";
+  // Write-if-changed cache: the snapshot is serialized every render but
+  // localStorage is touched only when it differs from what was last
+  // written (or what's already stored) — spam-reloads with unchanged
+  // data perform zero writes. The ref seeds from storage on first use
+  // so the post-reload render compares against truth, not a blank ref.
+  // Live-empty (ready + zero customs) writes "{}" to clear stale counts;
+  // pending-empty never touches the snapshot — that is the whole point.
+  const lastWrittenSnapshotRef = useRef<string | null>(null);
+  if (chatAuth != null && typeof window !== "undefined") {
+    const liveEmpty = chatRowsLive && customs.length === 0;
+    if (customs.length > 0 || liveEmpty) {
+      const counts: Record<string, number> = {};
+      for (const c of customs)
+        counts[c.subject] = (counts[c.subject] ?? 0) + 1;
+      const serialized = JSON.stringify(counts);
+      if (lastWrittenSnapshotRef.current == null) {
+        try {
+          lastWrittenSnapshotRef.current = window.localStorage.getItem(
+            LAST_KNOWN_SUBJECT_COUNTS_KEY,
+          );
+        } catch {
+          lastWrittenSnapshotRef.current = null;
+        }
+      }
+      if (serialized !== lastWrittenSnapshotRef.current) {
+        lastWrittenSnapshotRef.current = serialized;
+        try {
+          window.localStorage.setItem(
+            LAST_KNOWN_SUBJECT_COUNTS_KEY,
+            serialized,
+          );
+        } catch {
+          // Storage failure must never wedge render — that workspace just
+          // renders no skeleton rows.
+        }
+      }
+    }
+  }
+  // Empty-flash fix: `shouldShowChatListSkeleton` (frozen) requires
+  // `authenticated`, but `useAuth` stays "loading" until the live session
+  // check resolves — that whole window painted the real empty list, so
+  // reloads read as "I have no chats" before the skeleton ever appeared.
+  // Cover the unresolved window too; `skeletonRowsFor` returns 0 without
+  // a snapshot, so first-timers see zero skeletons, and known guests never
+  // skeleton (`showWorkspaceSkeleton` is false once status resolves). The
+  // irreducible residue: an unresolved window on a browser holding a stale
+  // snapshot may flash rows that vanish when the session proves guest.
+  const authUnresolved = authState.status === "loading";
+  const showWorkspaceSkeleton = showChatListSkeleton || authUnresolved;
+  let lastKnownBySubject: Record<string, number> = {};
+  if (showWorkspaceSkeleton && typeof window !== "undefined") {
+    try {
+      lastKnownBySubject =
+        (JSON.parse(
+          window.localStorage.getItem(LAST_KNOWN_SUBJECT_COUNTS_KEY) ?? "{}",
+        ) as Record<string, number>) ?? {};
+    } catch {
+      lastKnownBySubject = {};
+    }
+  }
+  const skeletonRowsFor = (subject: string): number =>
+    showWorkspaceSkeleton
+      ? Math.min(Math.max(lastKnownBySubject[subject] ?? 0, 0), 3)
+      : 0;
+
   const [mode, setMode] = useState<string | null>(
     initialSubjectValue ?? "auto",
   );
@@ -844,6 +932,12 @@ const LOGOUT_TIMEOUT_MS = 15000;
   useEffect(() => {
     const chat =
       initialCode != null ? getChatByCode(initialCode) : null;
+    const customCode =
+      chat == null &&
+      initialCode != null &&
+      isChatCodeFormat(initialCode)
+        ? initialCode
+        : null;
     const subject =
       chat?.subject ?? (isSubject(initialSubject) ? initialSubject : null);
     // Direct /profile load (or deep link like /profile#study): open the
@@ -852,7 +946,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
       openProfile(tabFromHash());
     }
     setSelectedChat(chat?.label ?? null);
-    setDraftCode(null);
+    setDraftCode(customCode);
     setDraftAutoSend(null);
     setCategory(subject);
     setMode(subject ?? "auto");
@@ -936,6 +1030,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
         if (draftCode === target.id) {
           setDraftCode(null);
           setDraftAutoSend(null);
+          navigate("/new");
         }
         setDeleteTarget(null);
       });
@@ -948,6 +1043,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
         if (draftCode === target.id) {
           setDraftCode(null);
           setDraftAutoSend(null);
+          navigate("/new");
         }
       } else {
         archiveChat({ kind: "demo", id: target.id });
@@ -981,6 +1077,11 @@ const LOGOUT_TIMEOUT_MS = 15000;
       setDraftCode(ref.id);
       setDraftAutoSend(null);
       setSelectedChat(null);
+      const subject =
+        customs.find((c) => c.code === ref.id)?.subject ?? "CN";
+      navigate(
+        buildChatPath(isSubject(subject) ? subject : "CN", ref.id),
+      );
     } else {
       openConversation(ref.id);
     }
@@ -998,6 +1099,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
         if (ref.kind === "custom" && draftCode === ref.id) {
           setDraftCode(null);
           setDraftAutoSend(null);
+          navigate("/new");
         }
         if (ref.kind === "demo" && selectedChat === ref.id) {
           navigate("/new");
@@ -1018,6 +1120,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
         if (ok && draftCode === ref.id) {
           setDraftCode(null);
           setDraftAutoSend(null);
+          navigate("/new");
         }
       } finally {
         setRowPending(key, false);
@@ -1189,6 +1292,9 @@ const LOGOUT_TIMEOUT_MS = 15000;
       revokeStaged(staged);
       setDraftCode(chat.code);
       setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
+      navigate(
+        buildChatPath(isSubject(subject) ? subject : "CN", chat.code),
+      );
       return;
     }
     // Authenticated path: the server row is created first (no temp code
@@ -1208,6 +1314,9 @@ const LOGOUT_TIMEOUT_MS = 15000;
       revokeStaged(staged);
       setDraftCode(chat.code);
       setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
+      navigate(
+        buildChatPath(isSubject(subject) ? subject : "CN", chat.code),
+      );
     });
   };
 
@@ -1539,25 +1648,13 @@ const LOGOUT_TIMEOUT_MS = 15000;
                     );
                   })}
                   {showChatListSkeleton && (
-                    <ChatListSkeleton
-                      rows={
-                        pinnedRows.filter((r) => r.ref.kind === "custom").length
-                      }
-                    />
+                    <ChatListSkeleton rows={skeletonRows} />
                   )}
                 </VStack>
               </SideNavSection>
             )}
 
             <SideNavSection title="Subjects" isHeaderHidden>
-              {/* Cold-load placeholder: memory is empty before the first
-                  hydrate, so per-row skeletons would render nothing — a
-                  fixed 2-row block keeps the sidebar visibly loading while
-                  the gate holds. Unmounts on ready (ready-empty renders the
-                  real empty list, never a skeleton). */}
-              {showChatListSkeleton && customs.length === 0 && (
-                <ChatListSkeleton rows={2} />
-              )}
               {WORKSPACES.map((workspace) => {
                 const demoChats = workspace.chats.filter(
                   (chat) =>
@@ -1623,14 +1720,22 @@ const LOGOUT_TIMEOUT_MS = 15000;
                               setDraftCode(c.code);
                               setDraftAutoSend(null);
                               setSelectedChat(null);
+                              navigate(
+                                buildChatPath(
+                                  isSubject(c.subject) ? c.subject : "CN",
+                                  c.code,
+                                ),
+                              );
                             }}
                             menu={listedMenu(ref, c.title)}
                           />
                         );
                       })
-                      ) : (
-                        <ChatListSkeleton rows={workspaceCustoms.length} />
-                      )}
+                      ) : showWorkspaceSkeleton ? (
+                        <ChatListSkeleton
+                          rows={skeletonRowsFor(workspace.name)}
+                        />
+                      ) : null}
                     </VStack>
                   </SideNavItem>
                 );
@@ -1657,12 +1762,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                     );
                   })}
                   {showChatListSkeleton && (
-                    <ChatListSkeleton
-                      rows={
-                        archivedRows.filter((r) => r.ref.kind === "custom")
-                          .length
-                      }
-                    />
+                    <ChatListSkeleton rows={skeletonRows} />
                   )}
                 </VStack>
               </SideNavSection>
