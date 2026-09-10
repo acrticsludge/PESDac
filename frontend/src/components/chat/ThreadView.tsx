@@ -797,10 +797,12 @@ export default function ThreadView({
     isHistoryLoading === true ||
     shouldShowThreadSkeleton(isBacked, historyStatus, overlay.length);
   // Persistent sync-error surface (chat-error-display spec §4): per-chat
-  // history/persist failures win; the provisional deep-link thread (never
-  // backed, empty paint, list never landed) falls back to the hydrate
-  // error. 401s record neither (global re-login owns them); guests and
-  // demos never set either signal, so both stay null there.
+  // history/persist failures win; any authenticated thread otherwise falls
+  // back to the hydrate error — a failed hydrate means the list leg never
+  // landed, so no backed chat can exist and every visible composer should
+  // say so (demo threads included: their turns still send memory-only).
+  // 401s record neither (global re-login owns them); guests stay null
+  // (chatAuth null → zero fetches on the guest path).
   const chatSyncError = getChatSyncError(sessionKey);
   const isProvisionalHistory =
     !isBacked &&
@@ -809,7 +811,7 @@ export default function ThreadView({
     thread.blocks.length === 0 &&
     getChatHydrateFailed();
   const syncErrorMessage =
-    chatSyncError ?? (isProvisionalHistory ? getHydrateSyncError() : null);
+    chatSyncError ?? (chatAuth != null ? getHydrateSyncError() : null);
   // Loader suppression: a recorded sync error unmounts the loader and the
   // memory paint shows. Retry clears the signal first, so the spinner
   // honestly returns only for the new fetch.
