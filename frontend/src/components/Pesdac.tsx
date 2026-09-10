@@ -826,21 +826,15 @@ const LOGOUT_TIMEOUT_MS = 15000;
   const isChatReady = chatReady(chatAuth, getChatHydratedKey());
   const chatRowsLive = isUserReady && isChatReady;
 
-  // Chat skeleton loading (spec §6 FR2): use predicate + row-count clamp
+  // Chat skeleton loading: frozen predicate (session.ts) decides the
+  // window; Pinned/Archived/Subjects sections use their own snapshot
+  // counts below — never a shared global total.
   const hydratePending = getChatHydratePending();
   const showChatListSkeleton = shouldShowChatListSkeleton(
     authState.status,
     hydratePending,
     customs.length,
   );
-  const lastKnownCustomsRef = useRef(customs.length);
-  // Update lastKnown when we have customs (pre-hydrate snapshot)
-  if (customs.length > 0) {
-    lastKnownCustomsRef.current = customs.length;
-  }
-  const skeletonRows = showChatListSkeleton
-    ? Math.min(Math.max(lastKnownCustomsRef.current ?? 1, 1), 3)
-    : 0;
 
   // Per-workspace skeleton placement (fan-out fix): the session store is
   // memory-backed, so on reload the per-subject distribution is unknowable
@@ -854,6 +848,12 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // window, which is exactly when the snapshot is needed. SSR reads none
   // (matches the "SSR renders empty" doctrine above).
   const LAST_KNOWN_SUBJECT_COUNTS_KEY = "pesdac:lastKnownChatsBySubject";
+  // Pinned/Archived loader counts (spec FR1): transient localStorage
+  // counts only, no titles — same write/read lifecycle as the subject
+  // snapshot above. Pinned = pinned && !archived customs; archived =
+  // archived customs (archived wins when both flags hold).
+  const LAST_KNOWN_PINNED_COUNT_KEY = "pesdac:lastKnownPinnedCount";
+  const LAST_KNOWN_ARCHIVED_COUNT_KEY = "pesdac:lastKnownArchivedCount";
   // Write-if-changed cache: the snapshot is serialized every render but
   // localStorage is touched only when it differs from what was last
   // written (or what's already stored) — spam-reloads with unchanged
@@ -862,12 +862,55 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // Live-empty (ready + zero customs) writes "{}" to clear stale counts;
   // pending-empty never touches the snapshot — that is the whole point.
   const lastWrittenSnapshotRef = useRef<string | null>(null);
+  // Write-if-changed caches for the pinned/archived counts — same
+  // zero-write-on-unchanged-data rule as the subject snapshot above.
+  // Live-empty clears all three snapshots (write 0, 0); pending-empty
+  // never touches any snapshot.
+  const lastWrittenPinnedRef = useRef<number | null>(null);
+  const lastWrittenArchivedRef = useRef<number | null>(null);
+  const writeCountSnapshot = (
+    key: string,
+    ref: { current: number | null },
+    value: number,
+  ) => {
+    if (ref.current == null) {
+      try {
+        const stored = window.localStorage.getItem(key);
+        ref.current = stored == null ? Number.NaN : Number(stored);
+      } catch {
+        ref.current = null;
+      }
+    }
+    if (value !== ref.current) {
+      ref.current = value;
+      try {
+        window.localStorage.setItem(key, String(value));
+      } catch {
+        // Storage failure must never wedge render — that section just
+        // renders no skeleton rows.
+      }
+    }
+  };
   if (chatAuth != null && typeof window !== "undefined") {
     const liveEmpty = chatRowsLive && customs.length === 0;
     if (customs.length > 0 || liveEmpty) {
       const counts: Record<string, number> = {};
-      for (const c of customs)
+      let pinnedCount = 0;
+      let archivedCount = 0;
+      for (const c of customs) {
+        // Workspace counts exclude pinned/archived customs — the live
+        // workspace lists exclude them too, so skeleton bars never paint
+        // in a workspace for rows that will land in Pinned/Archived.
+        if (isArchivedHere({ kind: "custom", id: c.code })) {
+          archivedCount += 1;
+          continue;
+        }
+        if (isPinnedHere({ kind: "custom", id: c.code })) {
+          pinnedCount += 1;
+          continue;
+        }
         counts[c.subject] = (counts[c.subject] ?? 0) + 1;
+      }
       const serialized = JSON.stringify(counts);
       if (lastWrittenSnapshotRef.current == null) {
         try {
@@ -890,6 +933,16 @@ const LOGOUT_TIMEOUT_MS = 15000;
           // renders no skeleton rows.
         }
       }
+      writeCountSnapshot(
+        LAST_KNOWN_PINNED_COUNT_KEY,
+        lastWrittenPinnedRef,
+        pinnedCount,
+      );
+      writeCountSnapshot(
+        LAST_KNOWN_ARCHIVED_COUNT_KEY,
+        lastWrittenArchivedRef,
+        archivedCount,
+      );
     }
   }
   // Empty-flash fix: `shouldShowChatListSkeleton` (frozen) requires
@@ -903,7 +956,18 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // snapshot may flash rows that vanish when the session proves guest.
   const authUnresolved = authState.status === "loading";
   const showWorkspaceSkeleton = showChatListSkeleton || authUnresolved;
+  const readCountSnapshot = (key: string): number => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      const parsed = raw == null ? 0 : Number(raw);
+      return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+    } catch {
+      return 0;
+    }
+  };
   let lastKnownBySubject: Record<string, number> = {};
+  let lastKnownPinnedCount = 0;
+  let lastKnownArchivedCount = 0;
   if (showWorkspaceSkeleton && typeof window !== "undefined") {
     try {
       lastKnownBySubject =
@@ -913,11 +977,21 @@ const LOGOUT_TIMEOUT_MS = 15000;
     } catch {
       lastKnownBySubject = {};
     }
+    lastKnownPinnedCount = readCountSnapshot(LAST_KNOWN_PINNED_COUNT_KEY);
+    lastKnownArchivedCount = readCountSnapshot(LAST_KNOWN_ARCHIVED_COUNT_KEY);
   }
   const skeletonRowsFor = (subject: string): number =>
     showWorkspaceSkeleton
       ? Math.min(Math.max(lastKnownBySubject[subject] ?? 0, 0), 3)
       : 0;
+  // Pinned/Archived use their own snapshot counts — never the global
+  // total. Zero snapshot → zero rows (never fake rows to fill space).
+  const pinnedSkeletonRows = showWorkspaceSkeleton
+    ? Math.min(Math.max(lastKnownPinnedCount, 0), 3)
+    : 0;
+  const archivedSkeletonRows = showWorkspaceSkeleton
+    ? Math.min(Math.max(lastKnownArchivedCount, 0), 3)
+    : 0;
 
   const [mode, setMode] = useState<string | null>(
     initialSubjectValue ?? "auto",
@@ -1638,7 +1712,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
 
             {/* Subjects */}
 
-            {pinnedRows.length > 0 && (
+            {(pinnedRows.length > 0 || pinnedSkeletonRows > 0) && (
               <SideNavSection title="Pinned">
                 <VStack gap={0.5}>
                   {pinnedRows.map(({ ref, title }) => {
@@ -1658,8 +1732,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
                       />
                     );
                   })}
-                  {showChatListSkeleton && (
-                    <ChatListSkeleton rows={skeletonRows} />
+                  {showWorkspaceSkeleton && (
+                    <ChatListSkeleton rows={pinnedSkeletonRows} withIcon />
                   )}
                 </VStack>
               </SideNavSection>
@@ -1753,7 +1827,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
               })}
             </SideNavSection>
 
-            {archivedRows.length > 0 && (
+            {(archivedRows.length > 0 || archivedSkeletonRows > 0) && (
               <SideNavSection title="Archived">
                 <VStack gap={0.5}>
                   {archivedRows.map(({ ref, title }) => {
@@ -1772,8 +1846,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
                       />
                     );
                   })}
-                  {showChatListSkeleton && (
-                    <ChatListSkeleton rows={skeletonRows} />
+                  {showWorkspaceSkeleton && (
+                    <ChatListSkeleton rows={archivedSkeletonRows} />
                   )}
                 </VStack>
               </SideNavSection>
