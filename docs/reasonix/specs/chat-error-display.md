@@ -48,6 +48,10 @@ Reference (user-supplied Astryx pattern):
 * Error (backend/sync): `status={{ type: "error", message }} statusPosition="top"`.
 * Warning (rate-limit, storage, corrupt): existing `{ type: "warning" }` bottom position, unchanged.
 * Precedence (thread + welcome composer): `sendError > syncError > storage/corrupt`.
+* Thread fallback scope (fix 2026-09-10): per-chat error wins; otherwise any
+  authenticated thread composer falls back to the hydrate error (demo threads
+  included — their turns still send memory-only). A failed hydrate means the
+  list leg never landed, so no backed chat can exist; guests stay clean.
 * Message copy reuses the existing toast strings (single source), e.g. history: `Couldn't load this chat's history. Showing what's on this device.`
 * Error clears on: next successful send, successful history reload/hydrate, or chat switch (remount). Never on a timer.
 * Failed history renders the memory paint + a Retry affordance; spinner never re-appears without a new fetch.
