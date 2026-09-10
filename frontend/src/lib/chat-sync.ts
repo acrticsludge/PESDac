@@ -14,6 +14,12 @@ export type ServerChat = {
   isArchived: boolean;
   createdAt: string;
   updatedAt: string;
+  // Lean-list columns (migration 0007, Stream A). Optional: rows served
+  // from branches without the migration omit them — callers fall back to
+  // title-only rows + full-window loads (spec §13), never stubbed data.
+  preview?: string;
+  msgCount?: number;
+  lastSeq?: number;
 };
 
 /** Server message row (backend `MessageOut`). `seq` is server-assigned. */
@@ -26,10 +32,40 @@ export type ServerMessage = {
 };
 
 /** List envelope shared by the chats/messages list + delete-all endpoints. */
-type ListEnvelope<T> = {
+export type ListEnvelope<T> = {
   data: T;
   pagination: { limit: number; offset: number; total: number };
 };
+
+/** Server-side list filters (spec FR2/FR3). Omitted/blank keys send nothing. */
+export type ChatListQuery = {
+  archived?: boolean;
+  subject?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+};
+
+/** Windowed message reads (spec FR2): open `limit=50, offset=max(0,total-50)`. */
+export type MessagePageQuery = {
+  limit?: number;
+  offset?: number;
+};
+
+function encodeQuery(
+  params: Record<string, string | number | boolean | undefined>,
+): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined) continue;
+    const trimmed = typeof value === "string" ? value.trim() : value;
+    if (typeof trimmed === "string" && trimmed === "") continue;
+    parts.push(
+      `${encodeURIComponent(key)}=${encodeURIComponent(String(trimmed))}`,
+    );
+  }
+  return parts.length > 0 ? `?${parts.join("&")}` : "";
+}
 
 function chatPath(code: string): string {
   return `/chats/${encodeURIComponent(code)}`;
@@ -40,9 +76,24 @@ function messagesPath(code: string): string {
 }
 
 /** List owned chat containers (server wins; replaces memory customs). */
-export async function apiListChats(): Promise<ServerChat[]> {
-  const res = await apiFetch<ListEnvelope<ServerChat[]>>("/chats");
-  return res.data;
+export async function apiListChats(
+  query?: ChatListQuery,
+): Promise<ServerChat[]> {
+  return (await apiListChatsPage(query)).data;
+}
+
+/** Same list leg with the `{data, pagination}` envelope (counts/windowing). */
+export async function apiListChatsPage(
+  query?: ChatListQuery,
+): Promise<ListEnvelope<ServerChat[]>> {
+  const qs = encodeQuery({
+    archived: query?.archived,
+    subject: query?.subject,
+    q: query?.q,
+    limit: query?.limit,
+    offset: query?.offset,
+  });
+  return apiFetch<ListEnvelope<ServerChat[]>>(`/chats${qs}`);
 }
 
 /** Create a chat container. */
@@ -83,11 +134,18 @@ export async function apiClearChats(): Promise<{ deleted: number }> {
 /** List a chat's messages ascending by `seq` (returns the `data` array). */
 export async function apiListMessages(
   code: string,
+  query?: MessagePageQuery,
 ): Promise<ServerMessage[]> {
-  const res = await apiFetch<ListEnvelope<ServerMessage[]>>(
-    messagesPath(code),
-  );
-  return res.data;
+  return (await apiListMessagesPage(code, query)).data;
+}
+
+/** Same messages leg with the `{data, pagination}` envelope (windowing). */
+export async function apiListMessagesPage(
+  code: string,
+  query?: MessagePageQuery,
+): Promise<ListEnvelope<ServerMessage[]>> {
+  const qs = encodeQuery({ limit: query?.limit, offset: query?.offset });
+  return apiFetch<ListEnvelope<ServerMessage[]>>(`${messagesPath(code)}${qs}`);
 }
 
 /** Append one turn (`seq` assigned server-side). */
