@@ -106,6 +106,11 @@ export function buildChatPath(subject: Subject, code: string): string {
   return `/subject/${subject}/${code}`;
 }
 
+/** 6-char lowercase-alnum chat code (demo constants + `genCode` customs share it). */
+export function isChatCodeFormat(code: string | undefined): code is string {
+  return typeof code === "string" && /^[a-z0-9]{6}$/.test(code);
+}
+
 export function getAllChatPaths(): Array<{ subject: Subject; code: string }> {
   return Object.entries(CHAT_CODES).map(([label, code]) => ({
     subject: getChatSubject(label),
