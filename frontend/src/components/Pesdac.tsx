@@ -958,6 +958,17 @@ const LOGOUT_TIMEOUT_MS = 15000;
     setIsModeMenuOpen(false);
   }, [initialSubject, initialCode, initialView]);
 
+  // Dead deep link: the URL names a custom chat the ready store doesn't
+  // have (deleted or unknown code). Bounce to /new instead of stranding
+  // the welcome composer on a chat URL. Runs only when the store is live,
+  // so in-app opens (chat written before draftCode is set) never trip it.
+  useEffect(() => {
+    if (!chatRowsLive) return;
+    if (draftCode == null) return;
+    if (customs.some((c) => c.code === draftCode)) return;
+    navigate("/new");
+  }, [chatRowsLive, customs, draftCode]);
+
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
 
   // Unsent welcome text survives reloads (debounced; send clears it).
@@ -1780,8 +1791,25 @@ const LOGOUT_TIMEOUT_MS = 15000;
               ? (customs.find((c) => c.code === draftCode) ?? null)
               : null;
           const draftThread = draftChat ? makeDraftThread(draftChat) : null;
+          // Deep-link pending: the URL names a custom chat the store
+          // hasn't resolved yet (cold refresh before hydrate lands).
+          // Render the real thread shell with skeleton turns — never the
+          // /new welcome composer (that composer lives strictly on /new).
+          // Provisional carries URL-known fields only; the title lands on
+          // hydrate under the same key, so no remount and no composer swap.
+          const deepLinkPending =
+            draftCode != null && draftChat == null && !chatRowsLive;
+          const provisionalThread = deepLinkPending
+            ? makeDraftThread({
+                code: draftCode,
+                subject: isSubject(initialSubject) ? initialSubject : "CN",
+                title: "",
+                createdAt: new Date().toISOString(),
+              })
+            : null;
           const thread =
             draftThread ??
+            provisionalThread ??
             (selectedChat != null ? getThread(selectedChat) : null);
           const key =
             draftCode ??
@@ -1794,6 +1822,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
               thread={thread}
               sessionKey={key}
               autoSend={draftThread ? (draftAutoSend ?? undefined) : undefined}
+              isHistoryLoading={provisionalThread != null}
               notify={notifyChat}
               // App readiness gate (spec §4): the thread skeletons and
               // disables its composer while user data loads.
