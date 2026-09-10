@@ -62,6 +62,11 @@ class ChatOut(BaseModel):
     isArchived: bool
     createdAt: str
     updatedAt: str
+    # Lean-list columns (chat-history-lean-storage FR2, migration 0007).
+    # Defaulted so pre-0007 payloads/shapes stay valid (rollback-safe).
+    preview: str = ""
+    msgCount: int = 0
+    lastSeq: int = 0
 
 
 class ChatListOut(BaseModel):
