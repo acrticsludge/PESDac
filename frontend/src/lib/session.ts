@@ -286,6 +286,28 @@ function parseRefKey(key: string): ChatRef | null {
 const PINS_KEY = "pesdac-pins-v1";
 const ARCHIVE_KEY = "pesdac-archived-v1";
 
+// Skeleton snapshot keys (single-sourced here; Pesdac imports them). Counts
+// only, no titles. Wiped on every identity transition by
+// `resetChatStoreForIdentity` — never namespaced (the loading window can't
+// know the identity, and a last-user pointer would reintroduce the leak).
+export const LAST_KNOWN_SUBJECT_COUNTS_KEY = "pesdac:lastKnownChatsBySubject";
+export const LAST_KNOWN_PINNED_COUNT_KEY = "pesdac:lastKnownPinnedCount";
+export const LAST_KNOWN_ARCHIVED_COUNT_KEY = "pesdac:lastKnownArchivedCount";
+export const LAST_KNOWN_SNAPSHOT_AT_KEY = "pesdac:lastKnownSnapshotAt";
+
+/** Drop all skeleton snapshot keys (transition wipe; never wedges). */
+export function clearChatSnapshotKeys(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(LAST_KNOWN_SUBJECT_COUNTS_KEY);
+    window.localStorage.removeItem(LAST_KNOWN_PINNED_COUNT_KEY);
+    window.localStorage.removeItem(LAST_KNOWN_ARCHIVED_COUNT_KEY);
+    window.localStorage.removeItem(LAST_KNOWN_SNAPSHOT_AT_KEY);
+  } catch {
+    // Storage denied — snapshots simply stay absent.
+  }
+}
+
 function readKeys(key: string): string[] {
   return readJSON<string[]>(key, []);
 }
@@ -515,6 +537,11 @@ export function updateProfile(patch: Partial<Profile>) {
 // plus an identity key so a stale user-A resolve can never seed user-B.
 let profileSeedPending = false;
 let seededIdentityKey: string | null = null;
+// Attribution tag for login-path preserves (P0-4 stale-tab residual): the
+// seeded identity at the moment `resetChatStoreForIdentity` kept guest rows
+// (null for genuine guest heaps). `hydrateChats` drops the kept rows when
+// this tag names another identity.
+let preservedGuestSeedKey: string | null = null;
 
 /** True while the server→local profile seed fetch is in flight. */
 export function getProfileSeedPending(): boolean {
@@ -1124,6 +1151,13 @@ export async function loadChatMessages(
   emit();
   try {
     const rows = await apiListMessages(code);
+    // P0-3: an identity transition since dispatch clears messageStates —
+    // a missing or identity-mismatched entry proves this resolve is stale
+    // (previous identity's turns). Drop it instead of painting over the
+    // new identity's store. (Phase 2 generalizes this to epoch guards.)
+    if (messageStates.get(code)?.identityKey !== auth.identityKey) {
+      return getOverlay(code);
+    }
     const blocks = rows
       .map(messageToBlock)
       .filter((b): b is Block => b !== null);
@@ -1133,6 +1167,16 @@ export async function loadChatMessages(
     emit();
     return blocks;
   } catch (error) {
+    // Stale-drop (P0-3) applies to non-401 failures only. Our own 401
+    // routes through clearAuthCache — which resets this state — yet must
+    // still record the pinned failed status silently (the global re-login
+    // flow owns recovery). Auth failures paint no overlay either way, so
+    // bypassing the drop here cannot leak turns across identities.
+    if (!isAuthFailure(error)) {
+      if (messageStates.get(code)?.identityKey !== auth.identityKey) {
+        return getOverlay(code);
+      }
+    }
     messageStates.set(code, { status: "failed", identityKey: auth.identityKey });
     emit();
     notifyFailure(
@@ -1272,6 +1316,29 @@ export async function hydrateChats(
 ): Promise<HydrateResult> {
   if (auth == null) return { status: "guest" };
   if (chatHydratedKey === auth.identityKey) return { status: "already" };
+  // P0-1/P0-4 ordering: capture genuine guest adopt-candidates BEFORE the
+  // reset. Post-logout leftovers carry server flags, so the capture skips
+  // them — they are dropped by the reset and never adoptable. Kept rows are
+  // restored only when the preserve tag is absent (genuine guest heap) or
+  // names this identity; a foreign tag proves a stale heap and drops them
+  // (rows, overlays, and their refs — never adopted, never painted).
+  // The reset preserves `c:` refs here: same-identity first-sync migration
+  // input, retired by the migration below once consumed.
+  const guests = captureTrueGuestChats();
+  const keepPreservedGuests =
+    preservedGuestSeedKey == null ||
+    preservedGuestSeedKey === auth.identityKey;
+  preservedGuestSeedKey = null;
+  resetChatStoreForIdentity({ preserveCustomRefs: true });
+  if (keepPreservedGuests) {
+    restoreTrueGuestChats(guests);
+  } else {
+    const dropped = new Set(guests.chats.map((c) => c.code));
+    const dropRef = (k: string) =>
+      !(k.startsWith("c:") && dropped.has(k.slice(2)));
+    writeJSON(PINS_KEY, readKeys(PINS_KEY).filter(dropRef));
+    writeJSON(ARCHIVE_KEY, readKeys(ARCHIVE_KEY).filter(dropRef));
+  }
   // Set hydrate pending after guest/already early-returns (identity-guarded)
   setChatHydratePending(true, auth.identityKey);
   // Order ops: adopt FIRST, then hydrate-replace — an adopted chat is
@@ -1302,8 +1369,13 @@ export async function hydrateChats(
   writeJSON(CHATS_KEY, [...server.map(fromServerChat), ...pending]);
   await migratePinArchiveFlags(serverCodes, opts);
   // Turn caches belong to the previous world — drop them so turns reload
-  // against the hydrated list.
-  messageStates.clear();
+  // against the hydrated list. In-flight (`loading`) entries survive: their
+  // resolve belongs to this identity and must still paint (same-identity
+  // hydrate/load race — dropping it would strand an empty thread with no
+  // Retry); anything older died in the start-of-hydrate reset.
+  for (const [code, state] of messageStates) {
+    if (state.status !== "loading") messageStates.delete(code);
+  }
   chatHydratedKey = auth.identityKey;
   if (hydrateSyncError != null) {
     hydrateSyncError = null;
@@ -1311,6 +1383,109 @@ export async function hydrateChats(
   setChatHydratePending(false, auth.identityKey);
   emit();
   return { status: "ready" };
+}
+
+/**
+ * Identity-scoped store reset (caching Fix 1 — kills P0-1…P0-5 + P2-5).
+ * Drops every identity-owned chat cache so the next identity starts from a
+ * clean store: chat rows, overlays, `c:` pin/archive refs (unless
+ * `preserveCustomRefs`), message states, hydrate markers + pending bit, all
+ * three error signals, drafts, and the skeleton snapshot keys.
+ *
+ * Device-level state is never touched: the profile store (owned by
+ * `clearLocalProfileSeed`), demo overrides, `d:` pin/archive refs, and
+ * feedback votes all survive. Called from the auth choke point
+ * (`clearAuthCache`) on every identity transition; `hydrateChats`
+ * capture→reset→adopt ordering relies on it (genuine guest rows are
+ * captured before, adopted after).
+ *
+ * `preserveTrueGuests` (login path only): genuine guest rows — no server
+ * flags, never synced — survive the reset with their overlays and `c:`
+ * refs, so `hydrateChats` can adopt them afterwards. Post-logout leftovers
+ * carry server flags and are never preserved. Logout/401/delete always use
+ * the default full wipe.
+ */
+export function resetChatStoreForIdentity(
+  opts: { preserveTrueGuests?: boolean; preserveCustomRefs?: boolean } = {},
+): void {
+  const guests =
+    opts.preserveTrueGuests === true ? captureTrueGuestChats() : null;
+  if (opts.preserveTrueGuests === true) {
+    // Tag the kept rows with the currently-seeded identity (null for genuine
+    // guest heaps). `hydrateChats` drops them when the tag names another
+    // identity — a stale heap signed in elsewhere must never adopt.
+    preservedGuestSeedKey = getSeededIdentityKey();
+  }
+  mem.delete(CHATS_KEY);
+  mem.delete(OVERLAY_KEY);
+  mem.delete(DRAFTS_KEY);
+  clearChatSnapshotKeys();
+  // Custom refs retire on transitions (a new identity must never see them);
+  // `hydrateChats` opts out to preserve same-identity migration input.
+  if (opts.preserveCustomRefs !== true) {
+    writeJSON(
+      PINS_KEY,
+      readKeys(PINS_KEY).filter((k) => !k.startsWith("c:")),
+    );
+    writeJSON(
+      ARCHIVE_KEY,
+      readKeys(ARCHIVE_KEY).filter((k) => !k.startsWith("c:")),
+    );
+  }
+  chatHydratedKey = null;
+  chatHydratePending = false;
+  chatHydrateIdentityKey = null;
+  messageStates.clear();
+  hydrateSyncError = null;
+  chatSyncErrors.clear();
+  createSyncError = null;
+  if (guests != null) restoreTrueGuestChats(guests);
+  emit();
+}
+
+type TrueGuestSnapshot = {
+  chats: CustomChat[];
+  overlays: Record<string, Block[]>;
+  pins: string[];
+  archived: string[];
+};
+
+/** Capture never-synced guest rows (absence of server flags is the
+ *  guest-originated marker — post-logout leftovers always carry flags). */
+function captureTrueGuestChats(): TrueGuestSnapshot {
+  const chats = listCustomChats().filter((c) => c.updatedAt === undefined);
+  const codes = new Set(chats.map((c) => c.code));
+  const allOverlays = readJSON<Record<string, Block[]>>(OVERLAY_KEY, {});
+  const overlays: Record<string, Block[]> = {};
+  for (const code of codes) {
+    const blocks = allOverlays[code];
+    if (blocks != null) overlays[code] = blocks;
+  }
+  const guestRef = (k: string) => k.startsWith("c:") && codes.has(k.slice(2));
+  return {
+    chats,
+    overlays,
+    pins: readKeys(PINS_KEY).filter(guestRef),
+    archived: readKeys(ARCHIVE_KEY).filter(guestRef),
+  };
+}
+
+/** Restore a captured guest snapshot after the wipe (login path only). Refs
+ *  already present (preserved `c:` refs) are not duplicated. */
+function restoreTrueGuestChats(snapshot: TrueGuestSnapshot): void {
+  if (snapshot.chats.length === 0) return;
+  writeJSON(CHATS_KEY, snapshot.chats);
+  writeJSON(OVERLAY_KEY, snapshot.overlays);
+  const pins = readKeys(PINS_KEY);
+  const archived = readKeys(ARCHIVE_KEY);
+  writeJSON(PINS_KEY, [
+    ...pins,
+    ...snapshot.pins.filter((k) => !pins.includes(k)),
+  ]);
+  writeJSON(ARCHIVE_KEY, [
+    ...archived,
+    ...snapshot.archived.filter((k) => !archived.includes(k)),
+  ]);
 }
 
 // ---- Test hooks -------------------------------------------------------------
@@ -1327,4 +1502,5 @@ export function __resetChatBackingForTesting(): void {
   hydrateSyncError = null;
   chatSyncErrors.clear();
   createSyncError = null;
+  preservedGuestSeedKey = null;
 }

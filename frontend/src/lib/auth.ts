@@ -3,7 +3,7 @@ import "./buffer-polyfill.ts"; // Must load before any auth module that uses Buf
 
 import { useEffect, useState } from "react";
 import { authClient } from "./auth-client.ts";
-import { clearLocalProfileSeed } from "./session.ts";
+import { clearLocalProfileSeed, resetChatStoreForIdentity } from "./session.ts";
 import {
   mintTokenWithRetry,
   sharedTaggedFetch,
@@ -371,13 +371,14 @@ export async function signIn(email: string, password: string) {
   // User-A → user-B transition safety (T28): every successful sign-in
   // is a different identity. The cached /auth/me + accounts promises
   // could still belong to user-A; drop them so the next reader doesn't
-  // paint user-B's screen with user-A's data.
-  clearAuthCache();
+  // paint user-B's screen with user-A's data. True guest rows survive
+  // for post-login adoption; everything else in the chat store is dropped.
+  clearAuthCache({ preserveTrueGuests: true });
   return authClient.signIn.email({ email, password });
 }
 
 export async function signUp(email: string, password: string, name: string) {
-  clearAuthCache();
+  clearAuthCache({ preserveTrueGuests: true });
   return authClient.signUp.email({ email, password, name });
 }
 
@@ -394,7 +395,8 @@ export async function signInWithGoogle() {
   // sign-in is a different identity. The email signIn/signUp paths
   // already drop cached /auth/me + accounts promises; social login must
   // do the same or user-A's cached rows can paint user-B's first screens.
-  clearAuthCache();
+  // True guest rows survive for post-login adoption (see signIn above).
+  clearAuthCache({ preserveTrueGuests: true });
   return authClient.signIn.social({ provider: "google" });
 }
 
@@ -1128,19 +1130,37 @@ async function getBackendToken(): Promise<TokenResult> {
  * second attempt on transient failures with a 200ms backoff (T40).
  */
 async function mintBackendTokenWithRetry(base: string): Promise<TokenResult> {
+  // P0-2: a mint started as A can resolve after the transition to B.
+  // Never let it populate the new identity's cache — the next caller
+  // re-mints under its own identity.
+  const epochAtStart = getAuthEpoch();
   const result = await mintTokenWithRetry(base, fetch, TOKEN_TIMEOUT_MS);
   if (result.reason === "ok") {
+    if (getAuthEpoch() !== epochAtStart) return result;
     cachedToken = { token: result.token, at: Date.now() };
   }
   return result;
 }
 
-/** Drop cached auth material (logout, 401, account delete). */
-export function clearAuthCache(): void {
+/**
+ * Drop cached auth material (logout, login, 401, account delete) AND the
+ * identity-owned chat store, so every transition starts clean (caching
+ * Fix 1 choke point). `inFlightToken` is dropped too — a mint started as
+ * A never feeds B's callers; they start their own mint.
+ *
+ * `preserveTrueGuests` is the login-only path: never-synced guest rows
+ * survive so `hydrateChats` can adopt them afterwards. Logout/401/delete
+ * always take the default full wipe.
+ */
+export function clearAuthCache(
+  opts: { preserveTrueGuests?: boolean } = {},
+): void {
   cachedToken = null;
+  inFlightToken = null;
   currentMeCache = null;
   currentProfileCache = null;
   currentAccountsCache = null;
+  resetChatStoreForIdentity(opts);
   bumpAuthEpoch();
 }
 
