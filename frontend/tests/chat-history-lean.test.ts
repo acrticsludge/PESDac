@@ -21,9 +21,14 @@ import {
   __setFetchForTesting,
 } from "../src/lib/auth.ts";
 import {
+  __resetChatBackingForTesting,
+  getOverlay,
+  hydrateChats,
+  loadChatMessages,
   shouldShowChatListSkeleton,
   shouldShowThreadSkeleton,
   toWireBlock,
+  type ChatAuth,
 } from "../src/lib/session.ts";
 import type { Block } from "../src/content/threads/types.ts";
 
@@ -131,17 +136,19 @@ test("toWireBlock: drops empty followUps, keeps genuine suggestions", () => {
   assert.deepEqual(kept.followUps, ["What is CIDR?"]);
 });
 
-test("toWireBlock: keeps time/footer/error.retryText (render owns them)", () => {
-  // Defect-documented: ThreadView renders block.time (:1458,1541),
-  // block.footer (:1544), and error.retryText (:1535) directly with no
-  // createdAt/fallback recompute — stripping them regresses reloads.
+test("toWireBlock: drops time/footer/retryText (render recomputes)", () => {
+  // Full FR1: `time` is re-stamped from the server `createdAt` in
+  // `messageToBlock`, ThreadView recomputes `footer ?? PESDac · subject`
+  // and `error.retryText` (last-user-text fallback) — stripped rows paint
+  // identically to live turns.
   const wire = toWireBlock(assistantFixture()) as unknown as Record<
     string,
     unknown
   >;
-  assert.equal(wire.time, "2026-09-10T00:00:00.000Z");
-  assert.equal(wire.footer, "PESDac · CN");
-  assert.deepEqual(wire.error, { kind: "failed", retryText: "Explain subnets" });
+  for (const key of ["time", "toolCallsExpanded", "toolCallsAfter", "footer"]) {
+    assert.ok(!(key in wire), `${key} must be stripped`);
+  }
+  assert.deepEqual(wire.error, { kind: "failed" });
 });
 
 test("toWireBlock: never mutates the memory paint", () => {
@@ -168,6 +175,159 @@ test("toWireBlock: artifactId-only bubbles + metadata-only attachments", () => {
     /"(markdown|data|base64|blob|url)"/g,
   );
   assert.equal(blobKeys, null);
+});
+
+// ---- Reload recompute -------------------------------------------------------
+// The memory store gates on `window` existing (SSR returns fallbacks).
+// Stubbed before any session write; each file runs in its own process
+// under `node --test`, so this cannot leak into other suites.
+if (typeof (globalThis as Record<string, unknown>).window === "undefined") {
+  (globalThis as Record<string, unknown>).window = {
+    dispatchEvent() {},
+    addEventListener() {},
+    removeEventListener() {},
+  };
+}
+
+const AUTH: ChatAuth = { userId: "u-lean-1", identityKey: "u-lean-1:3" };
+
+test("reload: stripped rows regain time from createdAt; footer stays stripped", async () => {
+  __resetAuthCachesForTesting();
+  __resetChatBackingForTesting();
+  const apiLog: ApiCall[] = [];
+  const row = {
+    code: "c-lean-r",
+    subject: "CN",
+    title: "Reload",
+    isPinned: false,
+    isArchived: false,
+    createdAt: "2026-09-10T00:00:00.000Z",
+    updatedAt: "2026-09-10T00:01:00.000Z",
+  };
+  const seedRestore = __setFetchForTesting(
+    makeRouter(
+      [() => tokenOk("t-lean-seed")],
+      [
+        () =>
+          apiJson({
+            data: [row],
+            pagination: { limit: 50, offset: 0, total: 1 },
+          }),
+      ],
+      apiLog,
+    ),
+  );
+  try {
+    assert.deepEqual(await hydrateChats(AUTH), { status: "ready" });
+  } finally {
+    seedRestore();
+  }
+  // Stored exactly as the wire strip leaves them: no time/footer/retryText.
+  const createdAt = "2026-09-10T00:02:00.000Z";
+  const storedUser = { from: "user", bubbles: [{ type: "text", text: "Q" }] };
+  const storedAsst = {
+    from: "assistant",
+    bubbles: [{ type: "markdown", md: "A" }],
+    error: { kind: "failed" },
+  };
+  const loadRestore = __setFetchForTesting(
+    makeRouter(
+      [() => tokenOk("t-lean-load")],
+      [
+        () =>
+          apiJson({
+            data: [
+              { id: "m-lean-1", seq: 0, role: "user", content: storedUser, createdAt },
+              { id: "m-lean-2", seq: 1, role: "assistant", content: storedAsst, createdAt },
+            ],
+            pagination: { limit: 50, offset: 0, total: 2 },
+          }),
+      ],
+      apiLog,
+    ),
+  );
+  try {
+    const blocks = await loadChatMessages("c-lean-r", AUTH);
+    assert.equal(blocks.length, 2);
+    for (const b of blocks) {
+      const rec = b as unknown as Record<string, unknown>;
+      // Render never sees an undefined Timestamp...
+      assert.equal(rec.time, createdAt);
+      // ...and the footer stays server-lean (ThreadView recomputes it).
+      assert.ok(!("footer" in rec));
+    }
+    assert.deepEqual(getOverlay("c-lean-r"), blocks);
+  } finally {
+    loadRestore();
+  }
+});
+
+test("reload: rows that kept time pass through untouched", async () => {
+  __resetAuthCachesForTesting();
+  __resetChatBackingForTesting();
+  const apiLog: ApiCall[] = [];
+  const row = {
+    code: "c-lean-k",
+    subject: "CN",
+    title: "Kept",
+    isPinned: false,
+    isArchived: false,
+    createdAt: "2026-09-10T00:00:00.000Z",
+    updatedAt: "2026-09-10T00:00:00.000Z",
+  };
+  const seedRestore = __setFetchForTesting(
+    makeRouter(
+      [() => tokenOk("t-lean-seed2")],
+      [
+        () =>
+          apiJson({
+            data: [row],
+            pagination: { limit: 50, offset: 0, total: 1 },
+          }),
+      ],
+      apiLog,
+    ),
+  );
+  try {
+    await hydrateChats(AUTH);
+  } finally {
+    seedRestore();
+  }
+  const original = "2026-09-09T00:00:00.000Z";
+  const loadRestore = __setFetchForTesting(
+    makeRouter(
+      [() => tokenOk("t-lean-load2")],
+      [
+        () =>
+          apiJson({
+            data: [
+              {
+                id: "m-lean-3",
+                seq: 0,
+                role: "user",
+                content: {
+                  from: "user",
+                  bubbles: [{ type: "text", text: "Q" }],
+                  time: original,
+                },
+                createdAt: "2026-09-10T00:02:00.000Z",
+              },
+            ],
+            pagination: { limit: 50, offset: 0, total: 1 },
+          }),
+      ],
+      apiLog,
+    ),
+  );
+  try {
+    const blocks = await loadChatMessages("c-lean-k", AUTH);
+    assert.equal(
+      (blocks[0] as unknown as Record<string, unknown>).time,
+      original,
+    );
+  } finally {
+    loadRestore();
+  }
 });
 
 // ---- Query passthrough (same envelope) ------------------------------------

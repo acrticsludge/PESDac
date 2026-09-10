@@ -781,20 +781,24 @@ export function getChatMessagesStatus(
 // serialized Block payload (spec §3.1 content JSONB); role mirrors
 // Block.from exactly. `seq` is server-assigned — memory order stays
 // append-order and no seq is ever synthesized client-side.
-// Wire strip (chat-history-lean-storage FR1, safe subset): drop render-only
-// expansion state before POST so it is never stored in JSONB + TOAST.
-// `time`/`footer`/`error.retryText` are KEPT — ThreadView renders them
-// directly (`ThreadView.tsx:1458,1541` Timestamp from `block.time`, `:1544`
-// `block.footer` with no fallback, `:1535` Retry via `error.retryText`),
-// so stripping them would regress reload timestamps, footers, and
-// post-reload Retry. Filed as defects; do NOT extend this strip until
-// render fallbacks land. Deep-clones: the memory paint is never mutated.
+// Wire strip (chat-history-lean-storage FR1, full): drop render-only
+// fields before POST so they are never stored in JSONB + TOAST.
+// Reload-safe: `time` is re-stamped from the server `createdAt` in
+// `messageToBlock`, and ThreadView recomputes `footer ?? PESDac · subject`
+// plus `error.retryText` (last-user-text fallback) at render — stripped
+// rows paint identically to live turns. Deep-clones: memory never mutates.
 export function toWireBlock(block: Block): Block {
   const wire = JSON.parse(JSON.stringify(block)) as Record<string, unknown>;
+  delete wire.time;
   delete wire.toolCallsExpanded;
   delete wire.toolCallsAfter;
+  delete wire.footer;
   if (Array.isArray(wire.followUps) && wire.followUps.length === 0) {
     delete wire.followUps;
+  }
+  const error = wire.error;
+  if (typeof error === "object" && error !== null) {
+    delete (error as Record<string, unknown>).retryText;
   }
   return wire as unknown as Block;
 }
@@ -811,6 +815,15 @@ function messageToBlock(m: ServerMessage): Block | null {
   if (typeof c === "object" && c !== null) {
     const b = c as Partial<Block>;
     if (b.from === "user" || b.from === "assistant" || b.from === "system") {
+      // Reload recompute (FR1): stripped rows regain `time` from the
+      // server `createdAt` — render never sees an undefined Timestamp.
+      // System divider blocks carry no `time` by type; leave them alone.
+      if ((b.from === "user" || b.from === "assistant") && b.time == null) {
+        return {
+          ...(c as Record<string, unknown>),
+          time: m.createdAt,
+        } as Block;
+      }
       return c as Block;
     }
   }

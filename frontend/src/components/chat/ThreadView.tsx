@@ -1487,6 +1487,12 @@ export default function ThreadView({
   ) => {
     const after = block.toolCallsAfter ?? block.bubbles.length - 1;
     const error = block.error;
+    // Reload recompute (FR1): stripped rows regain their footer
+    // (`PESDac · subject`, same as live turns) and Retry text (last user
+    // text, same fallback as regenerate) — no missing footer, no dead Retry.
+    const footer = block.footer ?? `PESDac · ${thread.subject}`;
+    const retryText =
+      error?.retryText ?? lastUserText(blocks.slice(0, Math.max(0, key)));
     const toolCalls =
       block.toolCalls && block.toolCalls.length > 0 ? (
         <ChatToolCalls
@@ -1532,7 +1538,7 @@ export default function ThreadView({
                 label="Retry"
                 variant="ghost"
                 size="sm"
-                onClick={() => startTurn(error.retryText, { forceOk: true })}
+                onClick={() => startTurn(retryText, { forceOk: true })}
               />
             </HStack>
           </ChatMessageBubble>
@@ -1541,9 +1547,9 @@ export default function ThreadView({
           timestamp={<Timestamp value={block.time} format="time" />}
           footer={
             <HStack gap={1} vAlign="center">
-              {block.footer ? (
+              {footer ? (
                 <Text type="supporting" color="secondary">
-                  {block.footer}
+                  {footer}
                 </Text>
               ) : null}
               <CopyButton
