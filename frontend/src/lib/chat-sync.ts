@@ -96,14 +96,20 @@ export async function apiListChatsPage(
   return apiFetch<ListEnvelope<ServerChat[]>>(`/chats${qs}`);
 }
 
-/** Create a chat container. */
+/** Create a chat container. `clientAdoptKey` is the adopt-idempotency key
+ *  (caching Phase 5, spec §10.2): sent only by the guest→login adopt path,
+ *  one UUID per guest chat. Ordinary creates omit it and behave as before. */
 export async function apiCreateChat(
   subject: string,
   title: string,
+  opts?: { clientAdoptKey?: string },
 ): Promise<ServerChat> {
   return apiFetch<ServerChat>("/chats", {
     method: "POST",
-    body: { subject, title },
+    body:
+      opts?.clientAdoptKey != null
+        ? { subject, title, clientAdoptKey: opts.clientAdoptKey }
+        : { subject, title },
   });
 }
 

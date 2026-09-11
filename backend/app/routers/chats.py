@@ -161,13 +161,40 @@ async def create_chat(body: ChatCreate, request: Request, result: User = Depends
         return denied
     if limited := rate_limit.check("chats-create", request, 60, 60):
         return limited
+    # Adopt idempotency (caching Phase 5, spec §10.2): a retried adopt
+    # resends the same `clientAdoptKey` — return the existing row as
+    # `200` in the exact list shape instead of creating a duplicate.
+    # The per-user unique constraint (`uq_chats_user_adopt_key`) is the
+    # race safety net; NULL keys (ordinary creates) never conflict.
+    adopt_key = body.clientAdoptKey
+    if adopt_key is not None:
+        existing = db.scalar(
+            select(Chat).where(
+                Chat.user_id == result.id, Chat.client_adopt_key == adopt_key
+            )
+        )
+        if existing is not None:
+            return JSONResponse(status_code=200, content=_out(existing))
     for _ in range(5):
         code = security.gen_chat_code()
         if _get_owned(db, result.id, code) is None and db.scalar(select(Chat).where(Chat.code == code)) is None:
-            chat = Chat(user_id=result.id, code=code, subject=body.subject, title=body.title)
+            chat = Chat(user_id=result.id, code=code, subject=body.subject, title=body.title, client_adopt_key=adopt_key)
             db.add(chat)
             try:
                 db.commit()
+            except IntegrityError:
+                db.rollback()
+                # Lost an adopt race: the winner's row is the truth.
+                if adopt_key is not None:
+                    winner = db.scalar(
+                        select(Chat).where(
+                            Chat.user_id == result.id,
+                            Chat.client_adopt_key == adopt_key,
+                        )
+                    )
+                    if winner is not None:
+                        return JSONResponse(status_code=200, content=_out(winner))
+                continue
             except Exception:
                 db.rollback()
                 continue

@@ -38,8 +38,17 @@ class Chat(Base):
     preview: Mapped[str] = mapped_column(Text, default="", nullable=False)
     msg_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_seq: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Adopt idempotency (caching Phase 5, spec §5 Fix 5 + §10.2): one
+    # client-generated UUID per guest chat, stored with a per-user unique
+    # constraint. Nullable — ordinary creates send no key. NULLs never
+    # conflict (Postgres + SQLite treat NULLs as distinct), so only
+    # keyed adopt rows participate in conflict-200.
+    client_adopt_key: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
 
     __table_args__ = (
+        UniqueConstraint(
+            "user_id", "client_adopt_key", name="uq_chats_user_adopt_key"
+        ),
         # Sidebar/search ordering (`is_pinned DESC, updated_at DESC` scoped
         # by user + archive flag). Mirrors `ix_chats_user_updated` in
         # migration 0007 (the 0001 `ix_chats_user_list` covers the same key

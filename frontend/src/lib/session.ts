@@ -39,6 +39,12 @@ export type CustomChat = {
   isPinned?: boolean;
   isArchived?: boolean;
   updatedAt?: string;
+  // Adopt idempotency key (caching Phase 5, spec §10.2): one UUID per
+  // guest chat, sent as `clientAdoptKey` in the adopt `POST /chats`.
+  // Stored on the guest row so retries — same hydrate or a later login —
+  // resend the identical key and the server answers conflict-200 instead
+  // of duplicating. Server rows never carry it.
+  clientAdoptKey?: string;
 };
 
 const CHATS_KEY = "pesdac-custom-chats-v1";
@@ -155,6 +161,24 @@ function genCode(existing: CustomChat[]): string {
   }
 }
 
+/** One UUID per guest chat (spec §10.2 exact: `crypto.randomUUID()`). */
+function newAdoptKey(): string {
+  try {
+    if (
+      typeof crypto !== "undefined" &&
+      typeof crypto.randomUUID === "function"
+    ) {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // Fall through to the non-crypto fallback below.
+  }
+  const hex = "0123456789abcdef";
+  const pick = (n: number) =>
+    Array.from({ length: n }, () => hex[Math.floor(Math.random() * 16)]).join("");
+  return `${pick(8)}-${pick(4)}-4${pick(3)}-8${pick(3)}-${pick(12)}`;
+}
+
 export function listCustomChats(): CustomChat[] {
   return readJSON<CustomChat[]>(CHATS_KEY, []);
 }
@@ -166,6 +190,7 @@ export function createCustomChat(subject: string, title: string): CustomChat {
     subject,
     title: title.trim().slice(0, 34) || "New chat",
     createdAt: new Date().toISOString(),
+    clientAdoptKey: newAdoptKey(),
   };
   writeJSON(CHATS_KEY, [...existing, chat]);
   emit();
@@ -634,6 +659,45 @@ export function shouldShowChatListSkeleton(
   customCount: number,
 ): boolean {
   return authStatus === "authenticated" && hydratePending && customCount === 0;
+}
+
+/**
+ * Full sidebar-skeleton decision (composed in `Pesdac.tsx`).
+ * The frozen `shouldShowChatListSkeleton` above is untouched; this adds
+ * the two windows it cannot see:
+ * - unresolved session (`loading`): the empty-flash window — the live
+ *   session check hasn't resolved, so the sidebar must not read as
+ *   "I have no chats" yet;
+ * - user-unready (`authenticated` but the row gate's user half is still
+ *   pending): `useAuth` resolves from the session cookie alone while
+ *   `/auth/me` + the profile seed settle later, and the hydrate legs are
+ *   independent — hydrate may finish first, clearing `hydratePending`
+ *   while rows still can't paint. Without this term that race paints a
+ *   blank sidebar (no rows, no skeleton).
+ * Failure is excluded: `userReady` already fails open on error, and an
+ * unrecovered hydrate failure (`hydrateFailed`) belongs to the error UI,
+ * never the skeleton. Customs present keeps the frozen no-skeleton rule.
+ * Pure and unit-testable.
+ */
+export function shouldShowWorkspaceSkeleton(
+  authStatus: string,
+  hydratePending: boolean,
+  customCount: number,
+  userReady: boolean,
+  hydrateFailed: boolean,
+): boolean {
+  if (shouldShowChatListSkeleton(authStatus, hydratePending, customCount)) {
+    return true;
+  }
+  if (authStatus === "loading") {
+    return true;
+  }
+  return (
+    authStatus === "authenticated" &&
+    !userReady &&
+    !hydrateFailed &&
+    customCount === 0
+  );
 }
 
 /**
@@ -1322,19 +1386,36 @@ function dropMemoryChat(code: string) {
 // Guest→login adopt (best-effort, bounded): memory customs at first
 // authenticated hydrate are POSTed — container + overlay blocks in order —
 // then dropped from memory. Per-chat all-or-nothing: any failure keeps
-// that chat's memory copy untouched for the next login. A partial server
-// write (container created, later leg failed) can leave a server row
-// whose retry duplicates it — exact-once adopt needs idempotency keys,
-// which the frozen §3/§4 contract doesn't offer (reported, not worked
-// around here).
+// that chat's memory copy untouched for the next login. Exact-once across
+// retries rides the idempotency contract (spec §10.2): the per-guest
+// `clientAdoptKey` is stored on the row, so the first attempt and every
+// retry send the identical key — a duplicate POST answers `200` with the
+// existing row (same shape as `201`) and the flow below drops memory
+// without duplicating. A partial server write (container created, later
+// leg failed) therefore converges on retry instead of duplicating.
 async function adoptGuestChats(opts?: { notify?: ChatNotify }): Promise<void> {
   const candidates = listCustomChats().filter((c) => c.updatedAt === undefined);
   for (const chat of candidates) {
+    // Backfill once for guest rows created before the key existed, then
+    // persist: the retry (same hydrate or a later login) must resend the
+    // identical key or the server cannot dedupe.
+    let adoptKey = chat.clientAdoptKey;
+    if (adoptKey == null) {
+      adoptKey = newAdoptKey();
+      writeJSON(
+        CHATS_KEY,
+        listCustomChats().map((c) =>
+          c.code === chat.code ? { ...c, clientAdoptKey: adoptKey } : c,
+        ),
+      );
+    }
     const blocks = getOverlay(chat.code);
     const pinned = readKeys(PINS_KEY).includes(`c:${chat.code}`);
     const archived = readKeys(ARCHIVE_KEY).includes(`c:${chat.code}`);
     try {
-      const created = await apiCreateChat(chat.subject, chat.title);
+      const created = await apiCreateChat(chat.subject, chat.title, {
+        clientAdoptKey: adoptKey,
+      });
       for (const block of blocks) {
         const m = blockToMessage(block);
         await apiAppendMessage(created.code, m);

@@ -76,7 +76,7 @@ import {
   getChatHydrateFailed,
   getHydrateSyncError,
   getCreateSyncError,
-  shouldShowChatListSkeleton,
+  shouldShowWorkspaceSkeleton,
   userReady,
   chatReady,
   identitySeedKey,
@@ -858,15 +858,14 @@ const LOGOUT_TIMEOUT_MS = 15000;
   const welcomeSyncError =
     chatAuth != null ? (getCreateSyncError() ?? getHydrateSyncError()) : null;
 
-  // Chat skeleton loading: frozen predicate (session.ts) decides the
-  // window; Pinned/Archived/Subjects sections use their own snapshot
-  // counts below — never a shared global total.
+  // Chat skeleton loading: `shouldShowWorkspaceSkeleton` (session.ts)
+  // wraps the frozen hydrate-window predicate plus the
+  // unresolved-session and user-unready windows (session settled but
+  // me/profile/seed still pending while hydrate already finished — rows
+  // can't paint yet, so the skeleton must). Pinned/Archived/Subjects
+  // sections use their own snapshot counts below — never a shared global
+  // total.
   const hydratePending = getChatHydratePending();
-  const showChatListSkeleton = shouldShowChatListSkeleton(
-    authState.status,
-    hydratePending,
-    customs.length,
-  );
 
   // Per-workspace skeleton placement (fan-out fix): the session store is
   // memory-backed, so on reload the per-subject distribution is unknowable
@@ -987,14 +986,22 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // `authenticated`, but `useAuth` stays "loading" until the live session
   // check resolves — that whole window painted the real empty list, so
   // reloads read as "I have no chats" before the skeleton ever appeared.
-  // Cover the unresolved window too; `skeletonRowsFor` returns 0 without
-  // a snapshot, so first-timers see zero skeletons, and known guests never
-  // skeleton (`showWorkspaceSkeleton` is false once status resolves).
-  // Residue closed by the caching Fix 1 transition wipe: post-transition
-  // heaps hold no foreign snapshot, and pre-fix snapshots without a
-  // timestamp are cleared by the age-cap above before any read.
-  const authUnresolved = authState.status === "loading";
-  const showWorkspaceSkeleton = showChatListSkeleton || authUnresolved;
+  // `shouldShowWorkspaceSkeleton` covers the unresolved window plus the
+  // user-unready window (session settled but me/profile/seed still pending
+  // while hydrate already finished — rows can't paint yet, so the skeleton
+  // must, or the sidebar flashes blank); `skeletonRowsFor` returns 0
+  // without a snapshot, so first-timers see zero skeletons, and known
+  // guests never skeleton. Residue closed by the caching Fix 1 transition
+  // wipe: post-transition heaps hold no foreign snapshot, and pre-fix
+  // snapshots without a timestamp are cleared by the age-cap above before
+  // any read.
+  const showWorkspaceSkeleton = shouldShowWorkspaceSkeleton(
+    authState.status,
+    hydratePending,
+    customs.length,
+    isUserReady,
+    hydrateFailed,
+  );
   const readCountSnapshot = (key: string): number => {
     try {
       const raw = window.localStorage.getItem(key);

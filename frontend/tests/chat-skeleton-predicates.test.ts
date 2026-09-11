@@ -12,6 +12,7 @@ import {
   setChatHydratePending,
   shouldShowChatListSkeleton,
   shouldShowThreadSkeleton,
+  shouldShowWorkspaceSkeleton,
   __resetChatBackingForTesting,
 } from "../src/lib/session.ts";
 
@@ -163,6 +164,71 @@ test("shouldShowThreadSkeleton: not backed = false (guest/demo)", () => {
   );
   assert.equal(
     shouldShowThreadSkeleton(false, "idle", 0),
+    false,
+  );
+});
+
+// ---- shouldShowWorkspaceSkeleton (sidebar composition) ----------------------
+// Covers the full render decision: the frozen list predicate, the
+// unresolved-session window, and the user-unready window (session settled
+// but me/profile/seed still pending while hydrate already finished —
+// rows can't paint yet, so the skeleton must).
+
+test("shouldShowWorkspaceSkeleton: user-unready keeps skeleton after hydrate done", () => {
+  // The reported bug: authenticated, hydrate finished (pending false),
+  // zero customs, user data still pending → skeleton, not a blank sidebar.
+  assert.equal(
+    shouldShowWorkspaceSkeleton("authenticated", false, 0, false, false),
+    true,
+  );
+});
+
+test("shouldShowWorkspaceSkeleton: ready user with rows live shows no skeleton", () => {
+  assert.equal(
+    shouldShowWorkspaceSkeleton("authenticated", false, 0, true, false),
+    false,
+  );
+});
+
+test("shouldShowWorkspaceSkeleton: hydrate failure owns the UI, never skeleton", () => {
+  assert.equal(
+    shouldShowWorkspaceSkeleton("authenticated", false, 0, false, true),
+    false,
+  );
+});
+
+test("shouldShowWorkspaceSkeleton: hydrate pending still skeletons", () => {
+  assert.equal(
+    shouldShowWorkspaceSkeleton("authenticated", true, 0, false, false),
+    true,
+  );
+});
+
+test("shouldShowWorkspaceSkeleton: unresolved session skeletons", () => {
+  assert.equal(
+    shouldShowWorkspaceSkeleton("loading", false, 0, false, false),
+    true,
+  );
+});
+
+test("shouldShowWorkspaceSkeleton: guest never skeletons", () => {
+  assert.equal(
+    shouldShowWorkspaceSkeleton("guest", false, 0, false, false),
+    false,
+  );
+  assert.equal(
+    shouldShowWorkspaceSkeleton("guest", true, 0, false, false),
+    false,
+  );
+});
+
+test("shouldShowWorkspaceSkeleton: customs present keeps frozen no-skeleton", () => {
+  assert.equal(
+    shouldShowWorkspaceSkeleton("authenticated", true, 1, false, false),
+    false,
+  );
+  assert.equal(
+    shouldShowWorkspaceSkeleton("authenticated", false, 2, false, false),
     false,
   );
 });
