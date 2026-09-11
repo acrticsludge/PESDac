@@ -61,16 +61,23 @@ import {
   dumpStore,
   getProfile,
   getProfileSeedPending,
+  getScopeOverride,
+  scopeKey,
+  setScopeOverride,
   shouldShowIdentitySkeleton,
   updateProfile,
   useSessionVersion,
 } from "../../lib/session";
+import { savePreference } from "../../lib/settings-scope";
+import { resolveExamMonth } from "../../lib/setting-study";
+import { resolveQuizConfig } from "../../lib/setting-quiz";
 import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, linkPassword, refreshAccounts, apiDeleteAccount, apiFetch, apiUpdateProfile, updateDisplayName, toUserMessage, AuthRequiredError, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH, MAX_DISPLAY_NAME_LENGTH } from "../../lib/auth";
 import { navigate } from "astro:transitions/client";
 import {
   BRANCHES,
   CAMPUSES,
   SEMESTERS,
+  SUBJECTS,
 } from "../../lib/profile-options";
 import {
   SkeletonCard,
@@ -627,12 +634,44 @@ const DIFFICULTIES = [
   { value: "hard", label: "Hard" },
 ];
 
+const QUIZ_FORMATS = [
+  { value: "single", label: "Single" },
+  { value: "multi", label: "Multi" },
+];
+
+const OPTION_COUNTS = [
+  { value: "2", label: "2 options" },
+  { value: "3", label: "3 options" },
+  { value: "4", label: "4 options" },
+  { value: "5", label: "5 options" },
+  { value: "6", label: "6 options" },
+];
+
+const QUESTION_COUNTS = [
+  { value: "1", label: "1 question" },
+  { value: "3", label: "3 questions" },
+  { value: "5", label: "5 questions" },
+  { value: "10", label: "10 questions" },
+];
+
 export function StudySection() {
   useSessionVersion();
+  const auth = useAuth();
   const profile = getProfile();
   // Step 0 (settings kernel): pre-placed for the study-quiz stream — the
   // write-through `savePreference` notify target. Do not add a second one.
   const toast = useToast();
+  const server = auth.status === "authenticated";
+  // Per-subject compartments (memory-only kernel overrides, embedded in this
+  // dialog in v1 — dedicated panels are v2). One picker per block; the
+  // blocks sit at different anchors and stay self-contained.
+  const [examSubject, setExamSubject] = useState("CN");
+  const [quizSubject, setQuizSubject] = useState("CN");
+  // The kernel map is not reactive — bump to re-render after override
+  // writes (profile writes re-render via useSessionVersion).
+  const [, bumpOverrides] = useState(0);
+  const refreshOverrides = () => bumpOverrides((n) => n + 1);
+  const quizForSubject = resolveQuizConfig({ subject: quizSubject });
   return (
     <VStack gap={5}>
       <SettingsCard title="Schedule & level">
@@ -649,7 +688,11 @@ export function StudySection() {
                 width={CONTROL_WIDTH}
                 placeholder="December 2026"
                 value={profile.examMonth}
-                onChange={(value) => updateProfile({ examMonth: value })}
+                onChange={(value) =>
+                  savePreference({ examMonth: value }, (t) => toast(t), {
+                    server,
+                  })
+                }
               />
             }
           />
@@ -662,7 +705,11 @@ export function StudySection() {
                 label="Weekly study goal"
                 size="sm"
                 value={profile.weeklyGoal}
-                onChange={(value) => updateProfile({ weeklyGoal: value })}
+                onChange={(value) =>
+                  savePreference({ weeklyGoal: value }, (t) => toast(t), {
+                    server,
+                  })
+                }
               >
                 {WEEKLY_GOALS.map((g) => (
                   <SegmentedControlItem
@@ -675,6 +722,58 @@ export function StudySection() {
             }
           />
           <SettingsRow
+            title="Subject exam date"
+            description="Overrides the default above for one subject."
+            icon={CalendarDaysIcon}
+            control={
+              <VStack gap={2} width="100%" hAlign="end">
+                <Selector
+                  label="Subject"
+                  isLabelHidden
+                  size="sm"
+                  width={CONTROL_WIDTH}
+                  options={SUBJECTS}
+                  value={examSubject}
+                  onChange={(value) => setExamSubject(value ?? "CN")}
+                />
+                <TextInput
+                  label="Subject exam date"
+                  isLabelHidden
+                  size="sm"
+                  width={CONTROL_WIDTH}
+                  placeholder={profile.examMonth || "December 2026"}
+                  value={resolveExamMonth(examSubject)}
+                  onChange={(value) => {
+                    setScopeOverride(
+                      "examMonth",
+                      scopeKey("subject", examSubject),
+                      value === "" ? undefined : value,
+                    );
+                    refreshOverrides();
+                  }}
+                />
+                {getScopeOverride(
+                  "examMonth",
+                  scopeKey("subject", examSubject),
+                ) !== undefined && (
+                  <Button
+                    label="Use default"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setScopeOverride(
+                        "examMonth",
+                        scopeKey("subject", examSubject),
+                        undefined,
+                      );
+                      refreshOverrides();
+                    }}
+                  />
+                )}
+              </VStack>
+            }
+          />
+          <SettingsRow
             title="Quiz difficulty"
             description="Shapes future quiz questions; nothing changes in chat yet."
             icon={SparklesIcon}
@@ -683,7 +782,11 @@ export function StudySection() {
                 label="Quiz difficulty"
                 size="sm"
                 value={profile.difficulty}
-                onChange={(value) => updateProfile({ difficulty: value })}
+                onChange={(value) =>
+                  savePreference({ difficulty: value }, (t) => toast(t), {
+                    server,
+                  })
+                }
               >
                 {DIFFICULTIES.map((d) => (
                   <SegmentedControlItem
@@ -693,6 +796,168 @@ export function StudySection() {
                   />
                 ))}
               </SegmentedControl>
+            }
+          />
+        </CardRows>
+      </SettingsCard>
+      <SettingsCard title="Quiz format">
+        <CardRows>
+          <SettingsRow
+            title="Subject"
+            description="Per-subject overrides apply to this subject only."
+            icon={SparklesIcon}
+            control={
+              <Selector
+                label="Subject"
+                isLabelHidden
+                size="sm"
+                width={CONTROL_WIDTH}
+                options={SUBJECTS}
+                value={quizSubject}
+                onChange={(value) => setQuizSubject(value ?? "CN")}
+              />
+            }
+          />
+          <SettingsRow
+            title="Question format"
+            description="Single answer or several."
+            icon={SparklesIcon}
+            control={
+              <VStack gap={2} width="100%" hAlign="end">
+                <SegmentedControl
+                  label="Question format"
+                  size="sm"
+                  value={quizForSubject.format}
+                  onChange={(value) => {
+                    if (value === "single" || value === "multi") {
+                      setScopeOverride(
+                        "format",
+                        scopeKey("subject", quizSubject),
+                        value,
+                      );
+                      refreshOverrides();
+                    }
+                  }}
+                >
+                  {QUIZ_FORMATS.map((f) => (
+                    <SegmentedControlItem
+                      key={f.value}
+                      value={f.value}
+                      label={f.label}
+                    />
+                  ))}
+                </SegmentedControl>
+                {getScopeOverride(
+                  "format",
+                  scopeKey("subject", quizSubject),
+                ) !== undefined && (
+                  <Button
+                    label="Use default"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setScopeOverride(
+                        "format",
+                        scopeKey("subject", quizSubject),
+                        undefined,
+                      );
+                      refreshOverrides();
+                    }}
+                  />
+                )}
+              </VStack>
+            }
+          />
+          <SettingsRow
+            title="Options per question"
+            description="Answer choices per question, 2 to 6."
+            icon={SparklesIcon}
+            control={
+              <VStack gap={2} width="100%" hAlign="end">
+                <Selector
+                  label="Options per question"
+                  isLabelHidden
+                  size="sm"
+                  width={CONTROL_WIDTH}
+                  options={OPTION_COUNTS}
+                  value={String(quizForSubject.optionCount)}
+                  onChange={(value) => {
+                    const n = Number(value);
+                    if (Number.isInteger(n) && n >= 2 && n <= 6) {
+                      setScopeOverride(
+                        "optionCount",
+                        scopeKey("subject", quizSubject),
+                        n,
+                      );
+                      refreshOverrides();
+                    }
+                  }}
+                />
+                {getScopeOverride(
+                  "optionCount",
+                  scopeKey("subject", quizSubject),
+                ) !== undefined && (
+                  <Button
+                    label="Use default"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setScopeOverride(
+                        "optionCount",
+                        scopeKey("subject", quizSubject),
+                        undefined,
+                      );
+                      refreshOverrides();
+                    }}
+                  />
+                )}
+              </VStack>
+            }
+          />
+          <SettingsRow
+            title="Questions per quiz"
+            description="How many questions each quiz holds."
+            icon={SparklesIcon}
+            control={
+              <VStack gap={2} width="100%" hAlign="end">
+                <Selector
+                  label="Questions per quiz"
+                  isLabelHidden
+                  size="sm"
+                  width={CONTROL_WIDTH}
+                  options={QUESTION_COUNTS}
+                  value={String(quizForSubject.questionCount)}
+                  onChange={(value) => {
+                    const n = Number(value);
+                    if (n === 1 || n === 3 || n === 5 || n === 10) {
+                      setScopeOverride(
+                        "questionCount",
+                        scopeKey("subject", quizSubject),
+                        n,
+                      );
+                      refreshOverrides();
+                    }
+                  }}
+                />
+                {getScopeOverride(
+                  "questionCount",
+                  scopeKey("subject", quizSubject),
+                ) !== undefined && (
+                  <Button
+                    label="Use default"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setScopeOverride(
+                        "questionCount",
+                        scopeKey("subject", quizSubject),
+                        undefined,
+                      );
+                      refreshOverrides();
+                    }}
+                  />
+                )}
+              </VStack>
             }
           />
         </CardRows>
@@ -720,6 +985,7 @@ const CITATIONS = [
 
 export function AssistantSection() {
   useSessionVersion();
+  const auth = useAuth();
   const profile = getProfile();
   // Step 0 (settings kernel): pre-placed for the follow-ups/shaping streams
   // — the write-through `savePreference` notify target. Do not add a second one.
@@ -757,7 +1023,7 @@ export function AssistantSection() {
                 label="Explanation verbosity"
                 size="sm"
                 value={profile.verbosity}
-                onChange={(value) => updateProfile({ verbosity: value })}
+                onChange={(value) => savePreference({ verbosity: value }, toast, { server: auth.status === "authenticated" })}
               >
                 {VERBOSITIES.map((v) => (
                   <SegmentedControlItem
@@ -777,7 +1043,7 @@ export function AssistantSection() {
                 label="Source citations"
                 size="sm"
                 value={profile.citations}
-                onChange={(value) => updateProfile({ citations: value })}
+                onChange={(value) => savePreference({ citations: value }, toast, { server: auth.status === "authenticated" })}
               >
                 {CITATIONS.map((c) => (
                   <SegmentedControlItem
@@ -817,7 +1083,11 @@ export function AssistantSection() {
                 label="Follow-up suggestions"
                 isLabelHidden
                 value={profile.followUps}
-                onChange={(checked) => updateProfile({ followUps: checked })}
+                onChange={(checked) =>
+                  savePreference({ followUps: checked }, (t) => toast(t), {
+                    server: auth.status === "authenticated",
+                  })
+                }
               />
             }
           />
@@ -968,6 +1238,7 @@ const TIMEZONES = [
 
 export function LanguageSection() {
   useSessionVersion();
+  const auth = useAuth();
   const profile = getProfile();
   // Step 0 (settings kernel): pre-placed for the locale stream — the
   // write-through `savePreference` notify target. Do not add a second one.
@@ -990,7 +1261,7 @@ export function LanguageSection() {
               searchPlaceholder="Search languages..."
               options={LANGUAGES}
               value={profile.language}
-              onChange={(value) => updateProfile({ language: value })}
+              onChange={(value) => savePreference({ language: value }, toast, { server: auth.status === "authenticated" })}
             />
             }
           />
@@ -1008,7 +1279,7 @@ export function LanguageSection() {
               searchPlaceholder="Search regions..."
               options={REGIONS}
               value={profile.region}
-              onChange={(value) => updateProfile({ region: value })}
+              onChange={(value) => savePreference({ region: value }, toast, { server: auth.status === "authenticated" })}
             />
             }
           />
@@ -1026,7 +1297,7 @@ export function LanguageSection() {
               searchPlaceholder="Search time zones..."
               options={TIMEZONES}
               value={profile.timezone}
-              onChange={(value) => updateProfile({ timezone: value })}
+              onChange={(value) => savePreference({ timezone: value }, toast, { server: auth.status === "authenticated" })}
             />
             }
           />
