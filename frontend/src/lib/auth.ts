@@ -1061,6 +1061,25 @@ export type ApiFetchInit = Omit<RequestInit, "body" | "headers"> & {
   headers?: Record<string, string>;
 };
 
+/**
+ * Chat-write 429 wait (caching Phase 5, spec §5 Fix 5): parse a
+ * `Retry-After` response header (delay-seconds, the shape our backend
+ * emits) and clamp to the same 5 s cap as the onboarding policy. Unknown
+ * or absent values mean "retry without waiting" — the bound that matters
+ * is exactly-one-retry, enforced in `apiFetch`, not the wait.
+ */
+export function chatWriteRetryDelayMs(retryAfter: string | null): number {
+  if (retryAfter == null) return 0;
+  const seconds = Number.parseInt(retryAfter.trim(), 10);
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  return Math.min(seconds * 1000, ONBOARDING_CHECK_RETRY_AFTER_CAP_MS);
+}
+
+/** Chat-write gate for the 429 retry: mutations under `/chats` only. */
+function isChatWrite(path: string, method: string): boolean {
+  return method !== "GET" && path.startsWith("/chats");
+}
+
 // The backend serves everything under /api/v1 (see app/main.py). The
 // prefix is joined here — the single place — so callers pass bare
 // paths ("/auth/me") and PUBLIC_API_BASE_URL stays a clean host.
@@ -1197,24 +1216,42 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
     }
     throw new AuthServiceError(tokenResult.reason);
   }
+  // Narrowed past the guard above: the closure below cannot carry the
+  // narrowing, so bind the non-null headers once here.
+  const bearerHeaders: Record<string, string> = authorizedHeaders;
   const body =
     init.body === undefined ? undefined : JSON.stringify(init.body);
+  const method = (init.method ?? "GET").toUpperCase();
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(`${apiRoot}${API_PREFIX}${path}`, {
-      ...init,
-      headers: body
-        ? { ...authorizedHeaders, "Content-Type": "application/json" }
-        : authorizedHeaders,
-      body,
-      credentials: "include",
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
+  async function doFetch(): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    try {
+      return await fetch(`${apiRoot}${API_PREFIX}${path}`, {
+        ...init,
+        headers: body
+          ? { ...bearerHeaders, "Content-Type": "application/json" }
+          : bearerHeaders,
+        body,
+        credentials: "include",
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  let res = await doFetch();
+  // Chat-path 429s (spec §5 Fix 5): ONE bounded retry honoring
+  // `min(Retry-After, 5s)`. Chat writes only — every other path and every
+  // other status falls through to the current error handling unchanged.
+  // No retry loops, no global fetch retry.
+  if (res.status === 429 && isChatWrite(path, method)) {
+    const waitMs = chatWriteRetryDelayMs(res.headers.get("Retry-After"));
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    res = await doFetch();
   }
 
   if (res.status === 204) {

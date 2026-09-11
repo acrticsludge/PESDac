@@ -19,6 +19,10 @@ MESSAGE_CONTENT_MAX_BYTES = 100 * 1024
 class ChatCreate(BaseModel):
     subject: str
     title: str
+    # Adopt idempotency key (caching Phase 5, spec §10.2): one UUID per
+    # guest chat, generated client-side via `crypto.randomUUID()`.
+    # Optional — ordinary creates omit it and behave exactly as before.
+    clientAdoptKey: str | None = None
 
     @field_validator("subject")
     @classmethod
@@ -33,6 +37,18 @@ class ChatCreate(BaseModel):
         clean = security.clean_title(v)
         if clean is None:
             raise ValueError("Title must be 1–34 characters.")
+        return clean
+
+    @field_validator("clientAdoptKey")
+    @classmethod
+    def _adopt_key(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        clean = v.strip()
+        if clean == "":
+            return None
+        if len(clean) > 64:
+            raise ValueError("Adopt key must be at most 64 characters.")
         return clean
 
 
