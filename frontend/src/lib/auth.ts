@@ -4,6 +4,7 @@ import "./buffer-polyfill.ts"; // Must load before any auth module that uses Buf
 import { useEffect, useState } from "react";
 import { authClient } from "./auth-client.ts";
 import { clearLocalProfileSeed, resetChatStoreForIdentity } from "./session.ts";
+import { broadcastLogoutPing } from "./cache-revalidation.ts";
 import {
   mintTokenWithRetry,
   sharedTaggedFetch,
@@ -1300,6 +1301,9 @@ export type LogoutOutcome =
  */
 export async function apiLogout(): Promise<LogoutOutcome> {
   clearAuthCache();
+  // Cross-tab logout ping (caching Fix 4): sibling tabs drop their chat
+  // caches immediately via the storage receiver. This tab navigates below.
+  broadcastLogoutPing();
   // Identity hygiene (logout/relogin fix): the local profile seed is a
   // separate store from the server caches above — without this, user-A's
   // campus/semester/branch/subjects survive into user-B's session.

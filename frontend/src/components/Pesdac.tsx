@@ -32,13 +32,14 @@ import type { ProfileTab } from "./profile/profile-tabs";
 import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
 import AppToasts, { type ShowToastFn } from "./AppToasts";
-import { apiLogout, apiGetProfile, useAuth, useProfile, AUTH_REQUIRED_EVENT, toUserMessage, getAuthEpoch, useAuthEpoch, type LogoutOutcome } from "../lib/auth";
+import { apiLogout, apiGetProfile, useAuth, useProfile, AUTH_REQUIRED_EVENT, toUserMessage, getAuthEpoch, useAuthEpoch, clearAuthCache, type LogoutOutcome } from "../lib/auth";
 import {
   beginLogoutTransition,
   endLogoutTransition,
   isLogoutTransition,
 } from "../lib/logout-guard";
 import { tabFromHash } from "./profile/profile-tabs";
+import { useCacheRevalidation } from "../lib/cache-revalidation";
 import { isCampus } from "../lib/profile-options";
 import AttachButton from "./chat/AttachButton";
 
@@ -760,6 +761,18 @@ const LOGOUT_TIMEOUT_MS = 15000;
       ? initialCode
       : null;
   const [draftCode, setDraftCode] = useState<string | null>(initialCustomCode);
+  // Foreground-gated revalidation (caching Fix 4): pageshow re-proof,
+  // coalesced foreground refetch (hydrate + open custom thread), and the
+  // sibling-tab logout ping. Listeners only — every leg reuses the
+  // session/auth paths above; no UI, fetch, or Phase-1–3 semantics touched.
+  // Sibling logout runs the full choke point (spec §7: logout row minus
+  // navigation) — never a bare row reset, never navigation.
+  useCacheRevalidation({
+    chatAuth,
+    openCode: draftCode,
+    notify: notifyChat,
+    onSiblingLogout: () => clearAuthCache(),
+  });
   // Draft auto-send: first message typed on welcome, sent on thread mount.
   const [draftAutoSend, setDraftAutoSend] = useState<{
     text: string;

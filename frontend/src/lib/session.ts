@@ -1522,6 +1522,52 @@ export async function hydrateChats(
   return { status: "ready" };
 }
 
+// ---- Foreground revalidation entry (caching Phase 4, spec §5 Fix 4) --------
+//
+// Single safe refetch entry for the foreground/pageshow hook: forces one
+// hydrate past the fetch-once `already` short-circuit, then reloads the
+// open thread (if any) through the same `loadChatMessages` path ThreadView
+// mounts use. No duplicate fetch logic lives here — both legs are the
+// existing functions, and normal callers keep fetch-once semantics.
+// Guests/unknown identities (`auth == null`) return `skipped` with zero
+// fetches (the hook additionally never calls us then).
+//
+// A failed refetch restores the previous hydrate marker (when the failure
+// left none) so a transient foreground failure keeps the memory paint plus
+// the existing error affordance instead of wedging the gate on loading.
+// (The pageshow path wipes the marker beforehand via the Phase-1 reset, so
+// a dead session still fails closed to loading there.)
+export type ForegroundRevalidateResult =
+  | { status: "skipped" }
+  | { status: "ready" }
+  | { status: "kept-memory" };
+
+export async function revalidateForeground(
+  auth: ChatAuth,
+  opts?: { openCode?: string | null; notify?: ChatNotify },
+): Promise<ForegroundRevalidateResult> {
+  if (auth == null) return { status: "skipped" };
+  const previousKey = chatHydratedKey;
+  chatHydratedKey = null;
+  const result = await hydrateChats(auth, opts);
+  if (result.status === "kept-memory") {
+    if (chatHydratedKey == null && previousKey != null) {
+      chatHydratedKey = previousKey;
+    }
+    return { status: "kept-memory" };
+  }
+  if (result.status === "ready" && opts?.openCode != null) {
+    // Hydrate already dropped settled message states, so this reloads the
+    // open thread; a deleted code drops via the membership guard, a
+    // non-server code returns its memory paint with zero fetches, and an
+    // in-flight load keeps covering its own resolve (no duplicate leg).
+    await loadChatMessages(opts.openCode, auth, opts);
+  }
+  // `guest`/`already` are unreachable (null guarded; marker cleared above) —
+  // mapped defensively so the contract stays total.
+  return { status: "ready" };
+}
+
 /**
  * Identity-scoped store reset (caching Fix 1 — kills P0-1…P0-5 + P2-5).
  * Drops every identity-owned chat cache so the next identity starts from a
@@ -1541,9 +1587,18 @@ export async function hydrateChats(
  * refs, so `hydrateChats` can adopt them afterwards. Post-logout leftovers
  * carry server flags and are never preserved. Logout/401/delete always use
  * the default full wipe.
+ *
+ * `preserveDrafts` (pageshow re-proof only): a bfcache restore is a
+ * same-identity return, not a transition — typed-but-unsent composer input
+ * is user data that no server leg can restore, so the re-proof wipe keeps
+ * it while rows/markers still fail closed to loading.
  */
 export function resetChatStoreForIdentity(
-  opts: { preserveTrueGuests?: boolean; preserveCustomRefs?: boolean } = {},
+  opts: {
+    preserveTrueGuests?: boolean;
+    preserveCustomRefs?: boolean;
+    preserveDrafts?: boolean;
+  } = {},
 ): void {
   const guests =
     opts.preserveTrueGuests === true ? captureTrueGuestChats() : null;
@@ -1555,7 +1610,7 @@ export function resetChatStoreForIdentity(
   }
   mem.delete(CHATS_KEY);
   mem.delete(OVERLAY_KEY);
-  mem.delete(DRAFTS_KEY);
+  if (opts.preserveDrafts !== true) mem.delete(DRAFTS_KEY);
   clearChatSnapshotKeys();
   // Custom refs retire on transitions (a new identity must never see them);
   // `hydrateChats` opts out to preserve same-identity migration input.
