@@ -111,6 +111,18 @@ function makeRouter(
       body = raw;
     }
     apiLog.push({ method: init?.method ?? "GET", url, body });
+    // Phase-3 paging leg: hydrate reads the archived list explicitly.
+    // Fixtures carry no archived server rows, so serve an empty page here
+    // without consuming the queued contract responses (queue positions —
+    // and every assertion on them — stay aligned).
+    if (
+      (init?.method ?? "GET") === "GET" &&
+      url.includes("/chats") &&
+      !url.includes("/messages") &&
+      url.includes("archived=true")
+    ) {
+      return apiJson(listEnvelope([]));
+    }
     const next = apiQueue.shift();
     if (!next) throw new Error(`api fetch with empty queue: ${url}`);
     return next();
@@ -213,6 +225,7 @@ test("hydrate adopts guest customs first, then replaces memory with the server l
         "POST https://api.test/api/v1/chats/c-back-a/messages",
         "POST https://api.test/api/v1/chats",
         "GET https://api.test/api/v1/chats",
+        "GET https://api.test/api/v1/chats?archived=true&limit=50&offset=0",
       ],
     );
     // Adopted guest codes are dropped — never double-listed.

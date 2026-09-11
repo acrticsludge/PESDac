@@ -165,6 +165,18 @@ function makeRouter(
       body = raw;
     }
     apiLog.push({ method: init?.method ?? "GET", url, body });
+    // Phase-3 paging leg: hydrate reads the archived list explicitly.
+    // Fixtures carry no archived server rows, so serve an empty page here
+    // without consuming the queued contract responses (queue positions —
+    // and every assertion on them — stay aligned).
+    if (
+      (init?.method ?? "GET") === "GET" &&
+      url.includes("/chats") &&
+      !url.includes("/messages") &&
+      url.includes("archived=true")
+    ) {
+      return apiJson(listEnvelope([]));
+    }
     const next = apiQueue.shift();
     if (!next) throw new Error(`api fetch with empty queue: ${url}`);
     return next();
@@ -425,7 +437,10 @@ test("A rows in memory + hydrate as B: zero adopt POSTs, B list only", async () 
     // only fetch is the list leg, and B's list is the server list only.
     assert.deepEqual(
       apiLog.map((c) => `${c.method} ${c.url}`),
-      ["GET https://api.test/api/v1/chats"],
+      [
+        "GET https://api.test/api/v1/chats",
+        "GET https://api.test/api/v1/chats?archived=true&limit=50&offset=0",
+      ],
     );
     assert.deepEqual(
       listCustomChats().map((c) => c.code),
@@ -479,6 +494,7 @@ test("genuine guest rows still adopt exactly once, pins included", async () => {
         "POST https://api.test/api/v1/chats/c-adopt-1/messages",
         "PATCH https://api.test/api/v1/chats/c-adopt-1",
         "GET https://api.test/api/v1/chats",
+        "GET https://api.test/api/v1/chats?archived=true&limit=50&offset=0",
       ],
     );
   } finally {
@@ -574,7 +590,10 @@ test("stale-tab orphans: seeded-A heap preserved at signin never adopts into B",
     assert.deepEqual(result, { status: "ready" });
     assert.deepEqual(
       apiLog.map((c) => `${c.method} ${c.url}`),
-      ["GET https://api.test/api/v1/chats"],
+      [
+        "GET https://api.test/api/v1/chats",
+        "GET https://api.test/api/v1/chats?archived=true&limit=50&offset=0",
+      ],
     );
     assert.deepEqual(
       listCustomChats().map((c) => c.code),
