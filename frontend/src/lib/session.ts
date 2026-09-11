@@ -20,8 +20,8 @@ import {
   apiAppendMessage,
   apiCreateChat,
   apiDeleteChat,
-  apiListChats,
-  apiListMessages,
+  apiListChatsPage,
+  apiListMessagesPage,
   apiPatchChat,
   apiTruncateMessages,
   type ServerChat,
@@ -937,7 +937,7 @@ export async function renameChatBacked(
     renameCustomChat(code, title);
     return true;
   }
-  const before = listCustomChats();
+  const prev = listCustomChats().find((c) => c.code === code);
   renameCustomChat(code, clean); // optimistic paint (sync, emits)
   try {
     const row = await apiPatchChat(code, { title: clean });
@@ -966,12 +966,18 @@ export async function renameChatBacked(
     return true;
   } catch (error) {
     // Membership BEFORE any rollback (P1-4): a delete that landed while
-    // the rename was in flight must keep the chat gone — restoring
-    // `before` would resurrect it. (Per-row snapshot is Phase 3; here
-    // only the guard is added.)
+    // the rename was in flight must keep the chat gone — restoring would
+    // resurrect it. Rollback is per-row (P1-3, pin/archive pattern): only
+    // the renamed row is restored, so concurrent confirmed ops on other
+    // chats survive. Phase-2 `updatedAt` guards above stay intact.
     if (!listCustomChats().some((c) => c.code === code)) return false;
-    writeJSON(CHATS_KEY, before); // exact rollback
-    emit();
+    if (prev != null) {
+      writeJSON(
+        CHATS_KEY,
+        listCustomChats().map((c) => (c.code === code ? prev : c)),
+      );
+      emit();
+    }
     notifyFailure(error, opts?.notify, "Couldn't rename that chat. Try again.");
     return false;
   }
@@ -1198,7 +1204,25 @@ export async function loadChatMessages(
   const overlayLenAtDispatch = getOverlay(code).length;
   emit();
   try {
-    const rows = await apiListMessages(code);
+    // Tail window (P1-7, `chat-sync.ts` MessagePageQuery): the server lists
+    // `seq ASC` from `offset=0`, so a bare read of a >200-turn thread paints
+    // the OLDEST 200 and hides the newest turns. The head read rides the
+    // server default window (bare URL, complete whenever `total` fits it);
+    // only a truncated head re-reads the tail slice (`limit=50,
+    // offset=max(0,total-50)`) so the newest turns paint. Either leg
+    // throwing keeps the memory paint + `failed` status below — never a
+    // false-complete `ready`.
+    const head = await apiListMessagesPage(code);
+    let rows: ServerMessage[];
+    if (head.pagination.total <= head.data.length) {
+      rows = head.data;
+    } else {
+      const tail = await apiListMessagesPage(code, {
+        limit: 50,
+        offset: Math.max(0, head.pagination.total - 50),
+      });
+      rows = tail.data;
+    }
     // P0-3: an identity transition since dispatch clears messageStates —
     // a missing or identity-mismatched entry proves this resolve is stale
     // (previous identity's turns). Drop it instead of painting over the
@@ -1383,6 +1407,46 @@ async function migratePinArchiveFlags(
   );
 }
 
+// Complete list read (P1-7): follow `pagination.total` past `limit=50`
+// for BOTH the open list and the archived list. Archived rows are
+// requested explicitly — the server defaults `archived=false`, so a bare
+// read silently drops everything past page 1 plus every archived row and
+// still reports `ready`. Page 1 rides those same server defaults (bare
+// `/chats`, the URL the app has always read); follow-ups state the window
+// explicitly. A throw on ANY leg aborts the whole read (the caller keeps
+// the memory paint + surfaces the hydrate error affordance), so a
+// truncated list is never painted as truth. Still fetch-once-per-
+// identity: one bounded loop inside one hydrate, no timers or retries.
+async function listAllChats(): Promise<ServerChat[]> {
+  const all: ServerChat[] = [];
+  const first = await apiListChatsPage();
+  all.push(...first.data);
+  let fetched = first.data.length;
+  while (fetched < first.pagination.total) {
+    const next = await apiListChatsPage({
+      archived: false,
+      limit: 50,
+      offset: fetched,
+    });
+    if (next.data.length === 0) break; // no progress: never spin
+    all.push(...next.data);
+    fetched += next.data.length;
+  }
+  let archivedOffset = 0;
+  for (;;) {
+    const page = await apiListChatsPage({
+      archived: true,
+      limit: 50,
+      offset: archivedOffset,
+    });
+    if (page.data.length === 0) break;
+    all.push(...page.data);
+    archivedOffset += page.data.length;
+    if (archivedOffset >= page.pagination.total) break;
+  }
+  return all;
+}
+
 export async function hydrateChats(
   auth: ChatAuth,
   opts?: { notify?: ChatNotify },
@@ -1420,7 +1484,7 @@ export async function hydrateChats(
   await adoptGuestChats(opts);
   let server: ServerChat[];
   try {
-    server = await apiListChats();
+    server = await listAllChats();
   } catch (error) {
     // Failed hydrate keeps the memory paint + one toast.
     notifyFailure(
