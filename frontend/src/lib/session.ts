@@ -552,6 +552,56 @@ export function updateProfile(patch: Partial<Profile>) {
   emit();
 }
 
+// ---- Settings override map (settings Step 0 kernel) ------------------------
+//
+// Per-scope setting overrides (per-chat today, per-subject next):
+// memory-only, identity-scoped, never persisted. Every identity transition
+// wipes them in `resetChatStoreForIdentity` — a new identity must never
+// inherit another user's per-chat choices. Streams resolve through
+// `resolveTiered` in settings-scope.ts; "Use default" deletes the entry
+// (value `undefined`), and deletion and never-set are identical downstream.
+
+export type ScopeKind = "chat" | "subject";
+
+/** Canonical scope key: `chat:<code>`, `subject:<code>`. */
+export function scopeKey(scope: ScopeKind, id: string): string {
+  return `${scope}:${id}`;
+}
+
+type OverrideValue = string | boolean | number;
+const scopeOverrides = new Map<string, OverrideValue>();
+
+function overrideKey(setting: string, scope: string): string {
+  return `${scope}:${setting}`;
+}
+
+/** Read one scoped override (`undefined` = unset → inherit the tier above). */
+export function getScopeOverride(
+  setting: string,
+  scope: string,
+): OverrideValue | undefined {
+  return scopeOverrides.get(overrideKey(setting, scope));
+}
+
+/**
+ * Write one scoped override. `undefined` deletes the entry (the "Use
+ * default" path).
+ */
+export function setScopeOverride(
+  setting: string,
+  scope: string,
+  value: OverrideValue | undefined,
+): void {
+  const key = overrideKey(setting, scope);
+  if (value === undefined) scopeOverrides.delete(key);
+  else scopeOverrides.set(key, value);
+}
+
+/** Empty the override map (identity transitions; engines never call this). */
+export function clearScopeOverrides(): void {
+  scopeOverrides.clear();
+}
+
 // Server→local seed state (logout + Google relogin fix).
 //
 // Campus/semester/branch/subjects render from the LOCAL store, which is
@@ -1712,6 +1762,10 @@ export function resetChatStoreForIdentity(
   hydrateSyncError = null;
   chatSyncErrors.clear();
   createSyncError = null;
+  // Settings overrides are identity-scoped: a transition must never leak
+  // one user's per-chat choices into the next identity — including the
+  // preserve paths (kept guest rows carry no overrides with them).
+  clearScopeOverrides();
   if (guests != null) restoreTrueGuestChats(guests);
   emit();
 }
@@ -1776,4 +1830,5 @@ export function __resetChatBackingForTesting(): void {
   chatSyncErrors.clear();
   createSyncError = null;
   preservedGuestSeedKey = null;
+  clearScopeOverrides();
 }

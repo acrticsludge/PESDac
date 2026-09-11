@@ -630,6 +630,9 @@ const DIFFICULTIES = [
 export function StudySection() {
   useSessionVersion();
   const profile = getProfile();
+  // Step 0 (settings kernel): pre-placed for the study-quiz stream — the
+  // write-through `savePreference` notify target. Do not add a second one.
+  const toast = useToast();
   return (
     <VStack gap={5}>
       <SettingsCard title="Schedule & level">
@@ -718,6 +721,9 @@ const CITATIONS = [
 export function AssistantSection() {
   useSessionVersion();
   const profile = getProfile();
+  // Step 0 (settings kernel): pre-placed for the follow-ups/shaping streams
+  // — the write-through `savePreference` notify target. Do not add a second one.
+  const toast = useToast();
   return (
     <VStack gap={5}>
       <SettingsCard title="Answers">
@@ -963,6 +969,9 @@ const TIMEZONES = [
 export function LanguageSection() {
   useSessionVersion();
   const profile = getProfile();
+  // Step 0 (settings kernel): pre-placed for the locale stream — the
+  // write-through `savePreference` notify target. Do not add a second one.
+  const toast = useToast();
   return (
     <VStack gap={5}>
       <SettingsCard title="Language & region">
