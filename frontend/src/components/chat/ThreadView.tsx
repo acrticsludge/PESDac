@@ -109,6 +109,9 @@ import {
   getFeedback,
   setFeedback,
   feedbackKey,
+  getScopeOverride,
+  setScopeOverride,
+  scopeKey,
   type FeedbackVote,
   type ChatAuth,
   identitySeedKey,
@@ -127,6 +130,11 @@ import {
   FOCUS_COMPOSER_EVENT,
 } from "../../lib/session";
 import { useAuth, useAuthEpoch } from "../../lib/auth";
+import {
+  FOLLOW_UPS_SETTING,
+  nextFollowUpsOverride,
+  resolveFollowUps,
+} from "../../lib/setting-followups";
 import { planResponse, type ResponseMode } from "../../lib/responder";
 
 /* -------------------------------------------------------------------------- */
@@ -760,6 +768,9 @@ export default function ThreadView({
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
   // Copy-transcript menu feedback.
   const [transcriptCopied, setTranscriptCopied] = useState(false);
+  // Per-chat follow-ups repaint: the kernel override map is intentionally
+  // emit-free, so the menu entry bumps this to repaint the pills gate.
+  const [, setFollowUpsTick] = useState(0);
 
   // Session overlay: blocks appended this session (persisted per code).
   // Read directly (see Pesdac.tsx note) so sent messages and renames show
@@ -839,6 +850,23 @@ export default function ThreadView({
     }
     return null;
   })();
+
+  // Follow-ups visibility gate (settings S1): per-chat override wins,
+  // otherwise the global profile default. Render-only — the server keeps
+  // sending suggestions; this decides display.
+  const showFollowUps = resolveFollowUps(sessionKey);
+  // Thread-menu state for the single three-state item (spec §3).
+  const followUpsScope = scopeKey("chat", sessionKey);
+  const followUpsOverride = getScopeOverride(
+    FOLLOW_UPS_SETTING,
+    followUpsScope,
+  ) as boolean | undefined;
+  const followUpsMenuState =
+    followUpsOverride === undefined
+      ? `Use default (${showFollowUps ? "On" : "Off"})`
+      : followUpsOverride
+        ? "On"
+        : "Off";
 
   // In-thread find: substring match over the block corpus, current hit
   // scrolled into view with an accent outline.
@@ -1854,6 +1882,18 @@ export default function ThreadView({
                                   : "Copy transcript",
                                 onClick: copyTranscript,
                               },
+                              {
+                                label: "Follow-up suggestions — this chat",
+                                description: followUpsMenuState,
+                                onClick: () => {
+                                  setScopeOverride(
+                                    FOLLOW_UPS_SETTING,
+                                    followUpsScope,
+                                    nextFollowUpsOverride(followUpsOverride),
+                                  );
+                                  setFollowUpsTick((t) => t + 1);
+                                },
+                              },
                             ]}
                           />
                         </>
@@ -1957,7 +1997,7 @@ export default function ThreadView({
                         in the sticky dock, so scrolled content can't slide
                         under them. No avatar/bubble: centered pills read as
                         "what to ask next", not as another answer. */}
-                    {live == null && (followUps || sendError) && (
+                    {live == null && ((followUps != null && showFollowUps) || sendError) && (
                       <HStack gap={2} wrap="wrap" vAlign="center" hAlign="center">
                         {sendError ? (
                           <Button
