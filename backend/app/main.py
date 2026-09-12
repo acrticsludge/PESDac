@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -40,6 +42,41 @@ _HTTP_CODE_BY_STATUS: dict[int, str] = {
 logger = logging.getLogger("pesdac")
 
 
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Boot warmup: pay cold-start costs here instead of on the first user
+    request. Fresh boots otherwise burn ~5s on TLS + Postgres auth for the
+    first pooled connection (measured) plus ~3s on the first JWKS fetch —
+    all of it landing inside the user's first paint. Awaited (not
+    background) so "startup complete" means genuinely ready; every leg is
+    failure-tolerant — a failed warmup only logs, and the first request
+    pays the cold cost exactly as before (no new failure mode)."""
+    try:
+        from sqlalchemy import text
+
+        from app.db import get_engine
+
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        logger.info("startup warmup: db pool connected")
+    except Exception as exc:
+        logger.warning(
+            "startup warmup: db connect skipped category=%s",
+            type(exc).__name__,
+        )
+    try:
+        from app.auth.betterauth import warm_jwks_cache
+
+        if await warm_jwks_cache():
+            logger.info("startup warmup: jwks prefetched")
+    except Exception as exc:
+        logger.warning(
+            "startup warmup: jwks prefetch skipped category=%s",
+            type(exc).__name__,
+        )
+    yield
+
+
 def _cors_error_headers(request: Request) -> dict[str, str]:
     """CORS headers for error responses, mirroring CORSMiddleware.
 
@@ -69,7 +106,7 @@ def create_app(validate: bool = True) -> FastAPI:
     if validate:
         config.validate_startup(require_db=True)
 
-    app = FastAPI(title="PESDac API", version="0.1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app = FastAPI(title="PESDac API", version="0.1.0", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=_lifespan)
 
     app.add_middleware(
         CORSMiddleware,

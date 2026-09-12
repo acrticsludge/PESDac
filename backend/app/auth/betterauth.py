@@ -76,6 +76,23 @@ async def _get_jwk_for_async(kid: str, force_refresh: bool = False) -> dict | No
     return _jwks_cache.get(kid)
 
 
+async def warm_jwks_cache() -> bool:
+    """Prefetch JWKS at startup so the first authed request skips the
+    fetch (~3s cold). Same never-throw guarantee as the lookup path:
+    False on any failure, and the first request simply fetches then."""
+    global _fetched_at
+    try:
+        fetched = await _fetch_jwks()
+    except Exception as exc:
+        logger.warning("jwks_warmup_failed category=%s", type(exc).__name__)
+        return False
+    if not fetched:
+        return False
+    _jwks_cache.update(fetched)
+    _fetched_at = time.monotonic()
+    return True
+
+
 def _resolve_issuer() -> str | None:
     base = (config.BETTER_AUTH_URL or "").rstrip("/")
     return base or None

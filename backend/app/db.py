@@ -28,7 +28,16 @@ def get_engine():
     if _engine is None:
         if not config.DATABASE_URL:
             raise RuntimeError("DATABASE_URL is not set")
-        _engine = create_engine(config.DATABASE_URL, pool_pre_ping=True)
+        # connect_timeout (Postgres only — pysqlite takes `timeout`, so
+        # SQLite test engines must not receive it): a suspended /
+        # unreachable Neon must fail fast (warning + serve) instead of
+        # hanging startup forever — the lifespan warmup and first requests
+        # share this bound. psycopg2 has no default timeout; 10s covers
+        # cold TLS + auth with margin.
+        kwargs: dict = {"pool_pre_ping": True}
+        if config.DATABASE_URL.startswith("postgres"):
+            kwargs["connect_args"] = {"connect_timeout": 10}
+        _engine = create_engine(config.DATABASE_URL, **kwargs)
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
     assert _SessionLocal is not None
     return _engine
