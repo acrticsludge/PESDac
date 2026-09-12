@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -71,5 +71,12 @@ class Profile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
+
+    # Phase 4 (T4d): purge window lookup
+    # (`select(Profile.user_id).where(Profile.retention == ...)`).
+    __table_args__ = (
+        Index("ix_profiles_retention", "retention"),
+    )
+
     # Back-reference for User.profile delete cascade (see models/users.py).
     user: Mapped["User"] = relationship("User", back_populates="profile")
