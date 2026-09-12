@@ -60,6 +60,23 @@ class Chat(Base):
             "is_pinned",
             "updated_at",
         ),
+        # Phase 4 (T4d): ownership lookup `_get_owned` (user_id, code).
+        Index("ix_chats_user_code", "user_id", "code"),
+        # Export sort `GET /users/me/export` (user_id, created_at).
+        Index("ix_chats_user_created", "user_id", "created_at"),
+        # Subject filter scoped by user (`list_chats ?subject=`).
+        Index("ix_chats_user_subject", "user_id", "subject"),
+        # Title `ilike` search: migration 0007 created this as a
+        # trigram-GIN index on Postgres but models never declared it
+        # (drift). Declared here so metadata matches the migration;
+        # the GIN/trgm options render on Postgres only — SQLite (tests)
+        # gets a plain btree index with the same name.
+        Index(
+            "ix_chats_title_trgm",
+            "title",
+            postgresql_using="gin",
+            postgresql_ops={"title": "gin_trgm_ops"},
+        ),
     )
 
     # Back-reference for User.chats delete cascade (see models/users.py).
