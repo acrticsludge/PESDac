@@ -1036,9 +1036,9 @@ export default function ThreadView({
   // partial — same path). Failure rolls back ONLY the assistant block +
   // one toast; the user message is preserved (slice-12). Guests/demos
   // no-op inside the helper (memory-only, no fetch). The live send is
-  // tracked in the outbox queue (pending → sent; forgotten on failure —
-  // the persistent composer error + toast own that surface, and the
-  // queue never classifies an error it cannot see).
+  // tracked in the outbox queue (pending → sent / failed) under one
+  // idempotency key; persistAppendedBlock settles the record and
+  // enqueues a durable replay on retryable failure.
   const appendAndPersist = (block: Block) => {
     if (!isBacked) {
       appendBlocks(sessionKey, [block]);
@@ -1046,18 +1046,20 @@ export default function ThreadView({
     }
     const snapshot = getOverlay(sessionKey);
     appendBlocks(sessionKey, [block]);
+    // One idempotency key per send: the live send and any durable outbox
+    // replay share it, so retries converge instead of duplicating.
+    // persistAppendedBlock owns settling the queue record (sent / failed
+    // + durable enqueue); this site only rolls back the optimistic paint.
     const sendId = newClientKey();
     outboxQueue.track(sendId);
-    void persistAppendedBlock(sessionKey, block, chatAuth, { notify }).then(
-      (ok) => {
-        if (!ok) {
-          setOverlay(sessionKey, snapshot);
-          outboxQueue.forget(sendId);
-          return;
-        }
-        outboxQueue.markSent(sendId);
-      },
-    );
+    void persistAppendedBlock(sessionKey, block, chatAuth, {
+      notify,
+      clientMsgKey: sendId,
+    }).then((ok) => {
+      if (!ok) {
+        setOverlay(sessionKey, snapshot);
+      }
+    });
   };
 
   const finalizeTurn = (
@@ -1219,21 +1221,24 @@ export default function ThreadView({
     // Staged files travel with this message; clear the drawer either way.
     setAttachments([]);
     revokeStaged(staged);
-    // Live-send queue record (same doctrine as appendAndPersist above).
-    const sendId = newClientKey();
-    outboxQueue.track(sendId);
+    // One queue record + idempotency key PER BLOCK: every persisted block
+    // is its own server message, and sharing a key across blocks would
+    // dedupe the later ones away. persistAppendedBlock settles each
+    // record (sent / failed + durable enqueue); this site only rolls
+    // back the optimistic paint and gates the assistant turn.
     void (async () => {
       for (const block of fresh) {
+        const blockSendId = newClientKey();
+        outboxQueue.track(blockSendId);
         const ok = await persistAppendedBlock(sessionKey, block, chatAuth, {
           notify,
+          clientMsgKey: blockSendId,
         });
         if (!ok) {
           setOverlay(sessionKey, snapshot);
-          outboxQueue.forget(sendId);
           return;
         }
       }
-      outboxQueue.markSent(sendId);
       startTurn(text);
     })();
   };

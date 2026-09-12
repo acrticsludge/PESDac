@@ -184,11 +184,20 @@ export class OutboxStore {
     }
   }
 
-  /** All ops, oldest first (FIFO). Malformed rows are dropped, never surfaced. */
+  /**
+   * All ops, oldest first (FIFO). Malformed rows are dropped, never
+   * surfaced. Memory entries missing from the IDB rows are unioned in:
+   * a `put` that fell back to memory after a transient IDB failure must
+   * still drain — otherwise the op would sit invisible to the flush
+   * worker (never sent, never evicted). IDB rows win on id collisions
+   * (a memory copy alongside an IDB row is stale by construction).
+   */
   async list(): Promise<OutboxOp[]> {
+    const byCreated = (a: OutboxOp, b: OutboxOp) => a.createdAt - b.createdAt;
+    const memory = [...this.memory.values()].filter(isValidOutboxOp);
     const db = await this.database();
     if (!db) {
-      return [...this.memory.values()].sort((a, b) => a.createdAt - b.createdAt);
+      return memory.sort(byCreated);
     }
     let rows: unknown[];
     try {
@@ -196,10 +205,14 @@ export class OutboxStore {
         store.getAll(),
       );
     } catch {
-      return [...this.memory.values()].sort((a, b) => a.createdAt - b.createdAt);
+      return memory.sort(byCreated);
     }
     const valid = rows.filter(isValidOutboxOp);
-    valid.sort((a, b) => a.createdAt - b.createdAt);
+    const seen = new Set(valid.map((op) => op.id));
+    for (const op of memory) {
+      if (!seen.has(op.id)) valid.push(op);
+    }
+    valid.sort(byCreated);
     return valid;
   }
 

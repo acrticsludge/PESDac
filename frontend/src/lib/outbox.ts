@@ -21,11 +21,13 @@
 // interval, registered once via `startOutboxSchedulers()` (SSR-safe
 // no-op without `window`).
 //
-// Cross-tab single-flusher (T5d): `navigator.locks` when available,
-// else a `localStorage` lease (timestamp + TTL — payloads never touch
-// localStorage, only the lease). No locks API and no storage (private
-// mode / node) → run inline: correctness holds because every replay
-// carries its idempotency key and the server dedupes into a 200.
+// Cross-tab flush guard, best-effort (T5d): `navigator.locks` is only
+// QUERIED (never held across network I/O), else a `localStorage` lease
+// (timestamp + TTL — payloads never touch localStorage, only the lease).
+// Two tabs can still flush concurrently inside a race window; that is
+// safe (not merely unlikely) because every replay carries its
+// idempotency key and the server dedupes into a 200. No locks API and
+// no storage (private mode / node) → run inline under the same guarantee.
 //
 // Cap + eviction (T5d): `MAX_OPS` pending ops; beyond that the oldest
 // op is evicted (dropped with a visible `evicted` count — bounded disk

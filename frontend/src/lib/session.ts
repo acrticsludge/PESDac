@@ -27,6 +27,8 @@ import {
   type ServerChat,
   type ServerMessage,
 } from "./chat-sync.ts";
+import { enqueueAppend } from "./outbox.ts";
+import { classifyOutboxError, outboxQueue } from "./outbox-queue.ts";
 
 export type CustomChat = {
   code: string;
@@ -1257,18 +1259,49 @@ export async function persistAppendedBlock(
   code: string,
   block: Block,
   auth: ChatAuth,
-  opts?: { notify?: ChatNotify },
+  opts?: { notify?: ChatNotify; clientMsgKey?: string },
 ): Promise<boolean> {
   if (auth == null || !isServerChat(code)) return true;
   const m = blockToMessage(block);
+  const sendId = opts?.clientMsgKey;
   try {
-    await apiAppendMessage(code, m);
+    await apiAppendMessage(
+      code,
+      m,
+      sendId != null ? { clientMsgKey: sendId } : undefined,
+    );
     if (chatSyncErrors.delete(code)) emit();
+    // The live send carries the same idempotency key the durable outbox
+    // would replay with, so every outcome converges: success settles the
+    // queue record, and a failure the live send never saw resolves to the
+    // original row (200) instead of a duplicate.
+    if (sendId != null) outboxQueue.markSent(sendId);
     return true;
   } catch (error) {
     notifyFailure(error, opts?.notify, "Couldn't save that message. Try again.");
     if (!isAuthFailure(error)) {
       chatSyncErrors.set(code, "Couldn't save that message. Try again.");
+      if (sendId != null && outboxQueue.get(sendId)?.status === "pending") {
+        // Durable retry (outbox T5c): persist the same keyed send for the
+        // paced flush worker. Pending-guarded — a flush that already
+        // settled this record (sent, or failed with its own error) must
+        // not be overwritten, and a settled send must not be resurrected.
+        if (classifyOutboxError(error) === "failed-retryable") {
+          try {
+            await enqueueAppend(
+              code,
+              { role: m.role, content: m.content },
+              { clientKey: sendId, kick: true },
+            );
+          } catch {
+            // Store unavailable — the failed queue record below stays
+            // visible for manual retry.
+          }
+        }
+        if (outboxQueue.get(sendId)?.status === "pending") {
+          outboxQueue.markFailed(sendId, error);
+        }
+      }
       emit();
     }
     return false;
