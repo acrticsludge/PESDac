@@ -272,8 +272,21 @@ def clear_chats(request: Request, result: User = Depends(get_current_user), db: 
 
 
 @router.post("/{code}/messages", status_code=201)
-async def append_message(code: str, body: MessageCreate, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def append_message(code: str, body: MessageCreate, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Append one turn body; `seq` is server-assigned (max+1, retry ×3).
+
+    Slim path (Phase 5 T5-pre): one MAX query per attempt — no COUNT
+    (dense `seq` from 0 ⇒ count is `next_seq + 1`), no post-commit
+    refreshes (the response is built from the flushed row). Correct with
+    or without the Phase 4 index (the index only speeds the MAX query).
+
+    Idempotency (Phase 5 T5a, mirrors the `clientAdoptKey` precedent):
+    a retried append resends the same `clientMsgKey` — return the
+    existing row as `200` instead of appending a duplicate. The
+    per-chat unique constraint (`uq_messages_chat_client_key`) is the
+    race safety net; NULL keys (appends without a key) never conflict.
+    The `(chat_id, seq)` unique constraint stays the seq race safety
+    net (lost race ⇒ rollback, converge on the winner's max).
 
     Cross-user, unknown, and demo/static codes all 404 with the same
     NOT_FOUND body as the container routes (no existence oracle).
@@ -285,6 +298,15 @@ async def append_message(code: str, body: MessageCreate, request: Request, resul
     chat = _get_owned(db, result.id, code)
     if chat is None:
         return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Chat not found."))
+    msg_key = body.clientMsgKey
+    if msg_key is not None:
+        existing = db.scalar(
+            select(Message).where(
+                Message.chat_id == chat.id, Message.client_msg_key == msg_key
+            )
+        )
+        if existing is not None:
+            return JSONResponse(status_code=200, content=_msg_out(existing))
     for _ in range(3):
         next_seq = db.scalar(select(func.max(Message.seq)).where(Message.chat_id == chat.id))
         next_seq = 0 if next_seq is None else next_seq + 1
@@ -293,32 +315,43 @@ async def append_message(code: str, body: MessageCreate, request: Request, resul
             seq=next_seq,
             role=body.role,
             content=body.content,
+            client_msg_key=msg_key,
         )
         # Touch the container so sidebar ordering keeps working; the
-        # lean-list columns ride the same txn (FR2). Counts derive from the
-        # pre-add total so a retry after a lost append race converges on
-        # the winner's max instead of double-counting.
-        existing = db.scalar(
-            select(func.count()).select_from(Message).where(Message.chat_id == chat.id)
-        ) or 0
+        # lean-list columns ride the same txn (FR2). `seq` is dense from
+        # 0 (truncate only deletes the tail), so the count derives from
+        # the assigned seq — no COUNT query.
         chat.updated_at = datetime.now(timezone.utc)
-        chat.msg_count = existing + 1
+        chat.msg_count = next_seq + 1
         chat.last_seq = next_seq
         chat.preview = _preview_from_content(body.content)
         db.add(msg)
         try:
+            # Flush first: the 201 body is built from the flushed row,
+            # so the commit below costs no refresh SELECTs.
+            db.flush()
+            payload = _msg_out(msg)
             db.commit()
         except IntegrityError:
-            # Lost a concurrent append race: roll back and converge on
-            # the winner's max (mirrors `_insert_or_select` doctrine).
+            # Lost a concurrent append race (seq) or a keyed retry race
+            # (client key): roll back and converge — a keyed winner is
+            # the truth (return it as 200), otherwise retry on the
+            # winner's max (mirrors `_insert_or_select` doctrine).
             db.rollback()
             chat = _get_owned(db, result.id, code)
             if chat is None:
                 return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Chat not found."))
+            if msg_key is not None:
+                winner = db.scalar(
+                    select(Message).where(
+                        Message.chat_id == chat.id,
+                        Message.client_msg_key == msg_key,
+                    )
+                )
+                if winner is not None:
+                    return JSONResponse(status_code=200, content=_msg_out(winner))
             continue
-        db.refresh(msg)
-        db.refresh(chat)
-        return JSONResponse(status_code=201, content=_msg_out(msg))
+        return JSONResponse(status_code=201, content=payload)
     return JSONResponse(status_code=409, content=error_body("CONFLICT", "Could not append message. Retry."))
 
 

@@ -108,9 +108,18 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[dict] = mapped_column(JsonType, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    # Message idempotency (Phase 5 T5a, mirrors `Chat.client_adopt_key`):
+    # one client-generated key per send, stored with a per-chat unique
+    # constraint. Nullable — appends without a key behave exactly as
+    # before. NULLs never conflict (Postgres + SQLite treat NULLs as
+    # distinct), so only keyed retries participate in conflict-200.
+    client_msg_key: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
 
     __table_args__ = (
         UniqueConstraint("chat_id", "seq", name="uq_messages_chat_seq"),
+        UniqueConstraint(
+            "chat_id", "client_msg_key", name="uq_messages_chat_client_key"
+        ),
         CheckConstraint(
             "role IN ('user','assistant','system')", name="messages_role_check"
         ),

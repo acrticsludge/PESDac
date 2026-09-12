@@ -107,6 +107,10 @@ class MessageCreate(BaseModel):
 
     role: Literal["user", "assistant", "system"]
     content: dict[str, Any]
+    # Message idempotency key (Phase 5 T5a, mirrors `ChatCreate.clientAdoptKey`):
+    # one key per send, generated client-side via `crypto.randomUUID()`.
+    # Optional — appends omitting it behave exactly as before.
+    clientMsgKey: str | None = None
 
     @field_validator("content")
     @classmethod
@@ -114,6 +118,18 @@ class MessageCreate(BaseModel):
         if len(json.dumps(v).encode("utf-8")) > MESSAGE_CONTENT_MAX_BYTES:
             raise ValueError("Content exceeds 100KB.")
         return v
+
+    @field_validator("clientMsgKey")
+    @classmethod
+    def _msg_key(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        clean = v.strip()
+        if clean == "":
+            return None
+        if len(clean) > 64:
+            raise ValueError("Message key must be at most 64 characters.")
+        return clean
 
 
 class MessageOut(BaseModel):
