@@ -312,7 +312,9 @@ def list_messages(
     code: str,
     result: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    limit: int = Query(default=200, ge=1, le=200),
+    # Phase 4 (T4b): smaller default page (was 200 x up-to-100KB bodies
+    # ≈ 20MB worst case); `le=200` ceiling and the slice envelope stay.
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
     """List turn bodies `seq`-ascending in the slice `{data, pagination}` envelope."""

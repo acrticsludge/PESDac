@@ -42,7 +42,7 @@ def test_messages_list_returns_seq_ascending_slice_envelope(client):
     _append(client, code, role="system", content={"n": 1})
     body = client.get(f"/api/v1/chats/{code}/messages").json()
     assert [m["seq"] for m in body["data"]] == [0, 1, 2]
-    assert body["pagination"] == {"limit": 200, "offset": 0, "total": 3}
+    assert body["pagination"] == {"limit": 50, "offset": 0, "total": 3}
     body = client.get(f"/api/v1/chats/{code}/messages", params={"limit": 2, "offset": 1}).json()
     assert [m["seq"] for m in body["data"]] == [1, 2]
     assert body["pagination"] == {"limit": 2, "offset": 1, "total": 3}
