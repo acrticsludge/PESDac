@@ -134,7 +134,7 @@ def _get_owned(db: Session, user_id, code: str) -> Chat | None:
 
 
 @router.get("")
-async def list_chats(
+def list_chats(
     result: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     archived: bool = False,
@@ -156,7 +156,7 @@ async def list_chats(
 
 
 @router.post("", status_code=201)
-async def create_chat(body: ChatCreate, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_chat(body: ChatCreate, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     if limited := rate_limit.check("chats-create", request, 60, 60):
@@ -204,7 +204,7 @@ async def create_chat(body: ChatCreate, request: Request, result: User = Depends
 
 
 @router.patch("/{code}")
-async def patch_chat(code: str, body: ChatPatch, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def patch_chat(code: str, body: ChatPatch, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     chat = _get_owned(db, result.id, code)
@@ -226,7 +226,7 @@ async def patch_chat(code: str, body: ChatPatch, request: Request, result: User 
 
 
 @router.delete("/{code}", status_code=204)
-async def delete_chat(code: str, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_chat(code: str, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     chat = _get_owned(db, result.id, code)
@@ -238,7 +238,7 @@ async def delete_chat(code: str, request: Request, result: User = Depends(get_cu
 
 
 @router.delete("", status_code=200)
-async def clear_chats(request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def clear_chats(request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Delete-all (mirrors clearAllChats): chats only, profile/demo kept.
 
     Returns the same `{data, pagination}` envelope as `list_chats` so
@@ -308,7 +308,7 @@ async def append_message(code: str, body: MessageCreate, request: Request, resul
 
 
 @router.get("/{code}/messages")
-async def list_messages(
+def list_messages(
     code: str,
     result: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -327,7 +327,7 @@ async def list_messages(
 
 
 @router.delete("/{code}/messages")
-async def truncate_messages(
+def truncate_messages(
     code: str,
     request: Request,
     result: User = Depends(get_current_user),

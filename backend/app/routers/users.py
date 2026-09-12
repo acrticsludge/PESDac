@@ -32,7 +32,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.get("/me/export")
-async def export_me(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def export_me(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     profile = db.get(Profile, result.id)
     chats = db.scalars(select(Chat).where(Chat.user_id == result.id).order_by(Chat.created_at)).all()
     demos = db.scalars(select(DemoState).where(DemoState.user_id == result.id)).all()
@@ -46,7 +46,7 @@ async def export_me(result: User = Depends(get_current_user), db: Session = Depe
 
 
 @router.delete("/me", status_code=204)
-async def delete_me(request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_me(request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     if limited := rate_limit.check("users-delete", request, 10, 300):

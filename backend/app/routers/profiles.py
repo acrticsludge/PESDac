@@ -23,13 +23,13 @@ def _get_or_create(db: Session, user):
 
 
 @router.get("/me")
-async def get_me(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_me(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     profile = _get_or_create(db, result)
     return profile_to_out(profile)
 
 
 @router.patch("/me")
-async def patch_me(body: ProfilePatch, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def patch_me(body: ProfilePatch, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     if limited := rate_limit.check("profiles-patch", request, 60, 60):
