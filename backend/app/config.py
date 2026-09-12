@@ -66,6 +66,16 @@ ENV: str = _get("ENV", "dev") or "dev"
 
 DATABASE_URL: str | None = _get("DATABASE_URL")
 
+# Pooled connection string (Neon `-pooler` host). Preferred for app
+# traffic (T2.1); the direct DATABASE_URL remains the fallback (and is
+# still what migrations use). Read structure only — never log values.
+DATABASE_URL_POOLED: str | None = _get("DATABASE_URL_POOLED")
+
+
+def effective_database_url() -> str | None:
+    """App-traffic connection string: pooled first, direct fallback."""
+    return DATABASE_URL_POOLED or DATABASE_URL
+
 # BetterAuth configuration
 BETTER_AUTH_URL: str | None = _get("BETTER_AUTH_URL")
 BETTER_AUTH_SECRET: str | None = _get("BETTER_AUTH_SECRET")
@@ -98,7 +108,7 @@ def validate_startup(require_db: bool = True) -> None:
     errors: list[str] = []
     if ENV not in ("dev", "staging", "prod", "test"):
         errors.append("ENV must be one of dev/staging/prod/test")
-    if require_db and not DATABASE_URL:
+    if require_db and not effective_database_url():
         errors.append("DATABASE_URL is required")
     if not BETTER_AUTH_URL:
         errors.append("BETTER_AUTH_URL is required")
