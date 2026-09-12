@@ -32,7 +32,8 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 # Phase 4 (T4a): hard-cap export rows so large accounts get a bounded
 # response instead of an unbounded multi-MB dump. Same shape — arrays
-# are newest-window-truncated (created_at ascending, capped at the tail).
+# are newest-window-truncated: newest first in SQL, reversed back to
+# ascending for the response. Demos are label-ordered (deterministic).
 # Pagination is future work (deferred job queue covers a still-slow export).
 EXPORT_MAX_ROWS = 200
 
@@ -43,12 +44,13 @@ def export_me(result: User = Depends(get_current_user), db: Session = Depends(ge
     chats = db.scalars(
         select(Chat)
         .where(Chat.user_id == result.id)
-        .order_by(Chat.created_at)
+        .order_by(Chat.created_at.desc())
         .limit(EXPORT_MAX_ROWS)
-    ).all()
+    ).all()[::-1]
     demos = db.scalars(
         select(DemoState)
         .where(DemoState.user_id == result.id)
+        .order_by(DemoState.demo_label)
         .limit(EXPORT_MAX_ROWS)
     ).all()
     return {

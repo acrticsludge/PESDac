@@ -227,7 +227,7 @@ app = None
 # silently boots a half-configured server.
 if (
     config.ENV != "test"
-    and config.DATABASE_URL
+    and config.effective_database_url()
     and config.FRONTEND_ORIGINS
     and config.BETTER_AUTH_URL
     and config.BETTER_AUTH_SECRET
@@ -243,7 +243,7 @@ else:
     # No env / test env: no module-level app. Uvicorn entry-points
     # must run from a script that calls create_app(validate=...) with
     # full config — never the import-time `app`.
-    if config.ENV not in ("test", None) and not config.DATABASE_URL:
+    if config.ENV not in ("test", None) and not config.effective_database_url():
         logger.warning(
             "PESDac API not built: missing DATABASE_URL. "
             "Set ENV=test for tests, or supply DATABASE_URL."
