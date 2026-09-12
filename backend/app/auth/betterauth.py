@@ -34,6 +34,10 @@ _ALLOWED_ALGORITHMS: tuple[str, ...] = ("RS256", "EdDSA")
 _jwks_cache: dict[str, dict] = {}
 _fetched_at: float = 0.0
 _TTL_SECONDS = 3600  # 1 hour
+# T1.2 timeout review: the lifespan warmup in app/main.py measures ~3s for a
+# cold JWKS fetch, so lowering toward ~2s would risk timeout regressions on
+# slow networks. Keep 5s; the 10s tail is bounded by T1.1 instead (single
+# fetch + fail-fast retry), and keep-alive below removes per-fetch TLS.
 _JWKS_HTTP_TIMEOUT_S = 5.0
 
 # T1.1: singleflight lock + short-TTL negative cache. Concurrent lookups
@@ -48,6 +52,22 @@ _JWKS_HTTP_TIMEOUT_S = 5.0
 _NEGATIVE_TTL_SECONDS = 30.0
 _fetch_failed_at: float = 0.0
 _jwks_fetch_lock = asyncio.Lock()
+
+# T1.2: one process-wide keep-alive client for all JWKS fetches. Created
+# lazily; every call site holds _jwks_fetch_lock while fetching, so the lazy
+# init is race-free in practice (a duplicated init from a direct _fetch_jwks
+# caller would only leak one idle client). Process lifetime is intentional:
+# wiring an explicit aclose would require touching lifespan/deps, which P1
+# does not own — httpx reaps idle keep-alive connections itself.
+_shared_client: httpx.AsyncClient | None = None
+
+
+def _get_shared_client() -> httpx.AsyncClient:
+    """Return the shared JWKS HTTP client (keep-alive connection reuse)."""
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = httpx.AsyncClient(timeout=_JWKS_HTTP_TIMEOUT_S)
+    return _shared_client
 
 
 def _lookup_cached(kid: str, force_refresh: bool, now: float) -> tuple[bool, dict | None]:
@@ -72,10 +92,9 @@ async def _fetch_jwks() -> dict[str, dict]:
     if not config.BETTER_AUTH_URL:
         raise RuntimeError("BETTER_AUTH_URL not configured")
     jwks_url = f"{config.BETTER_AUTH_URL}/api/auth/jwks"
-    async with httpx.AsyncClient(timeout=_JWKS_HTTP_TIMEOUT_S) as client:
-        resp = await client.get(jwks_url)
-        resp.raise_for_status()
-        data = resp.json()
+    resp = await _get_shared_client().get(jwks_url)
+    resp.raise_for_status()
+    data = resp.json()
 
     keys = data.get("keys", [])
     return {

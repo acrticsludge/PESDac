@@ -173,3 +173,82 @@ def test_cached_kid_served_during_negative_window():
             assert await betterauth._get_jwk_for_async("k2") is None
 
     asyncio.run(_run())
+
+
+# --- T1.2: shared httpx.AsyncClient with keep-alive + timeout review ---
+
+
+class _StubResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _StubClient:
+    """Stand-in for the shared httpx.AsyncClient: records GETs, no I/O."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.get_calls: list[str] = []
+
+    async def get(self, url):
+        self.get_calls.append(url)
+        return _StubResponse(self.payload)
+
+
+def test_shared_client_singleton_identity():
+    """One process-wide client instance (keep-alive), not one per fetch."""
+    from app.auth import betterauth
+
+    try:
+        assert betterauth._get_shared_client() is betterauth._get_shared_client()
+    finally:
+        betterauth._shared_client = None
+
+
+def test_fetch_jwks_uses_shared_client():
+    """_fetch_jwks reuses the shared client and still indexes by kid."""
+    from app.auth import betterauth
+
+    payload = {"keys": [{"kid": "k1", "kty": "RSA"}, {"no-kid": True}]}
+
+    async def _run():
+        stub = _StubClient(payload)
+        with patch.object(betterauth, "_shared_client", stub):
+            # Bypass lazy init so the stub is used verbatim.
+            with patch.object(
+                betterauth, "_get_shared_client", return_value=stub
+            ):
+                first = await betterauth._fetch_jwks()
+                second = await betterauth._fetch_jwks()
+        return stub, first, second
+
+    stub, first, second = asyncio.run(_run())
+    assert first == {"k1": {"kid": "k1", "kty": "RSA"}}
+    assert second == first
+    assert len(stub.get_calls) == 2
+    assert all(
+        url == "http://localhost:4321/api/auth/jwks" for url in stub.get_calls
+    )
+
+
+def test_timeout_review_keeps_five_seconds():
+    """Timeout stays 5s: the measured ~3s cold fetch (see lifespan warmup in
+    app/main.py) would regress under ~2s, so T1.1 bounds the tail instead."""
+    from app.auth import betterauth
+
+    assert betterauth._JWKS_HTTP_TIMEOUT_S == 5.0
+    client = betterauth._get_shared_client()
+    try:
+        assert client.timeout.connect == 5.0
+        assert client.timeout.read == 5.0
+        assert client.timeout.write == 5.0
+        assert client.timeout.pool == 5.0
+    finally:
+        # Reset the singleton so no cross-test client leaks between loops.
+        betterauth._shared_client = None
