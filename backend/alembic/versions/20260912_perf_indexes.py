@@ -14,7 +14,7 @@ does NOT recreate it — models now declare the same index (GIN/trgm
 options render on Postgres only) so metadata matches the migration.
 Reversible.
 
-Run with the DIRECT url (DATABASE_URL_UNPOOLED), never pooled.
+Run with the DIRECT url (DATABASE_URL, unpooled), never pooled.
 """
 
 from __future__ import annotations

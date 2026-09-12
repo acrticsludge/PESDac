@@ -36,10 +36,11 @@ class Base(DeclarativeBase):
 #   instead of queueing for half a minute inside the request.
 # - pool_recycle=300: drop connections before Neon idles them out, so a
 #   cold request never inherits a half-open socket.
-# - connect_timeout=5 (was 10): cold TLS + auth still fits (measured ~5s
-#   worst case at startup warmup), but a suspended/unreachable Neon fails
-#   fast instead of hanging startup and first requests. This is a
-#   client-side libpq parameter, so the pooler accepts it.
+# - connect_timeout=8: cold TLS + auth measured ~5s worst case at startup
+#   warmup (direct URL; pooler similar), so 8s keeps a margin while still
+#   failing fast on a suspended/unreachable Neon. pool_timeout=10 still
+#   bounds the total checkout wait. This is a client-side libpq
+#   parameter, so the pooler accepts it.
 # - statement_timeout=15s is enforced with a `connect` listener
 #   (`SET statement_timeout`), NOT via `connect_args["options"]`: the Neon
 #   transaction pooler rejects `options` as a startup parameter
@@ -52,7 +53,7 @@ _POOL_SIZE = 5
 _MAX_OVERFLOW = 5
 _POOL_TIMEOUT = 10
 _POOL_RECYCLE = 300
-_CONNECT_TIMEOUT = 5
+_CONNECT_TIMEOUT = 8
 _STATEMENT_TIMEOUT = "15s"
 
 
