@@ -27,13 +27,13 @@ def _out(row: DemoState) -> dict:
 
 
 @router.get("")
-async def list_demo(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_demo(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(DemoState).where(DemoState.user_id == result.id)).all()
     return {"overrides": [_out(r) for r in rows]}
 
 
 @router.put("/{label}")
-async def put_demo(label: str, body: DemoPut, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def put_demo(label: str, body: DemoPut, request: Request, result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if denied := check_mutation_origin(request):
         return denied
     if limited := rate_limit.check("demo-put", request, 60, 60):

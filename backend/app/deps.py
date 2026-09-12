@@ -9,6 +9,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app import config
 from app.auth.betterauth import verify_betterauth_token
@@ -61,6 +62,37 @@ def get_or_create_profile(db: Session, user: User) -> Profile:
     )
 
 
+def _resolve_user_sync(db: Session, sub: str, email: str, name: str) -> User:
+    """Sync DB half of get_current_user (runs in Starlette's threadpool).
+
+    The async caller awaits the JWKS verify on the loop, then hops here
+    for the blocking SELECT/INSERT/COMMIT so the loop never parks on the
+    sync SQLAlchemy driver. Sequential use only: one request, one hop,
+    no concurrent access to the session.
+    """
+    user = _insert_or_select(
+        db,
+        lambda: db.query(User).filter(User.auth_user_id == sub).one_or_none(),
+        lambda: User(
+            auth_user_id=sub,
+            email=email.lower().strip()[:254],
+            display_name=name.strip()[:80],
+        ),
+    )
+    # Display-name re-mirror (FR2, human-approved): BetterAuth owns the
+    # name, and a rename via POST /api/auth/update-user touches no PESDac
+    # write path — only the JWT `name` claim moves. Re-mirror here so
+    # every authenticated read (notably GET /auth/me) converges without
+    # a schema change. Write-only-on-diff: converged requests skip the
+    # UPDATE entirely, and an empty claim never wipes a stored name.
+    fresh_name = name.strip()[:80]
+    if fresh_name and user.display_name != fresh_name:
+        user.display_name = fresh_name
+        db.commit()
+        db.refresh(user)
+    return user
+
+
 async def get_current_user(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
@@ -90,27 +122,11 @@ async def get_current_user(
     name = claims.get("name") or ""
     if not sub or not email:
         raise HTTPException(status_code=401, detail="Invalid session claims.")
-    
-    user = _insert_or_select(
-        db,
-        lambda: db.query(User).filter(User.auth_user_id == sub).one_or_none(),
-        lambda: User(
-            auth_user_id=sub,
-            email=email.lower().strip()[:254],
-            display_name=name.strip()[:80],
-        ),
-    )
-    # Display-name re-mirror (FR2, human-approved): BetterAuth owns the
-    # name, and a rename via POST /api/auth/update-user touches no PESDac
-    # write path — only the JWT `name` claim moves. Re-mirror here so
-    # every authenticated read (notably GET /auth/me) converges without
-    # a schema change. Write-only-on-diff: converged requests skip the
-    # UPDATE entirely, and an empty claim never wipes a stored name.
-    fresh_name = name.strip()[:80]
-    if fresh_name and user.display_name != fresh_name:
-        user.display_name = fresh_name
-        db.commit()
-        db.refresh(user)
+
+    # Sync DB hop: the upsert + re-mirror block on the sync driver, so run
+    # them in Starlette's threadpool instead of on the event loop. The JWKS
+    # verify above stays awaited on the loop (true async I/O).
+    user = await run_in_threadpool(_resolve_user_sync, db, sub, email, name)
     return user
 
 
