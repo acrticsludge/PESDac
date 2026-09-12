@@ -183,6 +183,7 @@ import {
   CircleStackIcon,
   CalculatorIcon,
   AtSymbolIcon,
+  ArrowPathIcon,
   ArrowRightStartOnRectangleIcon,
   ArrowLeftStartOnRectangleIcon,
 } from "@heroicons/react/24/outline";
@@ -612,6 +613,17 @@ export default function ShellSideNav({
   // parallel identity scheme). Failed hydrates keep the memory paint with
   // one toast and retry on the next identity transition.
   const chatHydratedRef = useRef<string | null>(null);
+  // Hydrate Retry (boot-race recovery): kept-memory never auto-retries, so
+  // the welcome dead-end (empty sidebar + banner, no action) gets one
+  // user-initiated path. Releases the effect guard and re-fires the same
+  // hydrate — the store's fetch-once marker is success-only, so the retry
+  // genuinely refetches; a second failure keeps memory + re-toasts once.
+  const [hydrateRetryTick, setHydrateRetryTick] = useState(0);
+  const handleHydrateRetry = () => {
+    if (chatAuth == null) return;
+    chatHydratedRef.current = null;
+    setHydrateRetryTick((t) => t + 1);
+  };
   useEffect(() => {
     if (chatAuth == null) return;
     if (chatHydratedRef.current === chatAuth.identityKey) return;
@@ -622,7 +634,7 @@ export default function ShellSideNav({
     void hydrateChats(chatAuth, { notify: notifyChat }).then((result) => {
       if (result.status === "kept-memory") chatHydratedRef.current = null;
     });
-  }, [authState.status, authUserId, authEpoch]);
+  }, [authState.status, authUserId, authEpoch, hydrateRetryTick]);
   const authExpiredRef = useRef(false);
   // Backend rejected our session (expired/invalid): clear it and
   // route to re-login. Guarded against reentrancy — apiLogout's
@@ -857,6 +869,13 @@ const LOGOUT_TIMEOUT_MS = 15000;
   const hydrateFailed = getChatHydrateFailed();
   const welcomeSyncError =
     chatAuth != null ? (getCreateSyncError() ?? getHydrateSyncError()) : null;
+  // Welcome hydrate-retry visibility: the hydrate error (not the user's own
+  // failed create) owns the composer status — that state used to dead-end
+  // with no action, so it gets the one user-initiated retry path.
+  const hydrateRetryVisible =
+    chatAuth != null &&
+    getCreateSyncError() == null &&
+    getHydrateSyncError() != null;
 
   // Chat skeleton loading: `shouldShowWorkspaceSkeleton` (session.ts)
   // wraps the frozen hydrate-window predicate plus the
@@ -2167,7 +2186,24 @@ const LOGOUT_TIMEOUT_MS = 15000;
                     }
                     sendActions={<ChatDictationButton dictation={dictation} />}
                   />
-                  )}
+                   )}
+                   {/* Hydrate Retry: the kept-memory dead-end (empty sidebar +
+                       banner, no action) gets one user-initiated refetch. */}
+                   {hydrateRetryVisible && (
+                     <HStack gap={2} vAlign="center" hAlign="center">
+                       <Button
+                         label="Try again"
+                         variant="ghost"
+                         size="sm"
+                         icon={
+                           <Icon icon={ArrowPathIcon} size="sm" />
+                         }
+                         isDisabled={hydratePending}
+                         isLoading={hydratePending}
+                         onClick={handleHydrateRetry}
+                       />
+                     </HStack>
+                   )}
 
                   {/* ======================================================== */}
                   {/* Subject quick filters                                   */}
