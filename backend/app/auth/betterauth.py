@@ -14,6 +14,7 @@ Validation (T17):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -34,6 +35,36 @@ _jwks_cache: dict[str, dict] = {}
 _fetched_at: float = 0.0
 _TTL_SECONDS = 3600  # 1 hour
 _JWKS_HTTP_TIMEOUT_S = 5.0
+
+# T1.1: singleflight lock + short-TTL negative cache. Concurrent lookups
+# collapse onto one outbound fetch (the first holder fetches, waiters re-check
+# the cache after acquiring the lock). A failed fetch stamps _fetch_failed_at;
+# lookups within _NEGATIVE_TTL_SECONDS then fail fast from cache instead of
+# triggering an immediate second full-timeout fetch from the unknown-kid
+# retry path in verify_betterauth_token (the 5s+5s tail). A successful fetch
+# clears the stamp, so recovery is immediate. Serving a stale cached kid
+# during the negative window is intentional (availability; the key was
+# previously trusted, and unknown kids still fail closed).
+_NEGATIVE_TTL_SECONDS = 30.0
+_fetch_failed_at: float = 0.0
+_jwks_fetch_lock = asyncio.Lock()
+
+
+def _lookup_cached(kid: str, force_refresh: bool, now: float) -> tuple[bool, dict | None]:
+    """Synchronous cache decision: (served, jwk).
+
+    Served True means the caller must NOT fetch (fresh hit, or negative
+    cache hot). Served False means the caller must fetch under the lock.
+    """
+    if (
+        not force_refresh
+        and kid in _jwks_cache
+        and (now - _fetched_at) <= _TTL_SECONDS
+    ):
+        return True, _jwks_cache.get(kid)
+    if (now - _fetch_failed_at) < _NEGATIVE_TTL_SECONDS:
+        return True, _jwks_cache.get(kid)
+    return False, None
 
 
 async def _fetch_jwks() -> dict[str, dict]:
@@ -56,22 +87,30 @@ async def _fetch_jwks() -> dict[str, dict]:
 
 async def _get_jwk_for_async(kid: str, force_refresh: bool = False) -> dict | None:
     """Async JWKS lookup with forced-refresh on unknown kid."""
-    global _fetched_at
+    global _fetched_at, _fetch_failed_at
 
-    needs_refresh = (
-        force_refresh
-        or kid not in _jwks_cache
-        or (time.monotonic() - _fetched_at) > _TTL_SECONDS
-    )
-    if needs_refresh:
+    # Fast path: fresh hit or hot negative cache — no lock, no fetch.
+    served, jwk = _lookup_cached(kid, force_refresh, time.monotonic())
+    if served:
+        return jwk
+
+    async with _jwks_fetch_lock:
+        # Re-check: a waiter ahead of us may have refreshed (or recorded a
+        # failure) while we queued — that is the singleflight coalescing.
+        served, jwk = _lookup_cached(kid, force_refresh, time.monotonic())
+        if served:
+            return jwk
         try:
-            _jwks_cache.update(await _fetch_jwks())
-            _fetched_at = time.monotonic()
+            fetched = await _fetch_jwks()
         except Exception as exc:
             # JWKS outage — never bubble up the raw exception to the
             # caller. We log a category so operators can act.
+            _fetch_failed_at = time.monotonic()
             logger.warning("jwks_fetch_failed category=%s", type(exc).__name__)
             return None
+        _fetch_failed_at = 0.0
+        _jwks_cache.update(fetched)
+        _fetched_at = time.monotonic()
 
     return _jwks_cache.get(kid)
 
@@ -80,17 +119,20 @@ async def warm_jwks_cache() -> bool:
     """Prefetch JWKS at startup so the first authed request skips the
     fetch (~3s cold). Same never-throw guarantee as the lookup path:
     False on any failure, and the first request simply fetches then."""
-    global _fetched_at
-    try:
-        fetched = await _fetch_jwks()
-    except Exception as exc:
-        logger.warning("jwks_warmup_failed category=%s", type(exc).__name__)
-        return False
-    if not fetched:
-        return False
-    _jwks_cache.update(fetched)
-    _fetched_at = time.monotonic()
-    return True
+    global _fetched_at, _fetch_failed_at
+    async with _jwks_fetch_lock:
+        try:
+            fetched = await _fetch_jwks()
+        except Exception as exc:
+            _fetch_failed_at = time.monotonic()
+            logger.warning("jwks_warmup_failed category=%s", type(exc).__name__)
+            return False
+        if not fetched:
+            return False
+        _fetch_failed_at = 0.0
+        _jwks_cache.update(fetched)
+        _fetched_at = time.monotonic()
+        return True
 
 
 def _resolve_issuer() -> str | None:
