@@ -112,6 +112,19 @@ let snapshot: OutboxSnapshot = { ...EMPTY_SNAPSHOT };
 const snapshotListeners = new Set<() => void>();
 
 function setSnapshot(next: OutboxSnapshot): void {
+  // No-change bail-out: refreshSnapshot() runs on mount, every 30s, and
+  // on focus/visibilitychange — without this guard each of those would
+  // push a fresh object through the subscribers and re-render ThreadView
+  // (the largest tree in the app) for an empty, unchanged outbox.
+  if (
+    snapshot.total === next.total &&
+    snapshot.pending === next.pending &&
+    snapshot.failedRetryable === next.failedRetryable &&
+    snapshot.failedFatal === next.failedFatal &&
+    snapshot.evicted === next.evicted
+  ) {
+    return;
+  }
   snapshot = next;
   snapshotListeners.forEach((notify) => {
     try {
