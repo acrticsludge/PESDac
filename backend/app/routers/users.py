@@ -30,12 +30,27 @@ from app.schemas.profiles import profile_to_out
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+# Phase 4 (T4a): hard-cap export rows so large accounts get a bounded
+# response instead of an unbounded multi-MB dump. Same shape — arrays
+# are newest-window-truncated (created_at ascending, capped at the tail).
+# Pagination is future work (deferred job queue covers a still-slow export).
+EXPORT_MAX_ROWS = 200
+
 
 @router.get("/me/export")
 def export_me(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
     profile = db.get(Profile, result.id)
-    chats = db.scalars(select(Chat).where(Chat.user_id == result.id).order_by(Chat.created_at)).all()
-    demos = db.scalars(select(DemoState).where(DemoState.user_id == result.id)).all()
+    chats = db.scalars(
+        select(Chat)
+        .where(Chat.user_id == result.id)
+        .order_by(Chat.created_at)
+        .limit(EXPORT_MAX_ROWS)
+    ).all()
+    demos = db.scalars(
+        select(DemoState)
+        .where(DemoState.user_id == result.id)
+        .limit(EXPORT_MAX_ROWS)
+    ).all()
     return {
         "profile": profile_to_out(profile) if profile else None,
         "chats": [_chat_out(c) for c in chats],
