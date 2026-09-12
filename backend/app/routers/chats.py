@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -68,6 +68,10 @@ RETENTION_MAX_AGE = {
     "session": timedelta(days=0),
 }
 
+# Phase 4 (T4c): user-id chunk size for the purge bulk DELETEs — keeps
+# each statement short and transactions small.
+_PURGE_CHUNK = 500
+
 
 def _as_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:  # SQLite (tests) returns naive; prod is tz-aware
@@ -77,8 +81,11 @@ def _as_aware(dt: datetime) -> datetime:
 
 def purge_expired_chats(db: Session, now: datetime | None = None) -> dict[str, int]:
     """Nightly-purge worker body (FR4): delete per-user chats older than
-    their `profiles.retention` window. Messages cascade via the ORM
-    delete path (SQLite-safe; the DB FK is the prod safety net).
+    their `profiles.retention` window. Cutoff is pushed into the WHERE
+    clause and deletes run as chunked bulk statements (Phase 4 T4c) —
+    no Python-side filter, no per-row delete, short transactions.
+    Messages are deleted first in SQL so SQLite (tests; FK enforcement
+    off) never orphans rows — prod has the DB FK cascade as well.
     No scheduler is wired — there is no job infra in this repo (see
     final report); call this from the nightly runner when one lands.
     Returns `{retention: deleted}` for the windows that had users.
@@ -93,10 +100,18 @@ def purge_expired_chats(db: Session, now: datetime | None = None) -> dict[str, i
         if not user_ids:
             continue
         count = 0
-        for chat in db.scalars(select(Chat).where(Chat.user_id.in_(user_ids))).all():
-            if _as_aware(chat.updated_at) < cutoff:
-                db.delete(chat)
-                count += 1
+        for i in range(0, len(user_ids), _PURGE_CHUNK):
+            chunk = user_ids[i:i + _PURGE_CHUNK]
+            stale_ids = select(Chat.id).where(
+                Chat.user_id.in_(chunk), Chat.updated_at < cutoff
+            )
+            db.execute(delete(Message).where(Message.chat_id.in_(stale_ids)))
+            res = db.execute(
+                delete(Chat).where(
+                    Chat.user_id.in_(chunk), Chat.updated_at < cutoff
+                )
+            )
+            count += res.rowcount or 0
         purged[retention] = count
     if any(purged.values()):
         db.commit()
