@@ -80,7 +80,58 @@ def test_postgres_kwargs_are_explicit_and_small():
     connect_args = kwargs["connect_args"]
     # Lowered from the previous 10s cold-connect bound.
     assert connect_args["connect_timeout"] < 10
-    assert "statement_timeout" in connect_args["options"]
+
+
+def test_postgres_kwargs_have_no_startup_options():
+    """Neon's transaction pooler rejects `options` as a startup parameter
+    (live-probe proven) — a single `options` key breaks every checkout."""
+    kwargs = db.engine_kwargs_for("postgresql+psycopg://u:p@ep-x-pooler/x")
+    assert "options" not in kwargs["connect_args"]
+
+
+def test_statement_timeout_listener_issues_set():
+    recorded: list = []
+
+    class _FakeCursor:
+        def execute(self, sql):
+            recorded.append(sql)
+
+        def close(self):
+            pass
+
+    class _FakeConn:
+        def cursor(self):
+            return _FakeCursor()
+
+    db._set_statement_timeout(_FakeConn(), None)
+    assert len(recorded) == 1
+    assert "statement_timeout" in recorded[0]
+
+
+def test_get_engine_wires_timeout_listener_for_postgres_only(
+    monkeypatch, _reset_engine
+):
+    from sqlalchemy import create_engine as _real_create_engine
+    from sqlalchemy import event as _sa_event
+
+    monkeypatch.setattr(
+        db, "create_engine", lambda url, **kw: _real_create_engine("sqlite://")
+    )
+    monkeypatch.setattr(
+        config, "DATABASE_URL_POOLED", "postgresql://u:p@ep-x-pooler/x"
+    )
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql://u:p@ep-direct/x")
+    pg_engine = db.get_engine()
+    assert _sa_event.contains(pg_engine, "connect", db._set_statement_timeout)
+
+    monkeypatch.setattr(db, "_engine", None)
+    monkeypatch.setattr(db, "_SessionLocal", None)
+    monkeypatch.setattr(config, "DATABASE_URL_POOLED", None)
+    monkeypatch.setattr(config, "DATABASE_URL", "sqlite://")
+    lite_engine = db.get_engine()
+    assert not _sa_event.contains(
+        lite_engine, "connect", db._set_statement_timeout
+    )
 
 
 def test_sqlite_kwargs_carry_no_pool_args():
