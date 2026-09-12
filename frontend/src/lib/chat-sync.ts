@@ -154,14 +154,22 @@ export async function apiListMessagesPage(
   return apiFetch<ListEnvelope<ServerMessage[]>>(`${messagesPath(code)}${qs}`);
 }
 
-/** Append one turn (`seq` assigned server-side). */
+/** Append one turn (`seq` assigned server-side).
+ *  `clientMsgKey` is the append-idempotency key (Phase 5 T5a): the
+ *  outbox flush replays with the SAME key so a retry after a dropped
+ *  connection returns the original row (200) instead of duplicating.
+ *  Optional — appends omitting it behave exactly as before. */
 export async function apiAppendMessage(
   code: string,
   m: { role: "user" | "assistant" | "system"; content: unknown },
+  opts?: { clientMsgKey?: string },
 ): Promise<ServerMessage> {
   return apiFetch<ServerMessage>(messagesPath(code), {
     method: "POST",
-    body: { role: m.role, content: m.content },
+    body:
+      opts?.clientMsgKey != null
+        ? { role: m.role, content: m.content, clientMsgKey: opts.clientMsgKey }
+        : { role: m.role, content: m.content },
   });
 }
 

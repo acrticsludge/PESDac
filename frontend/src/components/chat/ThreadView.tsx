@@ -136,6 +136,12 @@ import {
   resolveFollowUps,
 } from "../../lib/setting-followups";
 import { planResponse, type ResponseMode } from "../../lib/responder";
+import {
+  newClientKey,
+  outboxQueue,
+  startOutboxSchedulers,
+  useOutboxUnsynced,
+} from "../../lib/outbox";
 
 /* -------------------------------------------------------------------------- */
 /*                     Thread artifact panel styling                           */
@@ -778,6 +784,11 @@ export default function ThreadView({
   useSessionVersion();
   const storageOk = useStorageHealth();
   const corruptKeys = useCorruptKeys();
+  // Outbox (Phase 5): opportunistic flush triggers ride with the thread
+  // (registration is idempotent process-wide); the snapshot below feeds
+  // the composer's "N unsynced" status — no new UI, existing status slot.
+  useEffect(() => startOutboxSchedulers(), []);
+  const outboxSnapshot = useOutboxUnsynced();
   const overlay = getOverlay(sessionKey);
   const blocks = [...thread.blocks, ...overlay];
 
@@ -1024,7 +1035,10 @@ export default function ThreadView({
   // then the server leg lands at stream completion (stop persists the
   // partial — same path). Failure rolls back ONLY the assistant block +
   // one toast; the user message is preserved (slice-12). Guests/demos
-  // no-op inside the helper (memory-only, no fetch).
+  // no-op inside the helper (memory-only, no fetch). The live send is
+  // tracked in the outbox queue (pending → sent; forgotten on failure —
+  // the persistent composer error + toast own that surface, and the
+  // queue never classifies an error it cannot see).
   const appendAndPersist = (block: Block) => {
     if (!isBacked) {
       appendBlocks(sessionKey, [block]);
@@ -1032,9 +1046,16 @@ export default function ThreadView({
     }
     const snapshot = getOverlay(sessionKey);
     appendBlocks(sessionKey, [block]);
+    const sendId = newClientKey();
+    outboxQueue.track(sendId);
     void persistAppendedBlock(sessionKey, block, chatAuth, { notify }).then(
       (ok) => {
-        if (!ok) setOverlay(sessionKey, snapshot);
+        if (!ok) {
+          setOverlay(sessionKey, snapshot);
+          outboxQueue.forget(sendId);
+          return;
+        }
+        outboxQueue.markSent(sendId);
       },
     );
   };
@@ -1198,6 +1219,9 @@ export default function ThreadView({
     // Staged files travel with this message; clear the drawer either way.
     setAttachments([]);
     revokeStaged(staged);
+    // Live-send queue record (same doctrine as appendAndPersist above).
+    const sendId = newClientKey();
+    outboxQueue.track(sendId);
     void (async () => {
       for (const block of fresh) {
         const ok = await persistAppendedBlock(sessionKey, block, chatAuth, {
@@ -1205,9 +1229,11 @@ export default function ThreadView({
         });
         if (!ok) {
           setOverlay(sessionKey, snapshot);
+          outboxQueue.forget(sendId);
           return;
         }
       }
+      outboxQueue.markSent(sendId);
       startTurn(text);
     })();
   };
@@ -1791,7 +1817,17 @@ export default function ThreadView({
                                     message:
                                       "Saved data looked damaged, so this chat started fresh — history may be incomplete.",
                                   }
-                                : undefined
+                                : outboxSnapshot.total > 0
+                                  ? {
+                                      type: "warning",
+                                      message:
+                                        `${outboxSnapshot.total} unsynced — ` +
+                                        "will send automatically when online." +
+                                        (outboxSnapshot.evicted > 0
+                                          ? ` ${outboxSnapshot.evicted} oldest dropped (outbox full).`
+                                          : ""),
+                                    }
+                                  : undefined
                       }
                       placeholder={
                         composerMode === "deep"
