@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app import rate_limit
+from app import cache
 from app.db import get_db
 from app.deps import (
     check_mutation_origin,
@@ -24,8 +25,14 @@ def _get_or_create(db: Session, user):
 
 @router.get("/me")
 def get_me(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    profile = _get_or_create(db, result)
-    return profile_to_out(profile)
+    # Read-through K3 (TTL 60 s). First-ever call provisions the row via
+    # the miss path (handler runs fully, then populates) — correct by
+    # construction.
+    key = cache.profile_key(result.id)
+    body, _ = cache.read_through(
+        key, cache.TTL_PROFILE, lambda: profile_to_out(_get_or_create(db, result))
+    )
+    return body
 
 
 @router.patch("/me")
@@ -41,4 +48,5 @@ def patch_me(body: ProfilePatch, request: Request, result: User = Depends(get_cu
             setattr(profile, field, data[api])
     db.commit()
     db.refresh(profile)
+    cache.invalidate_exact(cache.profile_key(result.id))
     return profile_to_out(profile)

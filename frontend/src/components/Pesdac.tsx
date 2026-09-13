@@ -32,7 +32,7 @@ import type { ProfileTab } from "./profile/profile-tabs";
 import AuthGate from "./auth/AuthGate";
 import OnboardingDialog from "./auth/OnboardingDialog";
 import AppToasts, { type ShowToastFn } from "./AppToasts";
-import { apiLogout, apiGetProfile, useAuth, useProfile, AUTH_REQUIRED_EVENT, toUserMessage, getAuthEpoch, useAuthEpoch, clearAuthCache, type LogoutOutcome } from "../lib/auth";
+import { apiLogout, apiGetProfile, useAuth, useProfile, AUTH_REQUIRED_EVENT, toUserMessage, getAuthEpoch, useAuthEpoch, clearAuthCache, type LogoutOutcome, type AuthState } from "../lib/auth";
 import {
   beginLogoutTransition,
   endLogoutTransition,
@@ -124,6 +124,7 @@ import {
   SideNavHeading,
   SideNavItem,
   SideNavSection,
+  useSideNavCollapse,
 } from "@astryxdesign/core/SideNav";
 
 import { NavIcon } from "@astryxdesign/core/NavIcon";
@@ -473,11 +474,19 @@ function ConversationItem({
   icon?: ReactNode | IconType;
   isPending?: boolean;
   isDisabled?: boolean;
+  // True while any sidebar-scope modal is open (see isAnyModalOpen).
+  // The hover-mounted MoreMenu carries an ungated "Conversation options"
+  // tooltip (Astryx hardcodes it, no opt-out prop), and a tooltip that is
+  // showing or delay-pending when the modal opens has no mouseleave while
+  // the dialog covers its trigger — so it sticks above the backdrop with
+  // no way to dismiss. Unmounting the menu flips that off and blocks new
+  // hovers; the trigger is unreachable behind a modal backdrop anyway.
+  isModalOpen?: boolean;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const showMenu = (isHovered || isMenuOpen) && !isDisabled;
+  const showMenu = (isHovered || isMenuOpen) && !isDisabled && !isModalOpen;
 
   return (
     <Stack
@@ -510,6 +519,147 @@ function ConversationItem({
         }
       />
     </Stack>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     Sidebar account footer (collapse-aware)                */
+/* -------------------------------------------------------------------------- */
+
+function SidebarAccountFooter({
+  authStatus,
+  displayName,
+  accountEmail,
+  isUserReady,
+  isLoggingOut,
+  isAnyModalOpen,
+  onSettings,
+  onProfile,
+  onLogout,
+  onLogin,
+}: {
+  authStatus: AuthState["status"];
+  displayName: string;
+  accountEmail: string;
+  isUserReady: boolean;
+  isLoggingOut: boolean;
+  isAnyModalOpen: boolean;
+  onSettings: () => void;
+  onProfile: () => void;
+  onLogout: () => void;
+  onLogin: () => void;
+}) {
+  // Collapsed rail (~icon width): the Avatar + name/email row cannot fit,
+  // so it overflows and clips instead of collapsing (SideNavItem rows
+  // collapse natively via the same context). Avatar alone stays, centered;
+  // the name/email column and skeleton texts unmount. Expanded rendering
+  // is byte-identical to before.
+  const { isCollapsed } = useSideNavCollapse();
+  return (
+    <SideNavSection title="Account" isHeaderHidden>
+      {authStatus === "authenticated" && (
+        <HStack
+          gap={2}
+          vAlign="center"
+          hAlign={isCollapsed ? "center" : undefined}
+          padding={1}
+        >
+          <Avatar
+            name={
+              displayName ||
+              accountEmail ||
+              "?"
+            }
+            size="sm"
+            tooltip={!isAnyModalOpen}
+          />
+          {!isCollapsed && (
+            <VStack gap={0.5}>
+              <Text type="body" weight="bold" maxLines={1} hasTruncateTooltip={!isAnyModalOpen}>
+                {displayName ||
+                  accountEmail ||
+                  "?"}
+              </Text>
+              {displayName !== "" && (
+                <Text
+                  type="supporting"
+                  color="secondary"
+                  maxLines={1}
+                  hasTruncateTooltip={!isAnyModalOpen}
+                >
+                  {accountEmail}
+                </Text>
+              )}
+            </VStack>
+          )}
+        </HStack>
+      )}
+      {authStatus === "loading" && (
+        <HStack
+          gap={2}
+          vAlign="center"
+          hAlign={isCollapsed ? "center" : undefined}
+          padding={1}
+          aria-busy="true"
+          aria-label="Loading account"
+        >
+          <Skeleton width={32} height={32} radius="rounded" />
+          {!isCollapsed && (
+            <VStack gap={0.5}>
+              <Skeleton width={96} height={12} />
+              <Skeleton width={128} height={10} />
+            </VStack>
+          )}
+        </HStack>
+      )}
+      <SideNavItem
+        label="Settings"
+        icon={Cog6ToothIcon}
+        href="#"
+        isDisabled={!isUserReady}
+          ) : undefined
+        onClick={(event) => {
+          event.preventDefault();
+          if (!isUserReady) return;
+          onSettings();
+        }}
+      />
+
+      <SideNavItem
+        label="My Profile"
+        icon={UserCircleIcon}
+        href="#"
+        isDisabled={!isUserReady}
+        onClick={(event) => {
+          event.preventDefault();
+          if (!isUserReady) return;
+          onProfile();
+        }}
+      />
+      {authStatus === "authenticated" ? (
+        <SideNavItem
+          label={isLoggingOut ? "Logging out…" : "Logout"}
+          icon={ArrowLeftStartOnRectangleIcon}
+          href="#"
+          isDisabled={isLoggingOut}
+          onClick={(event) => {
+            event.preventDefault();
+            if (isLoggingOut) return;
+            onLogout();
+          }}
+        />
+      ) : authStatus === "guest" ? (
+        <SideNavItem
+          label="Login"
+          icon={ArrowRightStartOnRectangleIcon}
+          href="#"
+          onClick={(event) => {
+            event.preventDefault();
+            onLogin();
+          }}
+        />
+      ) : null}
+    </SideNavSection>
   );
 }
 
@@ -802,9 +952,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
     { kind: "custom" | "demo"; id: string; title: string } | null
   >(null);
   // Hover tooltips anchored behind an open modal (sidebar Avatar name,
-  // truncated account Texts) have no mouseleave while the dialog covers
+  // truncated account Texts, row MoreMenu "Conversation options", thread
+  // assistant-avatar "PESDac") have no mouseleave while the dialog covers
   // them, so an already-showing tooltip sticks above the backdrop with no
-  // way to dismiss. While any modal is open the sidebar tooltips stay
+  // way to dismiss. While any modal is open the background tooltips stay
   // off — flipping the prop unmounts a stuck layer and blocks new hovers.
   // Tooltips behave exactly as before when no modal is open.
   const isAnyModalOpen =
@@ -1644,99 +1795,18 @@ const LOGOUT_TIMEOUT_MS = 15000;
               />
             }
             footer={
-              <SideNavSection title="Account" isHeaderHidden>
-                {authState.status === "authenticated" && (
-                  <HStack gap={2} vAlign="center" padding={1}>
-                    <Avatar
-                      name={
-                        displayName ||
-                        accountEmail ||
-                        "?"
-                      }
-                      size="sm"
-                      tooltip={!isAnyModalOpen}
-                    />
-                    <VStack gap={0.5}>
-                      <Text type="body" weight="bold" maxLines={1} hasTruncateTooltip={!isAnyModalOpen}>
-                        {displayName ||
-                          accountEmail ||
-                          "?"}
-                      </Text>
-                      {displayName !== "" && (
-                        <Text
-                          type="supporting"
-                          color="secondary"
-                          maxLines={1}
-                          hasTruncateTooltip={!isAnyModalOpen}
-                        >
-                          {accountEmail}
-                        </Text>
-                      )}
-                    </VStack>
-                  </HStack>
-                )}
-                {authState.status === "loading" && (
-                  <HStack
-                    gap={2}
-                    vAlign="center"
-                    padding={1}
-                    aria-busy="true"
-                    aria-label="Loading account"
-                  >
-                    <Skeleton width={32} height={32} radius="rounded" />
-                    <VStack gap={0.5}>
-                      <Skeleton width={96} height={12} />
-                      <Skeleton width={128} height={10} />
-                    </VStack>
-                  </HStack>
-                )}
-                <SideNavItem
-                  label="Settings"
-                  icon={Cog6ToothIcon}
-                  href="#"
-                  isDisabled={!isUserReady}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    if (!isUserReady) return;
-                    openProfile("profile");
-                  }}
-                />
-
-                <SideNavItem
-                  label="My Profile"
-                  icon={UserCircleIcon}
-                  href="#"
-                  isDisabled={!isUserReady}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    if (!isUserReady) return;
-                    openProfile("profile");
-                  }}
-                />
-                {authState.status === "authenticated" ? (
-                  <SideNavItem
-                    label={isLoggingOut ? "Logging out…" : "Logout"}
-                    icon={ArrowLeftStartOnRectangleIcon}
-                    href="#"
-                    isDisabled={isLoggingOut}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      if (isLoggingOut) return;
-                      void handleLogout();
-                    }}
-                  />
-                ) : authState.status === "guest" ? (
-                  <SideNavItem
-                    label="Login"
-                    icon={ArrowRightStartOnRectangleIcon}
-                    href="#"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      navigate("/login");
-                    }}
-                  />
-                ) : null}
-              </SideNavSection>
+              <SidebarAccountFooter
+                authStatus={authState.status}
+                displayName={displayName}
+                accountEmail={accountEmail}
+                isUserReady={isUserReady}
+                isLoggingOut={isLoggingOut}
+                isAnyModalOpen={isAnyModalOpen}
+                onSettings={() => openProfile("profile")}
+                onProfile={() => openProfile("profile")}
+                onLogout={() => void handleLogout()}
+                onLogin={() => navigate("/login")}
+              />
             }
           >
             {/* Main navigation */}
@@ -1816,6 +1886,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                         isSelected={isRefOpen(ref)}
                         isPending={isRowPending(ref)}
                         isDisabled={ref.kind === "demo" && !isUserReady}
+                        isModalOpen={isAnyModalOpen}
                         onClick={() => openRef(ref)}
                         menu={listedMenu(ref, title)}
                       />
@@ -1873,6 +1944,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                             isSelected={chat.label === selectedChat}
                             isPending={isRowPending(ref)}
                             isDisabled={!isUserReady}
+                            isModalOpen={isAnyModalOpen}
                             onClick={() => openConversation(chat.label)}
                             menu={listedMenu(ref, display)}
                           />
@@ -1890,6 +1962,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                             label={c.title}
                             isSelected={c.code === draftCode}
                             isPending={isRowPending(ref)}
+                            isModalOpen={isAnyModalOpen}
                             onClick={() => {
                               setDraftCode(c.code);
                               setDraftAutoSend(null);
@@ -1930,6 +2003,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                         isSelected={isRefOpen(ref)}
                         isPending={isRowPending(ref)}
                         isDisabled={ref.kind === "demo" && !isUserReady}
+                        isModalOpen={isAnyModalOpen}
                         onClick={() => openRef(ref)}
                         menu={archivedMenu(ref, title)}
                       />
@@ -1990,6 +2064,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
               // App readiness gate (spec §4): the thread skeletons and
               // disables its composer while user data loads.
               isAppReady={isUserReady}
+              // Stuck-tooltip gate: assistant-avatar "PESDac" tooltips
+              // behind an open modal never see a mouseleave (same class
+              // as the sidebar tooltips above).
+              isModalOpen={isAnyModalOpen}
             />
           ) : (
           <Layout
@@ -2127,7 +2205,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                       </>
                     }
                     /* ------------------------------------------------------ */
-                    /* Mode + Settings                                        */
+                    /* Mode                                                   */
                     /* ------------------------------------------------------ */
 
                     footerActions={
@@ -2160,27 +2238,6 @@ const LOGOUT_TIMEOUT_MS = 15000;
                               }
                             },
                           }))}
-                        />
-
-                        <DropdownMenu
-                          button={{
-                            label: "Settings",
-                            variant: "ghost",
-                            size: "md",
-                            icon: <Icon icon={Cog6ToothIcon} size="sm" />,
-                            children: "Settings",
-                          }}
-                          menuWidth={200}
-                          items={[
-                            {
-                              label: "Study preferences",
-                              onClick: () => {
-                                // Shortcut to the full surface: Profile's
-                                // Study tab, opened over the chat.
-                                openProfile("study");
-                              },
-                            },
-                          ]}
                         />
                       </>
                     }

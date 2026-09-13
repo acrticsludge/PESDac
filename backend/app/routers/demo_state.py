@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import rate_limit
+from app import cache
 from app.db import get_db
 from app.deps import check_mutation_origin, get_current_user
 from app.models.chats import DEMO_LABELS, DemoState
@@ -28,8 +29,15 @@ def _out(row: DemoState) -> dict:
 
 @router.get("")
 def list_demo(result: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    rows = db.scalars(select(DemoState).where(DemoState.user_id == result.id)).all()
-    return {"overrides": [_out(r) for r in rows]}
+    # Read-through K4 (TTL 120 s): tiny rows, same per-call RTT tax.
+    key = cache.demos_key(result.id)
+
+    def _build():
+        rows = db.scalars(select(DemoState).where(DemoState.user_id == result.id)).all()
+        return {"overrides": [_out(r) for r in rows]}
+
+    body, _ = cache.read_through(key, cache.TTL_DEMOS, _build)
+    return body
 
 
 @router.put("/{label}")
@@ -53,4 +61,5 @@ def put_demo(label: str, body: DemoPut, request: Request, result: User = Depends
         row.is_pinned = bool(data["isPinned"])
     db.commit()
     db.refresh(row)
+    cache.invalidate_exact(cache.demos_key(result.id))
     return _out(row)

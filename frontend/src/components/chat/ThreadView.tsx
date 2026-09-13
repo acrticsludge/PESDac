@@ -724,6 +724,7 @@ export default function ThreadView({
   isHistoryLoading,
   notify,
   isAppReady = true,
+  isModalOpen,
 }: {
   thread: Thread;
   sessionKey: string;
@@ -744,6 +745,17 @@ export default function ThreadView({
    * caller sees today's behavior unchanged.
    */
   isAppReady?: boolean;
+  /**
+   * True while any app modal is open (driven by Pesdac's isAnyModalOpen).
+   * Assistant-avatar name tooltips ("PESDac") behind an open modal have no
+   * mouseleave while the dialog covers them — streaming autoscroll and
+   * modal open/close layout shifts can also fire spurious mouseenters
+   * under a stationary pointer — so a showing or delay-pending tooltip
+   * sticks above the backdrop with no way to dismiss. `false` unmounts
+   * the tooltip layer (clearing pending timers); undefined preserves
+   * today's behavior exactly.
+   */
+  isModalOpen?: boolean;
 }) {
   // Answer depth (answer-depth spec): profile default wins over the seed
   // voice; the toggle overrides per thread for the session. Seed
@@ -1614,7 +1626,7 @@ export default function ThreadView({
       <ChatMessage
         key={key}
         sender="assistant"
-        avatar={<Avatar name="PESDac" size="md" />}
+        avatar={<Avatar name="PESDac" size="md" tooltip={isModalOpen ? false : undefined} />}
       >
         {block.bubbles.flatMap((bubble, i) => {
           const nodes = [
@@ -2024,7 +2036,7 @@ export default function ThreadView({
                     {live && (
                       <ChatMessage
                         sender="assistant"
-                        avatar={<Avatar name="PESDac" size="md" />}
+                        avatar={<Avatar name="PESDac" size="md" tooltip={isModalOpen ? false : undefined} />}
                       >
                       <ChatMessageBubble variant="ghost">
                         <Markdown density="compact">

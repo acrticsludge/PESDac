@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import rate_limit, security
+from app import cache
 from app.db import get_db
 from app.deps import check_mutation_origin, get_current_user
 from app.models.chats import Chat, Message
@@ -158,16 +159,24 @@ def list_chats(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    stmt = select(Chat).where(Chat.user_id == result.id, Chat.is_archived.is_(archived))
-    if subject:
-        stmt = stmt.where(Chat.subject == subject)
-    if q and q.strip():
-        stmt = stmt.where(Chat.title.ilike(f"%{q.strip()}%"))
-    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    rows = db.scalars(
-        stmt.order_by(Chat.is_pinned.desc(), Chat.updated_at.desc()).limit(limit).offset(offset)
-    ).all()
-    return {"data": [_out(c) for c in rows], "pagination": {"limit": limit, "offset": offset, "total": total}}
+    # Read-through K1 (TTL 30 s, spec §6): the envelope dict is built
+    # exactly as before on miss, then populated. Hits skip all 3 queries.
+    key = cache.chats_list_key(result.id, archived, subject, q, limit, offset)
+
+    def _build():
+        stmt = select(Chat).where(Chat.user_id == result.id, Chat.is_archived.is_(archived))
+        if subject:
+            stmt = stmt.where(Chat.subject == subject)
+        if q and q.strip():
+            stmt = stmt.where(Chat.title.ilike(f"%{q.strip()}%"))
+        total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = db.scalars(
+            stmt.order_by(Chat.is_pinned.desc(), Chat.updated_at.desc()).limit(limit).offset(offset)
+        ).all()
+        return {"data": [_out(c) for c in rows], "pagination": {"limit": limit, "offset": offset, "total": total}}
+
+    body, _ = cache.read_through(key, cache.TTL_CHATS_LIST, _build)
+    return body
 
 
 @router.post("", status_code=201)
@@ -189,6 +198,10 @@ def create_chat(body: ChatCreate, request: Request, result: User = Depends(get_c
             )
         )
         if existing is not None:
+            # Keyed replay: no write happened, but the original write
+            # already busted K1 — re-delete unconditionally (spec §5:
+            # one code path, harmless no-op on replay).
+            cache.invalidate_prefix(cache.chats_list_prefix(result.id))
             return JSONResponse(status_code=200, content=_out(existing))
     for _ in range(5):
         code = security.gen_chat_code()
@@ -208,12 +221,14 @@ def create_chat(body: ChatCreate, request: Request, result: User = Depends(get_c
                         )
                     )
                     if winner is not None:
+                        cache.invalidate_prefix(cache.chats_list_prefix(result.id))
                         return JSONResponse(status_code=200, content=_out(winner))
                 continue
             except Exception:
                 db.rollback()
                 continue
             db.refresh(chat)
+            cache.invalidate_prefix(cache.chats_list_prefix(result.id))
             return JSONResponse(status_code=201, content=_out(chat))
     return JSONResponse(status_code=409, content=error_body("CODE_COLLISION", "Could not allocate a chat code. Retry."))
 
@@ -237,6 +252,7 @@ def patch_chat(code: str, body: ChatPatch, request: Request, result: User = Depe
     chat.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(chat)
+    cache.invalidate_prefix(cache.chats_list_prefix(result.id))
     return _out(chat)
 
 
@@ -249,6 +265,8 @@ def delete_chat(code: str, request: Request, result: User = Depends(get_current_
         return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Chat not found."))
     db.delete(chat)
     db.commit()
+    cache.invalidate_prefix(cache.chats_list_prefix(result.id))
+    cache.invalidate_prefix(cache.msgs_prefix(result.id, code))
     return Response(status_code=204)
 
 
@@ -268,6 +286,9 @@ def clear_chats(request: Request, result: User = Depends(get_current_user), db: 
         return limited
     count = db.query(Chat).filter(Chat.user_id == result.id).delete()
     db.commit()
+    # Clear is chats-only: profile/demos keys untouched (spec §5).
+    cache.invalidate_prefix(cache.chats_list_prefix(result.id))
+    cache.invalidate_prefix(cache.msgs_prefix(result.id))
     return {"data": {"deleted": count}, "pagination": {"limit": 0, "offset": 0, "total": count}}
 
 
@@ -306,6 +327,9 @@ def append_message(code: str, body: MessageCreate, request: Request, result: Use
             )
         )
         if existing is not None:
+            # Keyed replay (unconditional invalidation, spec §5).
+            cache.invalidate_prefix(cache.msgs_prefix(result.id, code))
+            cache.invalidate_prefix(cache.chats_list_prefix(result.id))
             return JSONResponse(status_code=200, content=_msg_out(existing))
     for _ in range(3):
         next_seq = db.scalar(select(func.max(Message.seq)).where(Message.chat_id == chat.id))
@@ -349,8 +373,13 @@ def append_message(code: str, body: MessageCreate, request: Request, result: Use
                     )
                 )
                 if winner is not None:
+                    cache.invalidate_prefix(cache.msgs_prefix(result.id, code))
+                    cache.invalidate_prefix(cache.chats_list_prefix(result.id))
                     return JSONResponse(status_code=200, content=_msg_out(winner))
             continue
+        # Committed above: the window and the list previews/counts moved.
+        cache.invalidate_prefix(cache.msgs_prefix(result.id, code))
+        cache.invalidate_prefix(cache.chats_list_prefix(result.id))
         return JSONResponse(status_code=201, content=payload)
     return JSONResponse(status_code=409, content=error_body("CONFLICT", "Could not append message. Retry."))
 
@@ -368,12 +397,23 @@ def list_messages(
     """List turn bodies `seq`-ascending in the slice `{data, pagination}` envelope."""
     chat = _get_owned(db, result.id, code)
     if chat is None:
+        # 404s never cache (D7: no-existence-oracle rule). Report MISS
+        # (not OFF): the store was healthy, there was simply nothing
+        # cacheable to serve.
+        cache.note_miss()
         return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Chat not found."))
-    total = db.scalar(select(func.count()).select_from(Message).where(Message.chat_id == chat.id)) or 0
-    rows = db.scalars(
-        select(Message).where(Message.chat_id == chat.id).order_by(Message.seq.asc()).limit(limit).offset(offset)
-    ).all()
-    return {"data": [_msg_out(m) for m in rows], "pagination": {"limit": limit, "offset": offset, "total": total}}
+    chat_id = chat.id
+    key = cache.msgs_key(result.id, code, limit, offset)
+
+    def _build():
+        total = db.scalar(select(func.count()).select_from(Message).where(Message.chat_id == chat_id)) or 0
+        rows = db.scalars(
+            select(Message).where(Message.chat_id == chat_id).order_by(Message.seq.asc()).limit(limit).offset(offset)
+        ).all()
+        return {"data": [_msg_out(m) for m in rows], "pagination": {"limit": limit, "offset": offset, "total": total}}
+
+    body, _ = cache.read_through(key, cache.TTL_MESSAGES, _build)
+    return body
 
 
 @router.delete("/{code}/messages")
@@ -416,4 +456,6 @@ def truncate_messages(
         chat.preview = ""
     chat.updated_at = datetime.now(timezone.utc)
     db.commit()
+    cache.invalidate_prefix(cache.msgs_prefix(result.id, code))
+    cache.invalidate_prefix(cache.chats_list_prefix(result.id))
     return {"data": {"deleted": count}, "pagination": {"limit": 0, "offset": 0, "total": count}}

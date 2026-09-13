@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import rate_limit
+from app import cache
 from app.db import get_db
 from app.deps import check_mutation_origin, get_current_user
 from app.models.chats import Chat, DemoState
@@ -76,4 +77,7 @@ def delete_me(request: Request, result: User = Depends(get_current_user), db: Se
     if user is not None:
         db.delete(user)  # cascades: profile, chats, demo_state
         db.commit()
+    # Account gone (or already gone — idempotent 204): wipe the entire
+    # user prefix so no cached envelope outlives the rows.
+    cache.invalidate_prefix(cache.user_prefix(result.id))
     return Response(status_code=204)

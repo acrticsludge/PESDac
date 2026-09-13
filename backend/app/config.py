@@ -96,6 +96,13 @@ FRONTEND_ORIGINS: list[str] = (
 
 COOKIE_SECURE: bool = _get_bool("COOKIE_SECURE", True)
 
+# Upstash Redis REST (read-through cache, specs/redis-read-through-cache).
+# Both optional — unset URL ⇒ NullCache (DB path, zero behavior delta).
+# `validate_startup` must NOT hard-require these. Read structure only —
+# never log values.
+UPSTASH_REDIS_REST_URL: str | None = _get("UPSTASH_REDIS_REST_URL")
+UPSTASH_REDIS_REST_TOKEN: str | None = _get("UPSTASH_REDIS_REST_TOKEN")
+
 
 def validate_startup(require_db: bool = True) -> None:
     """Called by the app factory (and alembic env). Raises on misconfiguration.
