@@ -12,6 +12,10 @@ dist/
 .env.*
 !.env.example
 
+# Drizzle — local config holds DATABASE_URL secret, never commit.
+# Copy drizzle.config.example.json to drizzle.config.json and fill in.
+drizzle.config.json
+
 # Logs
 *.log
 npm-debug.log*
