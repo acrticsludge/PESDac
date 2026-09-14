@@ -237,7 +237,13 @@ Cache becomes a performance layer with proven correctness (not a stale-read sour
 
 > **Status: DONE — struck through, not removed (2026-09-14).** The matrices are now evidence: backend matrix items map to proofs (JWT slices in §5, envelope shapes, cross-user isolation in §9, origins/CORS pre-existing, rate-limit + Retry-After + boundary in §12, health/ready, delete-idempotency + orphans in §§7/9, cache-invalidation in §12, export proof in §9); new this slice: commit-outage honesty (a dead DB answers 500-INTERNAL + ref, never a 409 masquerade; rollback recovery proven) via a non-raising `soft_client` fixture. Playwright is INSTALLED (`@playwright/test` + Chromium) with a 4-test smoke net green on preview (guest gate, gate routing, 360px gate fit, 404 + status) and the authed matrix as an honest `test.fixme` (needs staging credentials). `npm run test:e2e` builds with the e2e origin + runs the net. Verified: 377 frontend unit green, 199 backend green in groups, `astro check` + `astro build` green. Committed without a prompt per standing instruction. Two flags below — one product, one flake.
 
-> **PRODUCT FLAG (needs your decision):** the smoke run proved guests on `/new` get the NON-CLOSABLE login gate — the composer behind it is unreachable. That makes the entire guest-memory machinery (guest customs, adopt keys + conflict-200, guest-heap preservation, "guests stay memory-only" in ADR-0003) unreachable dead weight, OR the gate over-blocks and guest chat is broken. Both can't be the intent. I pinned current behavior (gate shows, routes correctly) and changed nothing — say whether guests should reach the composer and I'll do the follow-up slice.
+> **PRODUCT FLAG — RESOLVED (2026-09-14): login required.** Guest
+> creation branches cut (welcome-send + `createChatBacked` fail closed:
+> null, zero fetches, zero rows — pinned by test). The adopt/preserve/
+> key-set machinery stays, reframed: it guards cross-identity
+> transitions (logout → different login, stale-tab heaps), not
+> guest→login migration. Recorded in ADR-0003 addendum. Backend adopt
+> support unchanged (serves authed outbox retries).
 
 > **FLAKE FLAG:** `test_error_logging.py::test_500…` ERRORs intermittently in full-suite runs (~1 in 3), always passes alone and on immediate retry, and predates all backend changes (first seen during §7 verification). The 500-envelope behavior it covers is also proven deterministically by the new outage test. Owner: quarantine-or-fix when CI (§20) shows whether it's machine-specific — do not "fix" by masking.
 
