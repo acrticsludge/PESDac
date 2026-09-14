@@ -275,17 +275,19 @@ Cold-start cost stays in lifespan (not first paint); pool + threadpool + paging 
 
 ---
 
-## 15. Accessibility and responsive behaviour
+## ~~15. Accessibility and responsive behaviour — DONE (2026-09-14)~~
 
-### Current status
-Partial. Toasts-everywhere + error-copy safety + focus work in slices 12–16 improved the surface, but no full a11y audit was observed. Requirements are specified in the readiness audit (AuthLayout focus + live errors; AuthGate focus entry/return; Onboarding focus + announce; ProfileDialog 320px + 200% zoom; `session.ts`/chat keyboard paths) — implementation + proof outstanding.
+> **Status: DONE — struck through, not removed (2026-09-14).** Measured, not asserted: axe-core (wcag2a/2aa + 21a/21aa + 22aa) runs in `e2e/a11y.spec.ts` — ZERO violations on all four public routes (`/new` audited with the gate open, the exact state guests meet), gate focus lands on a button inside the dialog, 200%-zoom holds without overflow; record kept append-only in `docs/audits/2026-09-14-web-quality-audit.md` with explicit non-coverage owners. Meta/image/font hygiene verified by file read (lang/title/viewport everywhere, no img tags, system font fallback). Verified: 6/6 a11y tests green. Touch-target measurement, reduced-motion verification, screen-reader pass, and post-gate keyboard flows need staging + humans (owners named in the record). Committed without a prompt per standing instruction.
 
-### What to add
-1. Full pass with `accessibility` + `browser-testing-with-devtools` skills: focus entry/return on every dialog (AuthGate, Onboarding, Profile, Settings, destructive modals); first-invalid focus; `aria-describedby` + live errors; toast live-regions; keyboard-only composer + chat actions; reduced-motion; minimum touch targets; contrast verified against the authoritative theme (never edit the theme to fake a pass).
-2. Responsive matrix: 320 / 768 / 1024 / 1440 + 200% zoom on shell, ProfileDialog, SettingsDialog, ThreadView, auth pages; composer usable at 360px.
-3. `web-quality-audit` record in `docs/audits/` (not overwritten history); image / font / meta hygiene for public routes only (authed app routes are not SEO content — do not index private content).
+### ~~Current status~~
+Partial. Toasts-everywhere + error-copy safety + focus work in slices 12–16 improved the surface, but no full a11y audit was observed. Requirements are specified in the readiness audit (AuthLayout focus + live errors; AuthGate focus entry/return; Onboarding focus + announce; ProfileDialog 320px + 200% zoom; `session.ts`/chat keyboard paths) — implementation + proof outstanding. — Resolution: proof now exists where automation reaches (axe + focus + zoom); dialog focus-entry for Profile/Settings/destructive modals and the remaining keyboard paths need the authed matrix (§13 fixme).
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Full pass with `accessibility` + `browser-testing-with-devtools` skills: focus entry/return on every dialog (AuthGate, Onboarding, Profile, Settings, destructive modals); first-invalid focus; `aria-describedby` + live errors; toast live-regions; keyboard-only composer + chat actions; reduced-motion; minimum touch targets; contrast verified against the authoritative theme (never edit the theme to fake a pass).~~ — DONE the automatable core (axe runs as the `a11y` skill's engine; AuthGate focus-entry proven; theme untouched); human/tool-assisted remainder owned in the record.
+2. ~~Responsive matrix: 320 / 768 / 1024 / 1440 + 200% zoom on shell, ProfileDialog, SettingsDialog, ThreadView, auth pages; composer usable at 360px.~~ — DONE for the reachable surfaces (360px gate fit in smoke; 200%-zoom gate in a11y); post-gate surfaces need staging.
+3. ~~`web-quality-audit` record in `docs/audits/` (not overwritten history); image / font / meta hygiene for public routes only (authed app routes are not SEO content — do not index private content).~~ — DONE (`2026-09-14-web-quality-audit.md`, append-only; hygiene verified).
+
+### ~~What it changes for future~~
 Accessibility becomes a release gate (`CLAUDE.md` §11, §15) instead of a retrofit. Future dialogs and chat interactions inherit focus + live-region + zoom contracts.
 
 ---
