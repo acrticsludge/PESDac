@@ -1151,44 +1151,61 @@ Stop. Investigate architecture/root cause.
 
 # 22. EXISTING PROJECT STACK
 
-The following reflects the currently documented project environment. Verify
-against the repository before making technology assumptions.
+The following reflects the actual repository (synchronized 2026-09-14;
+the Next.js/Tailwind/Supabase description below it is legacy — see the
+note at the end). Verify against the repository before making
+technology assumptions.
 
-Frontend:
+Frontend (`frontend/`, Astro SSR on the Node standalone adapter):
 
-- Next.js App Router
-- TypeScript strict
-- Tailwind CSS
-- Radix UI
-- shadcn/ui
-- Recharts
+- Astro 6 + React 19 islands (`client:load` / `client:visible`)
+- Meta Astryx (`@astryxdesign/core` 0.5.2, `@astryxdesign/theme-neutral`)
+  + `PESDacMockupTheme` (Playground-exported, authoritative — see
+  `AGENTS.md`; never recreate, never restyle)
+- StyleX (no Tailwind, no global CSS frameworks)
+- TypeScript strict, `astro check` clean
+- BetterAuth client (email/password + Google + 2FA + passkeys); only
+  `PUBLIC_API_BASE_URL` + `PUBLIC_BETTER_AUTH_URL` reach the browser
 
-Backend/data:
+Backend (`backend/`, FastAPI + SQLAlchemy 2 + Alembic, one shared Neon
+Postgres 16 database):
 
-- Supabase
-- PostgreSQL
-- Supabase Auth
-- RLS
-- AES-256 encryption where application-level credential encryption is required
+- BetterAuth JWT verification per request (JWKS); no sessions, no
+  cookies, no client-supplied user id
+- SQLAlchemy app tables (`users`, `profiles`, `chats`, `messages`,
+  `demo_state`, `subjects`, `llm_credentials`); Drizzle owns the
+  BetterAuth identity tables on the same database (ADR-0004)
+- Fernet-encrypted LLM BYOK keys (last-4 hint only in responses)
+- Upstash REST read-through cache (optional; NullCache fallback)
 
 Hosting:
 
-- Vercel frontend
-- Render worker
+- Frontend: Astro Node standalone (preview-tested; Vercel/Render stay
+  implied, not locked — ADR-0002 territory)
+- Backend: uvicorn worker; Neon Postgres (pooled URL preferred)
 
 Integrations:
 
-- Resend
-- Dodo Payments
-- Supabase Auth
+- BetterAuth (identity), Google OAuth, Neon (database-only),
+  Upstash Redis (cache + rate-limit, optional), OpenRouter (LLM BYOK)
 
 Tooling:
 
-- Biome/ESLint
-- Graphify
+- `node --test` (frontend unit), `pytest` (backend), Playwright +
+  axe-core (browser + a11y), Lighthouse (lab baselines)
+- drizzle-kit (identity migrations), Alembic (app migrations)
+- `scripts/check_secrets.py`, `frontend/scripts/check-bundle.mjs`
+- GitHub Actions CI (`.github/workflows/ci.yml`)
 
 Do not introduce a replacement technology simply because it is preferred
 personally. Match the existing architecture unless the task requires a change.
+
+Legacy note (pre-2026-09-14): this section previously described
+Next.js App Router + Tailwind + Radix/shadcn + Supabase/Auth/RLS +
+Resend + Dodo Payments + Vercel/Render + Biome/Graphify. None of that
+is the current tree (the v5→v6 auth tear-out is documented in the
+architecture docs). Treat any remaining reference to that stack
+elsewhere in this file as stale unless re-verified.
 
 ---
 

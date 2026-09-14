@@ -195,8 +195,8 @@ export function IdentitySection() {
   const [nameError, setNameError] = useState<string | null>(null);
   const [isSavingName, setIsSavingName] = useState(false);
   const [renamedTo, setRenamedTo] = useState<string | null>(null);
-  // TODO(BetterAuth): email is account-owned — read-only when
-  // authenticated. displayName renames through updateUser. Logged out the
+  // Email is account-owned — read-only when authenticated (BetterAuth).
+  // displayName renames through updateUser. Logged out the
   // local store remains editable.
   // Server row wins; while it loads, the session name/email stand in so
   // the rows stay read-only instead of flickering to editable inputs.

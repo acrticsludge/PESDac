@@ -147,9 +147,8 @@ def test_chats_list_pagination_typed(client):
 
 
 def test_chats_single_dev_user_sees_own_chats(client):
-    # TODO(BetterAuth): restore the cross-user 404 oracle test once real
-    # per-user sessions land. Single dev-user placeholder: created chats
-    # are visible to the same caller.
+    # Same-caller sanity; the real cross-user 404 oracle lives in
+    # test_cross_user_isolation.py (per-user sessions have landed).
     code = _create(client)["code"]
     assert client.get("/api/v1/chats").json()["pagination"]["total"] == 1
     assert client.patch(f"/api/v1/chats/{code}", json={"title": "x"}).status_code == 200

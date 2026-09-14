@@ -25,8 +25,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    # External auth user id (verified `sub` claim from the auth provider).
-    # TODO(BetterAuth): this holds the BetterAuth user id.
+    # External auth user id (verified `sub` claim from BetterAuth).
     auth_user_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(254), nullable=False)
     display_name: Mapped[str] = mapped_column(String(80), default="", nullable=False)
