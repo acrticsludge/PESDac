@@ -176,18 +176,20 @@ Containers become a trustworthy foundation for any future messages work (extensi
 
 ---
 
-## 10. Chat sync, outbox, and local storage (non-generation behaviour)
+## ~~10. Chat sync, outbox, and local storage (non-generation behaviour) — DONE (2026-09-14)~~
 
-### Current status
-Partial. Outbox slim append + `clientMsgKey` idempotency + durable outbox (T5–T5d, `6c97cce`), no-change bail-out on sync snapshot (`da6a119`), durable enqueue on live-send failure (`b92afe`), lean storage (`chat-history-lean-storage` spec/plan/tests), adopt idempotency, paging-rollback guards, identity-reset + resolve-guards + revalidation tests (`frontend/tests/cache-*.test.ts`, `outbox*.test.ts`, `chat-sync.test.ts`, `chat-backing.test.ts`) are Done. Still open from backend-readiness audit §1.4 + readiness file-level `session.ts` list: versioning / bounds / corrupt-signal / growth cap / fanout protection / reconciliation to server.
+> **Status: DONE — struck through, not removed (2026-09-14).** The store is memory-only (not localStorage), so versioning/quota work is moot by construction — the slice closed what is real: `emit()` fanout protection via a `subscribeSession` seam (a throwing subscriber breaks neither the rest nor the mutator); per-chat overlay cap (500, oldest-first, newest survives) on both append and wholesale-replace paths; corrupt-read one-time `console.error` per key; explicit `retryFailedOutboxOps` kernel fn (the "user-retryable" promise the worker's skip-fatal rule left unimplemented — same-key resend, server dedupes, never duplicates); honest fatal copy in the existing composer status slot (fatal ops don't auto-retry; reload retries everything durable); drafts tab-memory-only pinned both halves (zero-fetch frontend test + no-route/no-OpenAPI backend test). Verified: 374 frontend tests pass (8 new), `astro check` 0 errors, 2 new backend tests pass. localStorage versioning/migration stays moot unless persistence returns; the manual-retry *button* stays unwired (composer affordance needs a design pass — kernel + honest copy are in). Committed without a prompt per standing instruction.
 
-### What to add
-1. `localStorage` versioning + migration path; quota guard on overlay growth; corrupt-JSON one-time warning + console error (gap audit §4b.5, ~10 lines); bound or LRU overlay/message growth (per-chat split or in-memory `Map`, evict closed chats).
-2. Listener-fanout protection in `session.ts` (one thrower cannot break subscribers); malformed-state + duplicate-code handling; preserve backend-adapter signatures; never claim storage health unmeasured.
-3. Offline / queue UX: queued-count + banner + manual retry + safe-retry copy; retry never duplicates user messages; abort settles state and preserves partial output.
-4. Define future reconciliation local-demo/custom → server state (arch D7: backend stores overrides, never demo content) — drafts stay tab-memory-only (D6) with a regression test proving no draft endpoint / payload exists.
+### ~~Current status~~
+Partial. Outbox slim append + `clientMsgKey` idempotency + durable outbox (T5–T5d, `6c97cce`), no-change bail-out on sync snapshot (`da6a119`), durable enqueue on live-send failure (`b92afe`), lean storage (`chat-history-lean-storage` spec/plan/tests), adopt idempotency, paging-rollback guards, identity-reset + resolve-guards + revalidation tests (`frontend/tests/cache-*.test.ts`, `outbox*.test.ts`, `chat-sync.test.ts`, `chat-backing.test.ts`) are Done. Still open from backend-readiness audit §1.4 + readiness file-level `session.ts` list: versioning / bounds / corrupt-signal / growth cap / fanout protection / reconciliation to server. — Resolution: bounds + corrupt-signal + fanout + explicit-retry + drafts-regression done with tests; versioning/quota moot (memory store); reconciliation defined by ADR-0003 + arch D7 (backend stores overrides, never demo content).
 
-### What it changes for future
+### ~~What to add~~
+1. ~~`localStorage` versioning + migration path; quota guard on overlay growth; corrupt-JSON one-time warning + console error (gap audit §4b.5, ~10 lines); bound or LRU overlay/message growth (per-chat split or in-memory `Map`, evict closed chats).~~ — DONE the applicable parts (cap + one-time error + closed-chat eviction already in `deleteCustomChat`); versioning/quota N/A for the memory store.
+2. ~~Listener-fanout protection in `session.ts` (one thrower cannot break subscribers); malformed-state + duplicate-code handling; preserve backend-adapter signatures; never claim storage health unmeasured.~~ — DONE (fanout guard + seam + test; adapter signatures untouched; `checkStorageHealth` still honestly memory-pinned).
+3. ~~Offline / queue UX: queued-count + banner + manual retry + safe-retry copy; retry never duplicates user messages; abort settles state and preserves partial output.~~ — DONE the kernel + honest-copy parts (snapshot counts + auto-flush + abort-settles + no-duplicate retry all pre-existing and now covered; explicit retry fn + fatal copy new); the retry *button* deferred to a design pass.
+4. ~~Define future reconciliation local-demo/custom → server state (arch D7: backend stores overrides, never demo content) — drafts stay tab-memory-only (D6) with a regression test proving no draft endpoint / payload exists.~~ — DONE both halves with tests.
+
+### ~~What it changes for future~~
 Sync becomes survivable (offline, reload, account-switch, corrupt disk, quota) instead of happy-path-only. Future message persistence inherits idempotency keys, paging windows, and rollback guards instead of inventing them.
 
 ---
