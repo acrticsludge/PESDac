@@ -446,6 +446,35 @@ export async function discardOp(id: string): Promise<void> {
 }
 
 /**
+ * Explicit user retry for settled failures (audit §10 item 3): reset
+ * failed-fatal + failed-retryable queue records to pending and kick a
+ * flush. Returns the retried count (0 = nothing to retry, no flush).
+ * Never auto-called — the worker skips fatal records, so this (plus a
+ * reload, which rebuilds a record-less queue) is the only path that
+ * re-sends them. Retries reuse each op's idempotency key: the server
+ * dedupes, so a retry can never duplicate. Pass explicit senders in
+ * tests; production callers omit it for the real flush.
+ */
+export async function retryFailedOutboxOps(
+  senders?: OutboxSenders,
+): Promise<{ retried: number }> {
+  const ops = await outboxStore.list();
+  let retried = 0;
+  for (const op of ops) {
+    const record = outboxQueue.get(op.id);
+    if (record && record.status !== "sent" && record.status !== "pending") {
+      outboxQueue.track(op.id);
+      retried += 1;
+    }
+  }
+  await refreshSnapshot();
+  if (retried === 0) return { retried };
+  if (senders) await flushOutbox(senders);
+  else requestOutboxFlush();
+  return { retried };
+}
+
+/**
  * Register `online` / `focus` / `visibilitychange` / interval flush
  * triggers. Idempotent; SSR-safe no-op without `window`.
  */

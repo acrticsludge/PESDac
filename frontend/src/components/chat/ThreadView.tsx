@@ -1924,6 +1924,14 @@ export default function ThreadView({
                                         "will send automatically when online." +
                                         (outboxSnapshot.evicted > 0
                                           ? ` ${outboxSnapshot.evicted} oldest dropped (outbox full).`
+                                          : "") +
+                                        // Failed-fatal ops never auto-retry
+                                        // (the worker skips them); a reload
+                                        // rebuilds a record-less queue and
+                                        // retries everything durable. Name it
+                                        // so a stuck count is diagnosable.
+                                        (outboxSnapshot.failedFatal > 0
+                                          ? ` ${outboxSnapshot.failedFatal} failed and won't retry until reload.`
                                           : ""),
                                     }
                                   : undefined

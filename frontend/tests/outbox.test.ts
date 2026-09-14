@@ -16,6 +16,7 @@ import {
   flushOutbox,
   getOutboxSnapshot,
   orderOutboxOps,
+  retryFailedOutboxOps,
   type OutboxSenders,
 } from "../src/lib/outbox.ts";
 import { outboxStore } from "../src/lib/outbox-db.ts";
@@ -189,6 +190,61 @@ test("exhausted retryables become failed-fatal (never silently dropped)", async 
   await flushOutbox(senders);
   assert.equal(senders.calls.length, 6);
   assert.equal((await outboxStore.list()).length, 1);
+});
+
+test("retryFailedOutboxOps re-sends settled failures once each, then drains", async () => {
+  reset();
+  await enqueueAppend("chat-1", { role: "user", content: { text: "hi" } }, { kick: false });
+  const failing = mockSenders({
+    appendMessage: async () => {
+      throw apiError(404);
+    },
+  });
+  assert.deepEqual(await flushOutbox(failing), { sent: 0, kept: 1 });
+  assert.equal(getOutboxSnapshot().failedFatal, 1);
+  // Explicit retry with healthy senders: same op re-sent (same key —
+  // server dedupes), acked, drained, snapshot zeroed.
+  const healthy = mockSenders();
+  assert.deepEqual(await retryFailedOutboxOps(healthy), { retried: 1 });
+  assert.equal(healthy.calls.length, 1);
+  assert.deepEqual(await outboxStore.list(), []);
+  assert.deepEqual(getOutboxSnapshot(), {
+    total: 0,
+    pending: 0,
+    failedRetryable: 0,
+    failedFatal: 0,
+    evicted: 0,
+  });
+});
+
+test("retryFailedOutboxOps counts only failures; pending ops are untouched", async () => {
+  reset();
+  await enqueueAppend("chat-1", { role: "user", content: { text: "doomed" } }, { kick: false });
+  await enqueueAppend("chat-1", { role: "user", content: { text: "fine" } }, { kick: false });
+  let calls = 0;
+  const flaky = mockSenders({
+    appendMessage: async (_chat, body) => {
+      calls += 1;
+      if ((body as { content: { text: string } }).content.text === "doomed") {
+        throw apiError(422);
+      }
+    },
+  });
+  await flushOutbox(flaky);
+  assert.equal(getOutboxSnapshot().failedFatal, 1);
+  assert.equal(getOutboxSnapshot().total, 1);
+  // The pending op drained on ack; only the failed one is "retried".
+  const healthy = mockSenders();
+  assert.deepEqual(await retryFailedOutboxOps(healthy), { retried: 1 });
+  assert.equal(healthy.calls.length, 1);
+  assert.deepEqual(await outboxStore.list(), []);
+});
+
+test("retryFailedOutboxOps with nothing failed returns zero and sends nothing", async () => {
+  reset();
+  const senders = mockSenders();
+  assert.deepEqual(await retryFailedOutboxOps(senders), { retried: 0 });
+  assert.equal(senders.calls.length, 0);
 });
 
 test("create ops drain before their chat's appends", async () => {

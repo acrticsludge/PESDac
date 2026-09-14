@@ -54,7 +54,29 @@ const OVERLAY_KEY = "pesdac-overlays-v1";
 
 const listeners = new Set<() => void>();
 function emit() {
-  listeners.forEach((fn) => fn());
+  // Listener-fanout protection (audit §10 item 2): one throwing
+  // subscriber breaks neither the remaining subscribers nor the
+  // mutator that emitted. The error is logged, never swallowed
+  // silently, and never thrown into the store.
+  listeners.forEach((fn) => {
+    try {
+      fn();
+    } catch (error) {
+      console.error("[session] subscriber threw; continuing fanout", error);
+    }
+  });
+}
+
+/**
+ * Subscribe to store changes; returns an unsubscribe function.
+ * `useSessionVersion` builds on this — prefer it over touching
+ * `listeners` directly.
+ */
+export function subscribeSession(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
 }
 
 // Cross-tab sync died with browser persistence (no shared medium
@@ -103,10 +125,7 @@ export function useSessionVersion() {
   const [, setVersion] = useState(0);
   useEffect(() => {
     const fn = () => setVersion((v) => v + 1);
-    listeners.add(fn);
-    return () => {
-      listeners.delete(fn);
-    };
+    return subscribeSession(fn);
   }, []);
 }
 
@@ -140,11 +159,32 @@ function readJSON<T>(key: string, fallback: T): T {
   try {
     return JSON.parse(raw) as T;
   } catch {
-    // Unreachable in practice (we only ever write our own JSON), but never
-    // let a bad entry wedge the session — drop it and fall back.
+    // Corrupt entry: drop it and fall back — but say so exactly once
+    // per key (audit §10 item 1: corrupt-JSON one-time warning). Silent
+    // drops hide disk/memory damage; repeated errors spam the console.
     mem.delete(key);
+    if (!corruptWarned.has(key)) {
+      corruptWarned.add(key);
+      console.error(
+        `[session] stored data for ${key} was damaged and was discarded; that section started fresh.`,
+      );
+    }
     return fallback;
   }
+}
+
+/** Keys that already emitted their one-time corrupt-data warning. */
+const corruptWarned = new Set<string>();
+
+/** Test seam: plant a raw (possibly damaged) payload straight into the store. */
+export function __plantStoreRawForTesting(key: string, raw: string): void {
+  if (typeof window === "undefined") return;
+  mem.set(key, raw);
+}
+
+/** Test seam: reset the one-time corrupt-data warnings. */
+export function __resetCorruptWarningsForTesting(): void {
+  corruptWarned.clear();
 }
 
 function writeJSON(key: string, value: unknown) {
@@ -219,9 +259,24 @@ export function getOverlay(code: string): Block[] {
   return readJSON<Record<string, Block[]>>(OVERLAY_KEY, {})[code] ?? [];
 }
 
+/**
+ * Per-chat overlay bound (audit §10 item 1): the store is memory-only,
+ * so a marathon session must not grow it without limit. Appends trim
+ * oldest-first; the tail (newest context, what rendering reads) always
+ * survives. Closed chats drop their overlay in `deleteCustomChat`;
+ * rollback/load paths use `setOverlay` below and are capped the same.
+ */
+export const MAX_OVERLAY_BLOCKS_PER_CHAT = 500;
+
+function capOverlay(blocks: Block[]): Block[] {
+  return blocks.length > MAX_OVERLAY_BLOCKS_PER_CHAT
+    ? blocks.slice(blocks.length - MAX_OVERLAY_BLOCKS_PER_CHAT)
+    : blocks;
+}
+
 export function appendBlocks(code: string, blocks: Block[]) {
   const all = readJSON<Record<string, Block[]>>(OVERLAY_KEY, {});
-  all[code] = [...(all[code] ?? []), ...blocks];
+  all[code] = capOverlay([...(all[code] ?? []), ...blocks]);
   writeJSON(OVERLAY_KEY, all);
   emit();
 }
@@ -939,7 +994,7 @@ export function isServerChat(code: string): boolean {
 /** Replace a chat's overlay blocks wholesale (rollback + server-load apply). */
 export function setOverlay(code: string, blocks: Block[]) {
   const all = readJSON<Record<string, Block[]>>(OVERLAY_KEY, {});
-  all[code] = [...blocks];
+  all[code] = capOverlay([...blocks]);
   writeJSON(OVERLAY_KEY, all);
   emit();
 }
