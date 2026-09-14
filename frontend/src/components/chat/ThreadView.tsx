@@ -18,12 +18,12 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { Card } from "@astryxdesign/core/Card";
 import { Section } from "@astryxdesign/core/Section";
 import { Markdown } from "@astryxdesign/core/Markdown";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Button } from "@astryxdesign/core/Button";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
-import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
@@ -109,9 +109,6 @@ import {
   getFeedback,
   setFeedback,
   feedbackKey,
-  getScopeOverride,
-  setScopeOverride,
-  scopeKey,
   type FeedbackVote,
   type ChatAuth,
   identitySeedKey,
@@ -126,15 +123,20 @@ import {
   persistAppendedBlock,
   persistTruncate,
   shouldShowThreadSkeleton,
+  listCustomChats,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
+  OPEN_FIND_EVENT,
+  setFindAvailable,
 } from "../../lib/session";
 import { useAuth, useAuthEpoch } from "../../lib/auth";
+import { useLlmStatus } from "../../lib/llm";
+import { latestFollowUps } from "../../lib/setting-followups";
 import {
-  FOLLOW_UPS_SETTING,
-  nextFollowUpsOverride,
-  resolveFollowUps,
-} from "../../lib/setting-followups";
+  formatTime,
+  resolveDividerText,
+  isSameCalendarDay,
+} from "../../lib/format-timestamps";
 import { planResponse, type ResponseMode } from "../../lib/responder";
 import {
   newClientKey,
@@ -211,6 +213,9 @@ function StudyNoteCard({
 const MCQ_LETTERS = ["A", "B", "C", "D", "E", "F"];
 function McqCard({ bubble }: { bubble: McqBubble }) {
   const [picked, setPicked] = useState<number | null>(null);
+  // Fail closed on a malformed payload (no options): a card row must never
+  // take down the thread — same doctrine as unparseable timestamps.
+  if (bubble.options.length === 0) return null;
   const correct = picked != null && picked === bubble.answerIndex;
   return (
     <Card variant="muted" padding={5} width="100%" maxWidth={560}>
@@ -280,6 +285,9 @@ function McqCard({ bubble }: { bubble: McqBubble }) {
 function StepsCard({ bubble }: { bubble: StepsBubble }) {
   const [at, setAt] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  // Fail closed on a malformed payload (no steps): `steps[0].heading`
+  // would throw below and unmount the whole thread.
+  if (bubble.steps.length === 0) return null;
   const step = bubble.steps[at];
   return (
     <Card variant="muted" padding={5} width="100%" maxWidth={560}>
@@ -625,6 +633,55 @@ function VoteButtons({ voteKey }: { voteKey: string }) {
   );
 }
 
+// Chat timestamp in the viewer's selected time zone (Profile → Language).
+// Same Astryx Text tokens the Timestamp row used (supporting/secondary),
+// but the wall time comes from profile region + timezone via `formatTime`
+// instead of the browser zone — so changing the setting repaints every
+// open message (reactive via useSessionVersion, same as the parent).
+function ChatTimestamp({ value }: { value: string }) {
+  useSessionVersion();
+  const profile = getProfile();
+  const text = formatTime(value, {
+    region: profile.region,
+    timeZone: profile.timezone,
+  });
+  let iso = value;
+  try {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) iso = parsed.toISOString();
+  } catch {
+    // Keep the raw value for dateTime — text already failed closed.
+  }
+  return (
+    <Text type="supporting" color="secondary">
+      <time dateTime={iso}>{text}</time>
+    </Text>
+  );
+}
+
+// Day-divider text for render: the stored text freezes the day word at
+// creation, so recompute its prefix from the first message below the
+// divider (else the chat's creation date for still-empty drafts).
+// No anchor (static demo shells) keeps the stored text verbatim.
+function dividerTextFor(
+  stored: string,
+  blocks: Block[],
+  index: number,
+  sessionKey: string,
+  region: string,
+  timeZone: string,
+): string {
+  for (let j = index + 1; j < blocks.length; j++) {
+    const next = blocks[j];
+    if (next.from === "user" || next.from === "assistant") {
+      return resolveDividerText(stored, next.time, { region, timeZone });
+    }
+  }
+  const createdAt = listCustomChats().find((c) => c.code === sessionKey)
+    ?.createdAt;
+  return resolveDividerText(stored, createdAt, { region, timeZone });
+}
+
 // Assistant turn as copyable markdown (code stays fenced, media degrades
 // to a labelled placeholder line).
 function assistantBlockText(block: AssistantBlock): string {
@@ -786,9 +843,6 @@ export default function ThreadView({
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
   // Copy-transcript menu feedback.
   const [transcriptCopied, setTranscriptCopied] = useState(false);
-  // Per-chat follow-ups repaint: the kernel override map is intentionally
-  // emit-free, so the menu entry bumps this to repaint the pills gate.
-  const [, setFollowUpsTick] = useState(0);
 
   // Session overlay: blocks appended this session (persisted per code).
   // Read directly (see Pesdac.tsx note) so sent messages and renames show
@@ -817,6 +871,19 @@ export default function ThreadView({
         }
       : null;
   const isBacked = chatAuth != null && isServerChat(sessionKey);
+  // LLM gate (spec llm-byok-settings §5.3): keyless authenticated sends
+  // stop in handleSend with the composer status showing — no optimistic
+  // paint (a user bubble with no possible reply is a lie). Drafts stay
+  // in the input. Guests/loading/degraded behave exactly as today.
+  const llm = useLlmStatus();
+  const llmBlocked =
+    authState.status === "authenticated" &&
+    (llm.state === "unconfigured" || llm.state === "invalid");
+  const llmStatusMessage = !llmBlocked
+    ? null
+    : llm.state === "invalid"
+      ? "Your saved key was rejected — save a new one in Settings."
+      : "Connect your OpenRouter key in Settings to start chatting.";
 
   // Open-chat message load (spec §5): server turns load once per opened
   // custom chat — skeleton while loading, memory paint + one toast on
@@ -864,32 +931,18 @@ export default function ThreadView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey, isBacked]);
 
-  // Follow-ups from the latest assistant turn (live turns persist theirs).
-  const followUps = (() => {
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const b = blocks[i];
-      if (b.from === "assistant" && b.followUps && b.followUps.length > 0)
-        return b.followUps;
-    }
-    return null;
-  })();
+  // Follow-ups for the bottom pill row: the latest assistant turn's
+  // suggestions, but only while no newer user message supersedes them —
+  // a sent prompt hides stale pills until its response lands and persists
+  // them (the `live == null` gate below stays as the streaming layer).
+  const followUps = latestFollowUps(blocks);
 
-  // Follow-ups visibility gate (settings S1): per-chat override wins,
-  // otherwise the global profile default. Render-only — the server keeps
-  // sending suggestions; this decides display.
-  const showFollowUps = resolveFollowUps(sessionKey);
-  // Thread-menu state for the single three-state item (spec §3).
-  const followUpsScope = scopeKey("chat", sessionKey);
-  const followUpsOverride = getScopeOverride(
-    FOLLOW_UPS_SETTING,
-    followUpsScope,
-  ) as boolean | undefined;
-  const followUpsMenuState =
-    followUpsOverride === undefined
-      ? `Use default (${showFollowUps ? "On" : "Off"})`
-      : followUpsOverride
-        ? "On"
-        : "Off";
+  // Follow-ups visibility gate: the profile default (My Profile →
+  // Assistant → Follow-up suggestions). Render-only — the server keeps
+  // sending suggestions; this decides display. Reactive via the
+  // useSessionVersion() subscription above, so flipping the profile
+  // switch repaints open chats with no refetch.
+  const showFollowUps = getProfile().followUps;
 
   // In-thread find: substring match over the block corpus, current hit
   // scrolled into view with an accent outline.
@@ -1156,6 +1209,7 @@ export default function ThreadView({
     // Gate: the composer is disabled while user data loads; this guard
     // covers any programmatic send path. Drafts are preserved (no clear).
     if (!isAppReady) return;
+    if (llmBlocked) return;
     setSendError(null);
     // Edited resend: drop the edited user turn and everything after it;
     // the normal path below appends the replacement and streams again.
@@ -1191,16 +1245,18 @@ export default function ThreadView({
   // paint + one toast and the assistant never starts.
   const appendAndStream = (text: string, staged: StagedFile[]) => {
     // Send clears the composer via ChatComposer's own onChange.
-    // Day break: new messages on a later day than the last one get a
-    // "Today · Subject" divider first (mockup label; backend sends real dates).
+    // Day break: new messages on a later calendar day (in the selected
+    // time zone) than the last one get a "Today · Subject" divider first.
+    // The divider text is re-resolved at render, so it ages on revisit.
+    const profile = getProfile();
     let needsDayDivider = false;
     for (let i = blocks.length - 1; i >= 0; i--) {
       const b = blocks[i];
       if (b.from === "user" || b.from === "assistant") {
-        const t = new Date(b.time).getTime();
-        needsDayDivider =
-          Number.isNaN(t) ||
-          new Date(t).toDateString() !== new Date().toDateString();
+        needsDayDivider = !isSameCalendarDay(b.time, new Date(), {
+          region: profile.region,
+          timeZone: profile.timezone,
+        });
         break;
       }
     }
@@ -1405,6 +1461,14 @@ export default function ThreadView({
   // (autoSendRef is declared with the backing block above: the history
   // load consults it to skip the list leg on fresh chats.)
 
+  // Find availability for the global Ctrl/⌘+F shortcut: published while
+  // this thread is mounted so Pesdac only hijacks browser find where the
+  // custom finder exists.
+  useEffect(() => {
+    setFindAvailable(true);
+    return () => setFindAvailable(false);
+  }, []);
+
   // Global shortcuts (no deps: re-subscribe each render for fresh state).
   useEffect(() => {
     const onCancel = () => {
@@ -1413,11 +1477,25 @@ export default function ThreadView({
       else if (findOpen) closeFind();
     };
     const onFocus = () => composerInputRef.current?.focus();
+    const onOpenFind = () => {
+      if (!getProfile().shortcutFind) return;
+      if (findOpen) {
+        // Already open: move focus back to the find box instead of
+        // wiping the query.
+        rootRef.current
+          ?.querySelector<HTMLInputElement>("[data-find-panel] input")
+          ?.focus();
+        return;
+      }
+      openFind();
+    };
     window.addEventListener(CANCEL_EVENT, onCancel);
     window.addEventListener(FOCUS_COMPOSER_EVENT, onFocus);
+    window.addEventListener(OPEN_FIND_EVENT, onOpenFind);
     return () => {
       window.removeEventListener(CANCEL_EVENT, onCancel);
       window.removeEventListener(FOCUS_COMPOSER_EVENT, onFocus);
+      window.removeEventListener(OPEN_FIND_EVENT, onOpenFind);
     };
   });  useEffect(() => {
     if (autoSendRef.current) {
@@ -1576,7 +1654,7 @@ export default function ThreadView({
               isLast ? (
                 <ChatMessageMetadata
                   timestamp={
-                    <Timestamp value={block.time} format="time" />
+                    <ChatTimestamp value={block.time} />
                   }
                   footer={
                     canEdit ? (
@@ -1665,7 +1743,7 @@ export default function ThreadView({
           </ChatMessageBubble>
         )}
         <ChatMessageMetadata
-          timestamp={<Timestamp value={block.time} format="time" />}
+          timestamp={<ChatTimestamp value={block.time} />}
           footer={
             <HStack gap={1} vAlign="center">
               {footer ? (
@@ -1717,6 +1795,7 @@ export default function ThreadView({
                 {/* Find floats over the message corner — never a layout row. */}
                 {findOpen && (
                   <div
+                    data-find-panel
                     style={{
                       position: "absolute",
                       top: 8,
@@ -1813,7 +1892,8 @@ export default function ThreadView({
                       isStopShown={live != null}
                       isDisabled={!isAppReady}
                       statusPosition={
-                        syncErrorMessage != null && sendError == null
+                        (syncErrorMessage != null || llmStatusMessage != null) &&
+                        sendError == null
                           ? "top"
                           : undefined
                       }
@@ -1822,7 +1902,9 @@ export default function ThreadView({
                           ? { type: "warning", message: sendError.message }
                           : syncErrorMessage != null
                             ? { type: "error", message: syncErrorMessage }
-                            : !storageOk
+                            : llmStatusMessage != null
+                              ? { type: "warning", message: llmStatusMessage }
+                              : !storageOk
                               ? {
                                   type: "warning",
                                   message:
@@ -1886,17 +1968,19 @@ export default function ThreadView({
                       }
                       headerActions={
                         <>
-                          <Button
-                            label="Find in thread"
-                            variant="ghost"
-                            size="sm"
-                            isIconOnly
-                            isDisabled={!isAppReady}
-                            icon={
-                              <Icon icon={MagnifyingGlassIcon} size="sm" />
-                            }
-                            onClick={openFind}
-                          />
+                          {getProfile().shortcutFind && (
+                            <Button
+                              label="Find in thread"
+                              variant="ghost"
+                              size="sm"
+                              isIconOnly
+                              isDisabled={!isAppReady}
+                              icon={
+                                <Icon icon={MagnifyingGlassIcon} size="sm" />
+                              }
+                              onClick={openFind}
+                            />
+                          )}
                           <AttachButton onFiles={stageIntoDrawer} />
                           <DropdownMenu
                             button={{
@@ -1935,21 +2019,20 @@ export default function ThreadView({
                                   : "Copy transcript",
                                 onClick: copyTranscript,
                               },
-                              {
-                                label: "Follow-up suggestions — this chat",
-                                description: followUpsMenuState,
-                                onClick: () => {
-                                  setScopeOverride(
-                                    FOLLOW_UPS_SETTING,
-                                    followUpsScope,
-                                    nextFollowUpsOverride(followUpsOverride),
-                                  );
-                                  setFollowUpsTick((t) => t + 1);
-                                },
-                              },
                             ]}
                           />
                         </>
+                      }
+                      // Cosmetic only (dummy value): reserves the context-window
+                      // slot until the context-meter work lands.
+                      headerContext={
+                        <HStack gap={2} vAlign="center">
+                          <ProgressBar
+                            value={42}
+                            label="Context usage"
+                            isLabelHidden
+                          />
+                        </HStack>
                       }
                       footerActions={
                         <DropdownMenu
@@ -1989,7 +2072,7 @@ export default function ThreadView({
                 >
                   <ChatMessageList isStreaming={live != null}>
                     {showHistoryLoader ? (
-                      <ThreadHistoryLoader />
+                      <ThreadHistoryLoader isModalOpen={isModalOpen} />
                     ) : (
                       <>
                     {showHistoryRetry && (
@@ -2007,6 +2090,20 @@ export default function ThreadView({
                     )}
                     {blocks.map((block, i) => {
                       if (block.from === "system") {
+                        // Stored divider text freezes its day word at creation;
+                        // re-resolve the prefix from the messages below it so
+                        // a chat started days ago no longer reads "Today".
+                        const text =
+                          block.variant === "divider"
+                            ? dividerTextFor(
+                                block.text,
+                                blocks,
+                                i,
+                                sessionKey,
+                                getProfile().region,
+                                getProfile().timezone,
+                              )
+                            : block.text;
                         return findRow(
                           i,
                           <ChatSystemMessage
@@ -2017,7 +2114,7 @@ export default function ThreadView({
                                 : undefined
                             }
                           >
-                            {block.text}
+                            {text}
                           </ChatSystemMessage>,
                         );
                       }

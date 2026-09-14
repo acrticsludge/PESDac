@@ -35,7 +35,7 @@ import { Link } from "@astryxdesign/core/Link";
 import { Divider } from "@astryxdesign/core/Divider";
 import { LayerProvider } from "@astryxdesign/core/Layer";
 import { Theme } from "@astryxdesign/core/theme";
-import { PESDacMockupTheme } from "../../theme/PESDacMockupTheme";
+import { PESDacMockupTheme } from "../../theme/PESDacMockup";
 import { navigate } from "astro:transitions/client";
 import {
   useAuth,

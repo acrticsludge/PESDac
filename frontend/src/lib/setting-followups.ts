@@ -1,38 +1,32 @@
-// Follow-up suggestions resolver (settings S1).
+// Follow-up suggestions pill anchor (settings S1).
 //
-// Precedence is `per-chat override > global default` (spec §2): suggestion
-// display is a thread-situation concern, so there is no per-subject tier.
-// Reads ride the Step-0 kernel (`resolveTiered`); writes below are
-// memory-only by kernel construction (guests cost zero fetches, and every
-// identity transition wipes the map).
+// Visibility is the profile global alone (My Profile → Assistant →
+// Follow-up suggestions); the thread's "..." menu carries no per-chat
+// override. This module owns only the pure anchor: which turn's
+// suggestions the bottom pill row shows.
 
-import { DEFAULT_PROFILE } from "./session.ts";
-import { resolveTiered } from "./settings-scope.ts";
-
-/** Kernel setting name for the per-chat override map. */
-export const FOLLOW_UPS_SETTING = "followUps";
-
-/**
- * Show suggestion pills for this chat? The per-chat override wins when
- * set; otherwise the global profile default applies.
- */
-export function resolveFollowUps(chatCode: string | null): boolean {
-  return resolveTiered<boolean>(
-    FOLLOW_UPS_SETTING,
-    chatCode,
-    DEFAULT_PROFILE.followUps,
-  );
-}
+/** Minimal block shape the pill anchor reads (system dividers carry no time). */
+export type FollowUpsBlock = {
+  from: "user" | "assistant" | "system";
+  followUps?: readonly string[];
+};
 
 /**
- * Next state for the thread menu's single three-state item:
- * unset → Off → On → Use default (delete). Pure so the menu stays a
- * thin caller and the cycle is unit-testable.
+ * Pills for the bottom row: the latest assistant turn's suggestions —
+ * but only while no newer user message supersedes them. A sent prompt
+ * whose response hasn't landed yet (user block appended, assistant turn
+ * not yet persisted) yields null, so stale pills never flash before the
+ * response is done. System dividers are skipped, never anchors; assistant
+ * turns without suggestions (e.g. error rows) are skipped the same way.
  */
-export function nextFollowUpsOverride(
-  current: boolean | undefined,
-): boolean | undefined {
-  if (current === undefined) return false;
-  if (current === false) return true;
-  return undefined;
+export function latestFollowUps(
+  blocks: readonly FollowUpsBlock[],
+): readonly string[] | null {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.from === "user") return null;
+    if (b.from === "assistant" && b.followUps && b.followUps.length > 0)
+      return b.followUps;
+  }
+  return null;
 }

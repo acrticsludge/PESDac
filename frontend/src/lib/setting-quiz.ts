@@ -6,7 +6,10 @@
 // fetch-free: `difficulty` and `proactive` reuse the existing profile fields
 // (same values, same backend enums); `format` / `optionCount` /
 // `questionCount` are new customizable axes with no profile column, so their
-// global tier is unset and they fall through to the built-ins.
+// global tier is unset and they fall through to the built-ins. `customEnabled`
+// is the master toggle for those three axes (also no profile column,
+// built-in `false`): when off, the engine ignores them and the LLM decides
+// quiz shape; when on, the engine enforces the resolved values.
 //
 // Overrides are config-only and memory-only (the Step-0 kernel map,
 // identity-scoped, cleared on transition); per-chat panels are v2, so this
@@ -32,12 +35,21 @@ export type QuizConfig = {
   questionCount: QuizQuestionCount;
   /** Offer a quiz after finishing an explanation. */
   proactive: boolean;
+  /**
+   * Master toggle for custom quiz formatting. When `false` (the default),
+   * `format` / `optionCount` / `questionCount` are ignored and the LLM
+   * decides how many options / questions to use. When `true`, the engine
+   * enforces the resolved format settings below.
+   */
+  customEnabled: boolean;
 };
 
 /**
  * Built-in default: `{ single, 4, medium, 5, proactive }`. `proactive`
  * reads the existing profile flag; the constant carries today's default
  * (`true`, mirroring DEFAULT_PROFILE) for callers with no profile access.
+ * `customEnabled` is `false` — the AI decides quiz shape unless the user
+ * opts into custom formatting.
  */
 export const BUILTIN_QUIZ_CONFIG: QuizConfig = {
   format: "single",
@@ -45,6 +57,7 @@ export const BUILTIN_QUIZ_CONFIG: QuizConfig = {
   difficulty: "medium",
   questionCount: 5,
   proactive: true,
+  customEnabled: false,
 };
 
 // Server-mirrored validators: an override holding an unknown value (never
@@ -137,6 +150,15 @@ export function resolveQuizConfig(opts?: {
       isBoolean,
       profile.proactiveQuiz,
       BUILTIN_QUIZ_CONFIG.proactive,
+    ),
+    // Master toggle for the custom format axes above. No profile column —
+    // per-chat > per-subject > built-in `false` (disabled by default, so
+    // the LLM decides quiz shape unless the user opts in).
+    customEnabled: pick(
+      "quizCustomEnabled",
+      isBoolean,
+      undefined,
+      BUILTIN_QUIZ_CONFIG.customEnabled,
     ),
   };
 }

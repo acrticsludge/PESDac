@@ -16,7 +16,9 @@ import { useEffect, useState } from "react";
 
 import { Dialog } from "@astryxdesign/core/Dialog";
 import { Button } from "@astryxdesign/core/Button";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Heading, Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { Layout, LayoutContent, VStack } from "@astryxdesign/core/Layout";
 import {
   SegmentedControl,
@@ -37,6 +39,13 @@ import {
   refreshProfile,
   toUserMessage,
 } from "../../lib/auth";
+import {
+  apiLlmSave,
+  apiLlmStatus,
+  LLM_DEFAULT_MODEL,
+  maskKeyHint,
+  OPENROUTER_KEYS_URL,
+} from "../../lib/llm";
 import {
   isLogoutTransition,
   isTransitionNoise,
@@ -78,6 +87,16 @@ export default function OnboardingDialog({
   const [subjects, setSubjects] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // Optional BYOK slot (spec llm-byok-settings §5.2): never blocks save.
+  // Empty + save asks once via the warning banner, then proceeds keyless.
+  const [llmKey, setLlmKey] = useState("");
+  const [llmSaving, setLlmSaving] = useState(false);
+  const [llmFailure, setLlmFailure] = useState<string | null>(null);
+  const [llmHint, setLlmHint] = useState<string | null>(null);
+  const [showKeyWarn, setShowKeyWarn] = useState(false);
+  // Set only via the banner's explicit action: proceed keyless even
+  // though a (bad) key is still typed — e.g. after a rejected save.
+  const [keylessConfirmed, setKeylessConfirmed] = useState(false);
 
   // Mounts only once the server confirms onboarding is needed:
   // checking/done render nothing, so refreshes never flash a loader.
@@ -137,6 +156,16 @@ export default function OnboardingDialog({
               ? profile.subjects.filter(isSubject)
               : [],
           );
+          // BYOK prefill (best-effort, never blocks): a returning user
+          // with a key sees the hint row instead of the input. Failure
+          // resolves to "no key" — the slot simply shows empty.
+          try {
+            const llm = await apiLlmStatus(userId);
+            if (cancelled) return;
+            if (llm.configured) setLlmHint(llm.keyHint);
+          } catch {
+            if (cancelled) return;
+          }
           setPhase("open");
           return;
         } catch (error) {
@@ -227,7 +256,13 @@ export default function OnboardingDialog({
     validateSubjects(subjects) === null;
 
   async function handleSave() {
-    if (!canSave) return;
+    if (!canSave || isSaving || llmSaving) return;
+    // Skippable key slot: a keyless save first raises the warning
+    // banner — the next save confirms the skip and proceeds.
+    if (llmHint == null && !keylessConfirmed && llmKey.trim() === "" && !showKeyWarn) {
+      setShowKeyWarn(true);
+      return;
+    }
     setIsSaving(true);
     setFailure(null);
     try {
@@ -247,6 +282,25 @@ export default function OnboardingDialog({
         branch,
         subjects,
       });
+      // Best-effort key save: failure stays visible inline (dialog
+      // stays open) — Settings remains the authoritative surface and
+      // the banner offers the explicit keyless path.
+      if (llmHint == null && !keylessConfirmed && llmKey.trim() !== "") {
+        setLlmSaving(true);
+        setLlmFailure(null);
+        try {
+          const saved = await apiLlmSave(llmKey.trim(), LLM_DEFAULT_MODEL);
+          if (saved.configured) setLlmHint(saved.keyHint);
+        } catch (error) {
+          setLlmFailure(
+            toUserMessage(error, "Couldn't save the key. You can add it later in Settings."),
+          );
+          setShowKeyWarn(true);
+          return;
+        } finally {
+          setLlmSaving(false);
+        }
+      }
       // The cached /auth/me still says onboardingDone:false — drop it so
       // the next reader sees the saved state instead of a stale flag.
       refreshProfile();
@@ -256,6 +310,13 @@ export default function OnboardingDialog({
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function handleContinueWithoutKey() {
+    setKeylessConfirmed(true);
+    setLlmKey("");
+    setLlmFailure(null);
+    void handleSave();
   }
 
   const allSelected = subjects.length === ALL_SUBJECTS.length;
@@ -341,6 +402,65 @@ export default function OnboardingDialog({
                   ))}
                 </CheckboxList>
               </VStack>
+              <VStack gap={1}>
+                <Text type="label">Model key (optional)</Text>
+                {llmHint != null ? (
+                  <Text type="supporting" color="secondary">
+                    OpenRouter key connected ({maskKeyHint(llmHint)}). You can
+                    change it anytime in Settings.
+                  </Text>
+                ) : (
+                  <>
+                    <TextInput
+                      label="OpenRouter API key"
+                      isLabelHidden
+                      type="password"
+                      placeholder="sk-or-v1-…"
+                      value={llmKey}
+                      onChange={(value) => {
+                        setLlmKey(value);
+                        if (llmFailure) setLlmFailure(null);
+                      }}
+                      status={
+                        llmFailure != null
+                          ? { type: "error", message: llmFailure }
+                          : undefined
+                      }
+                    />
+                    <Text type="supporting" color="secondary">
+                      Create one at openrouter.ai, then paste it here — or
+                      skip and add it later in Settings.
+                    </Text>
+                    <VStack hAlign="start">
+                      <Button
+                        label="Get an OpenRouter key"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          window.open(OPENROUTER_KEYS_URL, "_blank", "noopener");
+                        }}
+                      />
+                    </VStack>
+                  </>
+                )}
+              </VStack>
+              {showKeyWarn && (
+                <Banner
+                  status="warning"
+                  title="Chats need an API key"
+                  description="Without an OpenRouter key you can browse and set up, but starting a chat will ask you to connect one — anytime in Settings."
+                  endContent={
+                    <Button
+                      label="Continue without key"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => handleContinueWithoutKey()}
+                    />
+                  }
+                  onDismiss={() => setShowKeyWarn(false)}
+                  dismissLabel="Back to the form"
+                />
+              )}
               <VStack hAlign="stretch">
                 <Button
                   label="Start studying"

@@ -1,7 +1,9 @@
-// Settings S1 — follow-up suggestions (spec-followup-suggestions.md).
-// Resolver precedence (override > global), the three-state menu cycle,
-// and the global write-through contract this stream wires into the UI.
-// Guests cost zero fetches; overrides die on every identity transition.
+// Settings S1 — follow-up suggestions.
+// Pill visibility is the profile global alone (My Profile → Assistant →
+// Follow-up suggestions); the thread's "..." menu carries no per-chat
+// override. Covered here: the global write-through contract this stream
+// wires into the UI, plus the pure pill anchor (`latestFollowUps`).
+// Guests cost zero fetches.
 //
 // Style mirrors settings-scope.test.ts: stubbed window/fetch,
 // state-based assertions, DAMP self-contained cases.
@@ -42,21 +44,14 @@ import {
   __resetChatBackingForTesting,
   clearScopeOverrides,
   getProfile,
-  getScopeOverride,
   resetChatStoreForIdentity,
-  scopeKey,
-  setScopeOverride,
   updateProfile,
 } from "../src/lib/session.ts";
 import {
   __flushSettingsDebounceForTesting,
   savePreference,
 } from "../src/lib/settings-scope.ts";
-import {
-  FOLLOW_UPS_SETTING,
-  nextFollowUpsOverride,
-  resolveFollowUps,
-} from "../src/lib/setting-followups.ts";
+import { latestFollowUps } from "../src/lib/setting-followups.ts";
 
 __setAuthBaseForTesting("https://auth.test");
 __setApiRootForTesting("https://api.test");
@@ -109,57 +104,72 @@ function resetState() {
 type Toast = { body: string; type: string };
 
 // ---------------------------------------------------------------------------
-// Resolver: per-chat override > global default
+// Global default: the profile switch is the single control
 // ---------------------------------------------------------------------------
 
-test("resolveFollowUps reads the global default for unknown chats", () => {
+test("profile switch is the pill gate's source of truth", () => {
   resetState();
-  assert.equal(resolveFollowUps(null), true);
-  assert.equal(resolveFollowUps("C-CN-01"), true);
+  assert.equal(getProfile().followUps, true);
   updateProfile({ followUps: false });
-  assert.equal(resolveFollowUps(null), false);
-  assert.equal(resolveFollowUps("C-CN-01"), false);
-  assert.equal(resolveFollowUps("C-CN-02"), false);
-});
-
-test("per-chat On re-enables exactly that chat when the global is off", () => {
-  resetState();
-  updateProfile({ followUps: false });
-  setScopeOverride(FOLLOW_UPS_SETTING, scopeKey("chat", "C-CN-01"), true);
-  assert.equal(resolveFollowUps("C-CN-01"), true);
-  // Siblings and the default stay off.
-  assert.equal(resolveFollowUps("C-CN-02"), false);
-  assert.equal(resolveFollowUps(null), false);
-});
-
-test("per-chat Off suppresses exactly that chat when the global is on", () => {
-  resetState();
-  updateProfile({ followUps: true });
-  setScopeOverride(FOLLOW_UPS_SETTING, scopeKey("chat", "C-CN-01"), false);
-  assert.equal(resolveFollowUps("C-CN-01"), false);
-  assert.equal(resolveFollowUps("C-CN-02"), true);
-  assert.equal(resolveFollowUps(null), true);
-});
-
-test("Use default deletes the override entry (never stored as false)", () => {
-  resetState();
-  updateProfile({ followUps: true });
-  const scope = scopeKey("chat", "C-CN-01");
-  setScopeOverride(FOLLOW_UPS_SETTING, scope, false);
-  assert.equal(resolveFollowUps("C-CN-01"), false);
-  setScopeOverride(FOLLOW_UPS_SETTING, scope, undefined);
-  assert.equal(getScopeOverride(FOLLOW_UPS_SETTING, scope), undefined);
-  assert.equal(resolveFollowUps("C-CN-01"), true);
+  assert.equal(getProfile().followUps, false);
 });
 
 // ---------------------------------------------------------------------------
-// Menu cycle: one item walks Off -> On -> Use default
+// Pill anchor: pills show only after the response is done
 // ---------------------------------------------------------------------------
 
-test("menu cycle walks unset -> Off -> On -> Use default", () => {
-  assert.equal(nextFollowUpsOverride(undefined), false);
-  assert.equal(nextFollowUpsOverride(false), true);
-  assert.equal(nextFollowUpsOverride(true), undefined);
+test("latest assistant turn's pills show while nothing follows them", () => {
+  assert.deepEqual(
+    latestFollowUps([
+      { from: "system" },
+      { from: "user" },
+      { from: "assistant", followUps: ["Go deeper", "Quiz me"] },
+    ]),
+    ["Go deeper", "Quiz me"],
+  );
+});
+
+test("a sent prompt suppresses stale pills until its response lands", () => {
+  const before = [
+    { from: "system" },
+    { from: "user" },
+    { from: "assistant", followUps: ["Go deeper"] },
+  ] as const;
+  // Prompt sent, response pending: user block is newest.
+  assert.equal(
+    latestFollowUps([...before, { from: "user" }]),
+    null,
+  );
+  // A day-break divider inserted ahead of the prompt changes nothing.
+  assert.equal(
+    latestFollowUps([...before, { from: "system" }, { from: "user" }]),
+    null,
+  );
+  // Response done: the new assistant turn's pills show.
+  assert.deepEqual(
+    latestFollowUps([
+      ...before,
+      { from: "user" },
+      { from: "assistant", followUps: ["Worked example"] },
+    ]),
+    ["Worked example"],
+  );
+});
+
+test("assistant rows without suggestions never anchor (error rows skip)", () => {
+  assert.deepEqual(
+    latestFollowUps([
+      { from: "user" },
+      { from: "assistant", followUps: ["Go deeper"] },
+      { from: "assistant" },
+    ]),
+    ["Go deeper"],
+  );
+  assert.equal(latestFollowUps([]), null);
+  assert.equal(
+    latestFollowUps([{ from: "system" }, { from: "user" }]),
+    null,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -197,10 +207,9 @@ test("global survives an identity transition (profile is not an override)", asyn
     server: true,
   });
   await __flushSettingsDebounceForTesting();
-  // Logout/login wipes the per-chat map but never the persisted global.
+  // Logout/login never clears the persisted global.
   resetChatStoreForIdentity();
   assert.equal(getProfile().followUps, false);
-  assert.equal(resolveFollowUps("C-CN-01"), false);
 });
 
 test("failed PATCH rolls back memory and fires one error toast", async () => {
@@ -226,7 +235,7 @@ test("failed PATCH rolls back memory and fires one error toast", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Guest path: memory-only, zero fetches; transition clears overrides
+// Guest path: memory-only, zero fetches
 // ---------------------------------------------------------------------------
 
 test("guest global save is memory-only: zero fetches, instant local value", async () => {
@@ -243,24 +252,4 @@ test("guest global save is memory-only: zero fetches, instant local value", asyn
   await __flushSettingsDebounceForTesting();
   assert.equal(apiLog.length, 0);
   assert.equal(toasts.length, 0);
-});
-
-test("guest per-chat override costs zero fetches and dies on transition", async () => {
-  resetState();
-  const apiLog: FetchLog[] = [];
-  __setFetchForTesting(
-    makeRouter([() => tokenOk("t-never")], [], apiLog),
-  );
-  updateProfile({ followUps: false });
-  setScopeOverride(FOLLOW_UPS_SETTING, scopeKey("chat", "C-CN-01"), true);
-  assert.equal(resolveFollowUps("C-CN-01"), true);
-  await __flushSettingsDebounceForTesting();
-  assert.equal(apiLog.length, 0);
-  // Login wipes the guest's per-chat choice; the global still applies.
-  resetChatStoreForIdentity();
-  assert.equal(
-    getScopeOverride(FOLLOW_UPS_SETTING, scopeKey("chat", "C-CN-01")),
-    undefined,
-  );
-  assert.equal(resolveFollowUps("C-CN-01"), false);
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { Theme } from "@astryxdesign/core/theme";
-import { PESDacMockupTheme } from "../../theme/PESDacMockupTheme";
+import { PESDacMockupTheme } from "../../theme/PESDacMockup";
 import { VStack, HStack } from "@astryxdesign/core/Layout";
 import { Text, Heading } from "@astryxdesign/core/Text";
 import { Card } from "@astryxdesign/core/Card";

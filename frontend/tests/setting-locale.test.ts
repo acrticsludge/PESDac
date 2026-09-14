@@ -55,6 +55,11 @@ import {
   savePreference,
 } from "../src/lib/settings-scope.ts";
 import { formatTimestamp } from "../src/lib/format-timestamps.ts";
+import {
+  formatDayLabel,
+  isSameCalendarDay,
+  resolveDividerText,
+} from "../src/lib/format-timestamps.ts";
 
 __setAuthBaseForTesting("https://auth.test");
 __setApiRootForTesting("https://api.test");
@@ -234,4 +239,103 @@ test("helper never throws: garbage input returns the input", () => {
     formatTimestamp("not-a-timestamp", { region: "XX", timeZone: "XX" }),
     "not-a-timestamp",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Day divider: stored "Today" must age on revisit (explicit now, IST)
+// ---------------------------------------------------------------------------
+
+const DIV_NOW = "2026-09-13T12:00:00.000Z"; // a Sunday, 17:30 IST
+const IN_IST = { region: "IN", timeZone: "IST" } as const;
+
+test("divider day word ages: today / yesterday / weekday / date", () => {
+  assert.equal(
+    formatDayLabel("2026-09-13T06:00:00.000Z", { ...IN_IST, now: DIV_NOW }),
+    "Today",
+  );
+  assert.equal(
+    formatDayLabel("2026-09-12T12:00:00.000Z", { ...IN_IST, now: DIV_NOW }),
+    "Yesterday",
+  );
+  // 3 days back: Thursday in Asia/Kolkata.
+  assert.equal(
+    formatDayLabel("2026-09-10T12:00:00.000Z", { ...IN_IST, now: DIV_NOW }),
+    "Thursday",
+  );
+  // 10 days back: medium date, never a frozen relative word.
+  const old = formatDayLabel("2026-09-03T12:00:00.000Z", {
+    ...IN_IST,
+    now: DIV_NOW,
+  });
+  assert.equal(
+    old,
+    new Intl.DateTimeFormat("en-IN", {
+      dateStyle: "medium",
+      timeZone: "Asia/Kolkata",
+    }).format(new Date("2026-09-03T12:00:00.000Z")),
+  );
+});
+
+test("divider label follows the selected time zone, not the machine zone", () => {
+  // 00:30Z Sep 13 is still Sep 12 in Los Angeles, Sep 13 in Kolkata.
+  assert.equal(
+    formatDayLabel("2026-09-13T00:30:00.000Z", {
+      region: "US",
+      timeZone: "PT",
+      now: DIV_NOW,
+    }),
+    "Yesterday",
+  );
+  assert.equal(
+    formatDayLabel("2026-09-13T00:30:00.000Z", { ...IN_IST, now: DIV_NOW }),
+    "Today",
+  );
+});
+
+test("resolveDividerText recomputes the prefix, keeps subject, demo passthrough", () => {
+  assert.equal(
+    resolveDividerText("Today · Computer Networks", "2026-09-10T12:00:00.000Z", {
+      ...IN_IST,
+      now: DIV_NOW,
+    }),
+    "Thursday · Computer Networks",
+  );
+  // No anchor (static demo shells, empty drafts before creation lookup):
+  // stored text verbatim.
+  assert.equal(
+    resolveDividerText("Last week · Computer Networks", undefined, {
+      ...IN_IST,
+      now: DIV_NOW,
+    }),
+    "Last week · Computer Networks",
+  );
+  // Garbage anchor: keep the stored prefix, never blank.
+  assert.equal(
+    resolveDividerText("Today · Computer Networks", "not-a-timestamp", {
+      ...IN_IST,
+      now: DIV_NOW,
+    }),
+    "Today · Computer Networks",
+  );
+});
+
+test("isSameCalendarDay is zone-aware and fails safe on garbage", () => {
+  // 18:30Z Sep 12 = 00:00 Sep 13 IST: same IST day as Sep 13 noon.
+  assert.equal(
+    isSameCalendarDay(
+      "2026-09-12T18:30:00.000Z",
+      "2026-09-13T12:00:00.000Z",
+      IN_IST,
+    ),
+    true,
+  );
+  assert.equal(
+    isSameCalendarDay(
+      "2026-09-12T12:00:00.000Z",
+      "2026-09-13T12:00:00.000Z",
+      IN_IST,
+    ),
+    false,
+  );
+  assert.equal(isSameCalendarDay("garbage", DIV_NOW, IN_IST), false);
 });

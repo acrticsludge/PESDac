@@ -81,6 +81,22 @@ if (typeof window !== "undefined") {
 // listener; ThreadView and the welcome composer subscribe.
 export const CANCEL_EVENT = "pesdac:cancel";
 export const FOCUS_COMPOSER_EVENT = "pesdac:focus-composer";
+export const OPEN_FIND_EVENT = "pesdac:open-find";
+
+// In-thread find availability: ThreadView sets this while mounted so the
+// global Ctrl/⌘+F handler only hijacks browser find where our custom
+// finder exists (welcome/search surfaces keep native find).
+let findAvailable = false;
+
+/** True while a thread with the custom finder is mounted. */
+export function isFindAvailable(): boolean {
+  return findAvailable;
+}
+
+/** Publish thread-finder mount state (no reactivity — read in handlers). */
+export function setFindAvailable(available: boolean): void {
+  findAvailable = available;
+}
 
 /** Re-render the caller whenever the session store changes (client only). */
 export function useSessionVersion() {
@@ -514,6 +530,7 @@ export type Profile = {
   shortcutNewChat: boolean;
   shortcutCancel: boolean;
   shortcutFocus: boolean;
+  shortcutFind: boolean;
 };
 
 export const DEFAULT_PROFILE: Profile = {
@@ -538,6 +555,7 @@ export const DEFAULT_PROFILE: Profile = {
   shortcutNewChat: true,
   shortcutCancel: true,
   shortcutFocus: true,
+  shortcutFind: true,
 };
 
 export function getProfile(): Profile {

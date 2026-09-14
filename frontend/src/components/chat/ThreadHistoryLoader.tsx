@@ -11,14 +11,16 @@ import { ChatToolCalls } from "@astryxdesign/core/Chat";
  * shell. Replaces the 3-turn skeleton bar template: claims no structure,
  * animates from frame one (running Spinner), and announces via the chip's
  * role="status" (wrapper keeps aria-busy + aria-label="Loading chat history").
- * Presentational only — no props, no fetching, no logic.
+ * Presentational only — no fetching, no logic. `isModalOpen` kills the
+ * avatar tooltip while a modal covers it (same stuck-tooltip gate as the
+ * thread avatars — a showing tooltip has no mouseleave under a dialog).
  */
-export function ThreadHistoryLoader() {
+export function ThreadHistoryLoader({ isModalOpen }: { isModalOpen?: boolean }) {
   return (
     <VStack gap={4} aria-busy="true" aria-label="Loading chat history">
       <ChatMessage
         sender="assistant"
-        avatar={<Avatar name="PESDac" size="md" />}
+        avatar={<Avatar name="PESDac" size="md" tooltip={isModalOpen ? false : undefined} />}
       >
         <ChatMessageBubble variant="ghost">
           <ChatToolCalls

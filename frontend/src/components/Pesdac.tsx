@@ -5,7 +5,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type R
 import { navigate } from "astro:transitions/client";
 
 import { Theme } from "@astryxdesign/core/theme";
-import { PESDacMockupTheme } from "../theme/PESDacMockupTheme";
+import { PESDacMockupTheme } from "../theme/PESDacMockup";
 import {
   buildChatPath,
   getChatByCode,
@@ -40,10 +40,13 @@ import {
 } from "../lib/logout-guard";
 import { tabFromHash } from "./profile/profile-tabs";
 import { useCacheRevalidation } from "../lib/cache-revalidation";
+import { useLlmStatus } from "../lib/llm";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { isCampus } from "../lib/profile-options";
 import AttachButton from "./chat/AttachButton";
 
 const ProfileDialog = lazy(() => import("./profile/ProfileDialog"));
+const SettingsDialog = lazy(() => import("./settings/SettingsDialog"));
 import { getThread } from "../content/threads";
 import {
   useSessionVersion,
@@ -89,6 +92,8 @@ import {
   isServerChat,
   CANCEL_EVENT,
   FOCUS_COMPOSER_EVENT,
+  OPEN_FIND_EVENT,
+  isFindAvailable,
   LAST_KNOWN_SUBJECT_COUNTS_KEY,
   LAST_KNOWN_PINNED_COUNT_KEY,
   LAST_KNOWN_ARCHIVED_COUNT_KEY,
@@ -466,6 +471,7 @@ function ConversationItem({
   icon,
   isPending,
   isDisabled,
+  isModalOpen,
 }: {
   label: string;
   isSelected?: boolean;
@@ -533,6 +539,7 @@ function SidebarAccountFooter({
   isUserReady,
   isLoggingOut,
   isAnyModalOpen,
+  showKeyDot,
   onSettings,
   onProfile,
   onLogout,
@@ -544,6 +551,7 @@ function SidebarAccountFooter({
   isUserReady: boolean;
   isLoggingOut: boolean;
   isAnyModalOpen: boolean;
+  showKeyDot: boolean;
   onSettings: () => void;
   onProfile: () => void;
   onLogout: () => void;
@@ -617,7 +625,11 @@ function SidebarAccountFooter({
         icon={Cog6ToothIcon}
         href="#"
         isDisabled={!isUserReady}
+        endContent={
+          showKeyDot ? (
+            <StatusDot variant="warning" label="No model key connected" />
           ) : undefined
+        }
         onClick={(event) => {
           event.preventDefault();
           if (!isUserReady) return;
@@ -692,6 +704,10 @@ export default function ShellSideNav({
     setProfileTab(tab);
     setIsProfileOpen(true);
   };
+  // Standalone Settings dialog (spec llm-byok-settings §5.1): the
+  // sidebar Settings row lands here, not in Profile.
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const openSettings = () => setIsSettingsOpen(true);
   // Toast bridge (error surfaces F1/F2): handlers in this file live
   // outside the provider subtree, so AppToasts publishes the toast fn
   // here after mount. Null until then — every use is optional-chained.
@@ -701,6 +717,13 @@ export default function ShellSideNav({
   // as-is — no flash of gate while the session is still resolving.
   const authState = useAuth();
   const serverProfile = useProfile();
+  // LLM key presence (spec llm-byok-settings §5.3): ambient dot on the
+  // Settings row while an authenticated identity has no working key.
+  // Guests get no dot — their gate is the login CTA at send time.
+  const llm = useLlmStatus();
+  const showKeyDot =
+    authState.status === "authenticated" &&
+    (llm.state === "unconfigured" || llm.state === "invalid");
   const isGateOpen = authState.status === "guest";
   // Server→local hydration (auth audit G2, logout/relogin fix): the
   // session store is memory-only and wiped on reload, so seed the
@@ -960,6 +983,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // Tooltips behave exactly as before when no modal is open.
   const isAnyModalOpen =
     isProfileOpen ||
+    isSettingsOpen ||
     isOnboardingOpen ||
     renameTarget != null ||
     deleteTarget != null;
@@ -1602,6 +1626,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
     // Gate: the welcome composer is skeleton-swapped (unreachable) while
     // user data loads; this guard covers any programmatic send path.
     if (!isUserReady) return;
+    // LLM gate (spec llm-byok-settings §5.3): keyless authenticated sends
+    // stop here — the composer status already says why. Text stays in the
+    // input (controlled, never cleared on this path).
+    if (showKeyDot) return;
     // Mockup default: unscoped chats file under CN until backend scopes them.
     const subject = category ?? (mode && mode !== "auto" ? mode : "CN");
     // @ tokens stay in the sent text (responder scopes on them) but out of
@@ -1651,12 +1679,13 @@ const LOGOUT_TIMEOUT_MS = 15000;
     setAttachments((prev) => prev.filter((s) => s.att.id !== id));
   };
 
-  // Global shortcuts: Ctrl/⌘+K new chat; Esc closes shell UI first, then
-  // defers to the open thread (stop stream / cancel edit / close find);
-  // "/" focuses whichever composer is visible. Never fires from editable
-  // targets (typing "/" or Ctrl+K in a field must not navigate). Each
-  // shortcut obeys its profile toggle (Shortcuts section) — off means
-  // the keys do nothing here.
+  // Global shortcuts: Ctrl/⌘+K new chat; Ctrl/⌘+F opens the thread
+  // finder (hijacking browser find only where it exists); Esc closes
+  // shell UI first, then defers to the open thread (stop stream / cancel
+  // edit / close find); "/" focuses whichever composer is visible. Never
+  // fires from editable targets (typing "/" or Ctrl+K in a field must not
+  // navigate). Each shortcut obeys its profile toggle (Shortcuts section)
+  // — off means the keys do nothing here.
   useEffect(() => {
     const isEditable = (t: EventTarget | null) =>
       t instanceof HTMLElement &&
@@ -1666,6 +1695,15 @@ const LOGOUT_TIMEOUT_MS = 15000;
         if (!getProfile().shortcutNewChat) return;
         e.preventDefault();
         startNewChat();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        if (!getProfile().shortcutFind) return;
+        // No thread finder mounted (welcome, dialogs without a thread):
+        // leave browser find alone.
+        if (!isFindAvailable()) return;
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent(OPEN_FIND_EVENT));
         return;
       }
       if (e.key === "Escape") {
@@ -1802,7 +1840,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
                 isUserReady={isUserReady}
                 isLoggingOut={isLoggingOut}
                 isAnyModalOpen={isAnyModalOpen}
-                onSettings={() => openProfile("profile")}
+                showKeyDot={showKeyDot}
+                onSettings={() => openSettings()}
                 onProfile={() => openProfile("profile")}
                 onLogout={() => void handleLogout()}
                 onLogin={() => navigate("/login")}
@@ -2107,18 +2146,26 @@ const LOGOUT_TIMEOUT_MS = 15000;
                    {!isUserReady ? (
                      <ComposerSkeleton aria-busy="true" aria-label="Loading composer" />
                    ) : (
-                    <ChatComposer
-                     value={welcomeText}
-                     onChange={setWelcomeText}
-                     onSubmit={handleWelcomeSend}
-                     statusPosition={welcomeSyncError != null ? "top" : undefined}
-                     status={
-                       welcomeSyncError != null
-                         ? {
-                             type: "error",
-                             message: welcomeSyncError,
-                           }
-                         : !storageOk
+                     <ChatComposer
+                      value={welcomeText}
+                      onChange={setWelcomeText}
+                      onSubmit={handleWelcomeSend}
+                      statusPosition={welcomeSyncError != null || showKeyDot ? "top" : undefined}
+                      status={
+                        welcomeSyncError != null
+                          ? {
+                              type: "error",
+                              message: welcomeSyncError,
+                            }
+                          : showKeyDot
+                            ? {
+                                type: "warning",
+                                message:
+                                  llm.state === "invalid"
+                                    ? "Your saved key was rejected — save a new one in Settings."
+                                    : "Connect your OpenRouter key in Settings to start chatting.",
+                              }
+                            : !storageOk
                            ? {
                                type: "warning",
                                message:
@@ -2370,6 +2417,17 @@ const LOGOUT_TIMEOUT_MS = 15000;
               initialTab={profileTab}
               onOpenChange={(open) => {
                 if (!open) setIsProfileOpen(false);
+              }}
+            />
+          </Suspense>
+        )}
+
+        {isSettingsOpen && (
+          <Suspense fallback={null}>
+            <SettingsDialog
+              isOpen
+              onOpenChange={(open) => {
+                if (!open) setIsSettingsOpen(false);
               }}
             />
           </Suspense>

@@ -94,7 +94,7 @@ const CONTROL_WIDTH = 192;
  * Card, no padding (rows carry the inset so dividers stay full-bleed),
  * subtle dividers between rows only.
  */
-function SettingsCard({
+export function SettingsCard({
   title,
   children,
 }: {
@@ -122,7 +122,7 @@ function SettingsCard({
  * right in the shared column. The row owns the visible label, so every
  * control inside one keeps `isLabelHidden`.
  */
-function SettingsRow({
+export function SettingsRow({
   title,
   description,
   icon,
@@ -164,7 +164,7 @@ function SettingsRow({
 }
 
 /** Card wrapper that inserts subtle dividers between its rows. */
-function CardRows({ children }: { children: ReactNode }) {
+export function CardRows({ children }: { children: ReactNode }) {
   const rows = Array.isArray(children) ? children : [children];
   return (
     <>
@@ -803,6 +803,46 @@ export function StudySection() {
       <SettingsCard title="Quiz format">
         <CardRows>
           <SettingsRow
+            title="Custom quiz format"
+            description="When on, quizzes use your format settings below. When off, the AI decides."
+            icon={SparklesIcon}
+            control={
+              <VStack gap={2} width="100%" hAlign="end">
+                <Switch
+                  label="Custom quiz format"
+                  isLabelHidden
+                  value={quizForSubject.customEnabled}
+                  onChange={(checked) => {
+                    setScopeOverride(
+                      "quizCustomEnabled",
+                      scopeKey("subject", quizSubject),
+                      checked,
+                    );
+                    refreshOverrides();
+                  }}
+                />
+                {getScopeOverride(
+                  "quizCustomEnabled",
+                  scopeKey("subject", quizSubject),
+                ) !== undefined && (
+                  <Button
+                    label="Use default"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setScopeOverride(
+                        "quizCustomEnabled",
+                        scopeKey("subject", quizSubject),
+                        undefined,
+                      );
+                      refreshOverrides();
+                    }}
+                  />
+                )}
+              </VStack>
+            }
+          />
+          <SettingsRow
             title="Subject"
             description="Per-subject overrides apply to this subject only."
             icon={SparklesIcon}
@@ -814,6 +854,7 @@ export function StudySection() {
                 width={CONTROL_WIDTH}
                 options={SUBJECTS}
                 value={quizSubject}
+                isDisabled={!quizForSubject.customEnabled}
                 onChange={(value) => setQuizSubject(value ?? "CN")}
               />
             }
@@ -828,6 +869,7 @@ export function StudySection() {
                   label="Question format"
                   size="sm"
                   value={quizForSubject.format}
+                  isDisabled={!quizForSubject.customEnabled}
                   onChange={(value) => {
                     if (value === "single" || value === "multi") {
                       setScopeOverride(
@@ -847,24 +889,25 @@ export function StudySection() {
                     />
                   ))}
                 </SegmentedControl>
-                {getScopeOverride(
-                  "format",
-                  scopeKey("subject", quizSubject),
-                ) !== undefined && (
-                  <Button
-                    label="Use default"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setScopeOverride(
-                        "format",
-                        scopeKey("subject", quizSubject),
-                        undefined,
-                      );
-                      refreshOverrides();
-                    }}
-                  />
-                )}
+                {quizForSubject.customEnabled &&
+                  getScopeOverride(
+                    "format",
+                    scopeKey("subject", quizSubject),
+                  ) !== undefined && (
+                    <Button
+                      label="Use default"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setScopeOverride(
+                          "format",
+                          scopeKey("subject", quizSubject),
+                          undefined,
+                        );
+                        refreshOverrides();
+                      }}
+                    />
+                  )}
               </VStack>
             }
           />
@@ -881,6 +924,7 @@ export function StudySection() {
                   width={CONTROL_WIDTH}
                   options={OPTION_COUNTS}
                   value={String(quizForSubject.optionCount)}
+                  isDisabled={!quizForSubject.customEnabled}
                   onChange={(value) => {
                     const n = Number(value);
                     if (Number.isInteger(n) && n >= 2 && n <= 6) {
@@ -893,24 +937,25 @@ export function StudySection() {
                     }
                   }}
                 />
-                {getScopeOverride(
-                  "optionCount",
-                  scopeKey("subject", quizSubject),
-                ) !== undefined && (
-                  <Button
-                    label="Use default"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setScopeOverride(
-                        "optionCount",
-                        scopeKey("subject", quizSubject),
-                        undefined,
-                      );
-                      refreshOverrides();
-                    }}
-                  />
-                )}
+                {quizForSubject.customEnabled &&
+                  getScopeOverride(
+                    "optionCount",
+                    scopeKey("subject", quizSubject),
+                  ) !== undefined && (
+                    <Button
+                      label="Use default"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setScopeOverride(
+                          "optionCount",
+                          scopeKey("subject", quizSubject),
+                          undefined,
+                        );
+                        refreshOverrides();
+                      }}
+                    />
+                  )}
               </VStack>
             }
           />
@@ -927,6 +972,7 @@ export function StudySection() {
                   width={CONTROL_WIDTH}
                   options={QUESTION_COUNTS}
                   value={String(quizForSubject.questionCount)}
+                  isDisabled={!quizForSubject.customEnabled}
                   onChange={(value) => {
                     const n = Number(value);
                     if (n === 1 || n === 3 || n === 5 || n === 10) {
@@ -939,24 +985,25 @@ export function StudySection() {
                     }
                   }}
                 />
-                {getScopeOverride(
-                  "questionCount",
-                  scopeKey("subject", quizSubject),
-                ) !== undefined && (
-                  <Button
-                    label="Use default"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setScopeOverride(
-                        "questionCount",
-                        scopeKey("subject", quizSubject),
-                        undefined,
-                      );
-                      refreshOverrides();
-                    }}
-                  />
-                )}
+                {quizForSubject.customEnabled &&
+                  getScopeOverride(
+                    "questionCount",
+                    scopeKey("subject", quizSubject),
+                  ) !== undefined && (
+                    <Button
+                      label="Use default"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setScopeOverride(
+                          "questionCount",
+                          scopeKey("subject", quizSubject),
+                          undefined,
+                        );
+                        refreshOverrides();
+                      }}
+                    />
+                  )}
               </VStack>
             }
           />
@@ -1102,7 +1149,7 @@ export function AssistantSection() {
 }
 
 const SHORTCUT_ROWS: {
-  key: "shortcutNewChat" | "shortcutCancel" | "shortcutFocus";
+  key: "shortcutNewChat" | "shortcutCancel" | "shortcutFocus" | "shortcutFind";
   title: string;
   description: string;
   icon: IconComponent;
@@ -1128,6 +1175,13 @@ const SHORTCUT_ROWS: {
     description: "Jump to the message box.",
     icon: MagnifyingGlassIcon,
     keys: "/",
+  },
+  {
+    key: "shortcutFind",
+    title: "Find in thread",
+    description: "Search the open conversation with Ctrl+F.",
+    icon: MagnifyingGlassIcon,
+    keys: "mod+f",
   },
 ];
 
@@ -1162,8 +1216,9 @@ export function ShortcutsSection() {
         </CardRows>
       </SettingsCard>
       <Text type="supporting" color="secondary">
-        Switch a shortcut off and its keys do nothing. Rebinding comes
-        with the backend phase.
+        Switch a shortcut off and its keys do nothing. Switching Find off
+        also hides its button in the chat composer. Rebinding comes with
+        the backend phase.
       </Text>
     </VStack>
   );
@@ -1304,8 +1359,8 @@ export function LanguageSection() {
         </CardRows>
       </SettingsCard>
       <Text type="supporting" color="secondary">
-        Stored, not applied: the interface keeps its current language
-        until the backend phase binds these.
+        Time zone applies to chat timestamps right away. Language is
+        stored for now — the interface keeps its current language.
       </Text>
     </VStack>
   );

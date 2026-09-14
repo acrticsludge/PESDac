@@ -373,6 +373,7 @@ test("study+quiz identity transition clears every override", () => {
     difficulty: "medium",
     questionCount: 5,
     proactive: true,
+    customEnabled: false,
   });
 });
 
