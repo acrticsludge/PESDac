@@ -2,7 +2,71 @@
 
 from __future__ import annotations
 
+import uuid
+
+import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+import app.models  # noqa: F401
+from app import rate_limit
+from app.db import Base, get_db
+from app.deps import get_current_user
+from app.main import create_app
+from app.models.catalog import SUBJECT_SEEDS, Subject
+from app.models.users import User
+
+_engine = create_engine(
+    "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+)
+_TestingSession = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
+
+
+def _override_db():
+    db = _TestingSession()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture()
+def soft_client():
+    """Non-raising TestClient: unhandled route exceptions come back as
+    the 500 envelope (proving the global handler) instead of raising
+    in the test thread. Mirrors the conftest client otherwise."""
+    Base.metadata.drop_all(bind=_engine)
+    Base.metadata.create_all(bind=_engine)
+    db = _TestingSession()
+    for code, name in SUBJECT_SEEDS:
+        db.add(Subject(code=code, display_name=name))
+    db.commit()
+    db.close()
+    rate_limit.reset()
+
+    def _override_get_current_user(db=Depends(get_db)):
+        user = db.query(User).filter(User.auth_user_id == "test-auth-user-id").first()
+        if not user:
+            user = User(
+                id=uuid.uuid4(),
+                auth_user_id="test-auth-user-id",
+                email="test@example.com",
+                display_name="Test User",
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        return user
+
+    app = create_app(validate=False)
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_current_user] = _override_get_current_user
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+    app.dependency_overrides.clear()
 
 
 def _create(client: TestClient, subject="CN", title="OSI model"):
@@ -131,3 +195,22 @@ def test_delete_account_twice_is_204_both_times(client):
     # contract holds.
     assert client.delete("/api/v1/users/me").status_code == 204
     assert client.delete("/api/v1/users/me").status_code == 204
+
+
+def test_create_commit_outage_answers_500_not_409_and_recovers(soft_client, monkeypatch):
+    # §13: a dead database must not masquerade as a code collision
+    # (409 would send the client retrying codes against a dead DB), and
+    # the rolled-back session must not wedge later requests.
+    from sqlalchemy.orm import Session as SASession
+
+    def _boom(self):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(SASession, "commit", _boom)
+    r = soft_client.post("/api/v1/chats", json={"subject": "CN", "title": "t"})
+    assert r.status_code == 500, r.text
+    assert r.json()["error"]["code"] == "INTERNAL"
+    assert "Reference:" in r.json()["error"]["message"]
+    monkeypatch.undo()
+    r = soft_client.post("/api/v1/chats", json={"subject": "CN", "title": "t"})
+    assert r.status_code == 201, r.text

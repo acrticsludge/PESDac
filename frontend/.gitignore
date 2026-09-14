@@ -5,3 +5,7 @@ dist
 .env
 .env.local
 .env.production
+
+# Playwright (audit S13: failure traces/screenshots, never commit)
+test-results/
+playwright-report/

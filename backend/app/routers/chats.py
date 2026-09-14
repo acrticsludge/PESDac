@@ -210,6 +210,7 @@ def create_chat(body: ChatCreate, request: Request, result: User = Depends(get_c
             # one code path, harmless no-op on replay).
             cache.invalidate_prefix(cache.chats_list_prefix(result.id))
             return JSONResponse(status_code=200, content=_out(existing))
+    saw_transient = False
     for _ in range(5):
         code = security.gen_chat_code()
         if _get_owned(db, result.id, code) is None and db.scalar(select(Chat).where(Chat.code == code)) is None:
@@ -232,11 +233,18 @@ def create_chat(body: ChatCreate, request: Request, result: User = Depends(get_c
                         return JSONResponse(status_code=200, content=_out(winner))
                 continue
             except Exception:
+                # A dead database is not a code collision: remember it so
+                # the fallthrough below answers an honest 500 (envelope +
+                # ref ID) instead of a 409 that would send the client
+                # retrying a different code against the same dead DB.
                 db.rollback()
+                saw_transient = True
                 continue
             db.refresh(chat)
             cache.invalidate_prefix(cache.chats_list_prefix(result.id))
             return JSONResponse(status_code=201, content=_out(chat))
+    if saw_transient:
+        raise RuntimeError("chat create commit failed repeatedly")
     return JSONResponse(status_code=409, content=error_body("CODE_COLLISION", "Could not allocate a chat code. Retry."))
 
 
