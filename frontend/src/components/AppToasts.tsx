@@ -18,6 +18,7 @@
 
 import { useEffect } from "react";
 import { useToast, type ShowToastFn } from "@astryxdesign/core/Toast";
+import { isRepeatToast, redactForLog } from "../lib/toast-policy";
 
 export type { ShowToastFn };
 
@@ -106,11 +107,15 @@ export default function AppToasts({
     };
     toastRef.current = showToast;
     const onUnhandled = (event: PromiseRejectionEvent) => {
-      console.error("Unhandled rejection:", event.reason);
-      toast({
-        body: "Something went wrong. Try again — if it keeps happening, reload the page.",
-        type: "error",
-      });
+      const body =
+        "Something went wrong. Try again — if it keeps happening, reload the page.";
+      // Storm guard (§11): repeats inside the window are already
+      // recorded — skip both the toast and the log line. Caught flows
+      // (form errors included) never reach this listener, so nothing
+      // local is ever duplicated here.
+      if (isRepeatToast(body)) return;
+      console.error("Unhandled rejection:", redactForLog(event.reason));
+      toast({ body, type: "error" });
     };
     window.addEventListener("unhandledrejection", onUnhandled);
     return () => {

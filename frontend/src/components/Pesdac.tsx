@@ -1823,7 +1823,6 @@ const LOGOUT_TIMEOUT_MS = 15000;
               <SideNavHeading
                 heading="PESDac"
                 icon={<NavIcon icon={<Icon icon={SparklesIcon} size="sm" />} />}
-                headingHref="#"
               />
             }
             footer={
@@ -1872,16 +1871,16 @@ const LOGOUT_TIMEOUT_MS = 15000;
                 }}
               />
 
-              {/* T23: Study Library is on the planned-feature boundary — keep
-                  the visual entry point but mark it explicitly disabled
-                  with a "Coming soon" affordance so the user knows it
-                  isn't a live route. Toggling or removing would be a
-                  redesign; this is the smallest honest change. */}
+              {/* T23 (§11 item 6): Study Library is Backend-gated — the row
+                  stays as a disabled entry with an honest "Soon" token so
+                  it can never read as a live route. Owner: backend phase
+                  (library surface); until then this row is display-only. */}
               <SideNavItem
                 label="Study Library"
                 icon={BookOpenIcon}
                 href="#"
                 isDisabled
+                endContent={<Token label="Soon" />}
                 onClick={(event) => {
                   event.preventDefault();
                 }}
