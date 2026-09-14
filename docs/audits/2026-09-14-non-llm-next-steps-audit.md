@@ -310,17 +310,19 @@ Security moves from scattered hardening to a repeatable baseline with audit hist
 
 ---
 
-## 17. Observability and operations
+## ~~17. Observability and operations — DONE (2026-09-14)~~
 
-### Current status
-Partial. Stdlib structured logging Done (method + path-template + status + latency-ms + user-id hash, never email/bodies/tokens — `main.py:39-43`, `timing.py`); ref-ID 500s Done; startup warmup visibility Done. Metrics / tracing / alerting / runbooks are Missing; `docs/operations/` does not exist yet; `LESSONS.md` does not exist yet.
+> **Status: DONE — struck through, not removed (2026-09-14).** The headline fix first: the timing log line did NOT match its own documentation (raw paths + verbatim query values logged; no template, no user hash as claimed) — now it logs route templates + param NAMES only (no ids, no `?q=` search text, no user id by privacy design), pinned by tests including the middleware-runs-before-routing subtlety. Runbooks written for all six areas (`docs/operations/`: deploy, rollback, env-rotation, orphan-reconciliation, purge-verification, stale-recovery) from verified procedures only. `LESSONS.md` seeded with six dated entries from this session's real gotchas. Metrics/tracing/alerting stay unsunk (no sink exists — the log line + `X-*` headers are the scrape-ready contract, documented as such). Graphify not adopted → no gitignore line (noted, not speculated). Verified: 8 timing tests green. Committed without a prompt per standing instruction.
 
-### What to add
-1. Instrument while building (`observability-and-instrumentation`): RED metrics (latency / error / traffic), job duration + success/failure + backlog (purge, outbox), cache hit-rate, pool saturation, JWKS failures; health checks; symptom-based alerts (5xx rate, p95 latency, pool exhaustion, JWKS outage, cache down).
-2. Runbooks in `docs/operations/`: deploy, rollback, env rotation (rotation orphans stored keys — users re-save — procedure must exist), orphan reconciliation, purge verification, stale-worker / stale-asset recovery (both dev servers restarted + hard refresh).
-3. Create `LESSONS.md` on the next meaningful failure / gotcha (date / category / what happened / root cause / fix / prevention); keep `/graphify-out` gitignored if Graphify is adopted.
+### ~~Current status~~
+Partial. Stdlib structured logging Done (method + path-template + status + latency-ms + user-id hash, never email/bodies/tokens — `main.py:39-43`, `timing.py`); ref-ID 500s Done; startup warmup visibility Done. Metrics / tracing / alerting / runbooks are Missing; `docs/operations/` does not exist yet; `LESSONS.md` does not exist yet. — Resolution: corrected the log-line claim to what the code now actually does (template + names, no user id); runbooks + LESSONS exist; metrics stay honestly unsunk.
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Instrument while building (`observability-and-instrumentation`): RED metrics (latency / error / traffic), job duration + success/failure + backlog (purge, outbox), cache hit-rate, pool saturation, JWKS failures; health checks; symptom-based alerts (5xx rate, p95 latency, pool exhaustion, JWKS outage, cache down).~~ — PARTIAL by design: the log line + headers ARE the RED/cache/pool/JWKS signal (aggregatable by template now); no sink, no alerts, no dashboards exist to wire — building an aggregator without a sink would be shelfware. Owner: §20 (pick the sink with staging).
+2. ~~Runbooks in `docs/operations/`: deploy, rollback, env rotation (rotation orphans stored keys — users re-save — procedure must exist), orphan reconciliation, purge verification, stale-worker / stale-asset recovery (both dev servers restarted + hard refresh).~~ — DONE (six runbooks; rotation-orphan procedure explicit).
+3. ~~Create `LESSONS.md` on the next meaningful failure / gotcha (date / category / what happened / root cause / fix / prevention); keep `/graphify-out` gitignored if Graphify is adopted.~~ — DONE (seeded with six; graphify unadopted → no line).
+
+### ~~What it changes for future~~
 Production behaviour becomes diagnosable without asking the user "what went wrong" — the ref ID + logs + metrics answer it. Incidents produce lessons and runbook updates instead of repeat outages.
 
 ---
