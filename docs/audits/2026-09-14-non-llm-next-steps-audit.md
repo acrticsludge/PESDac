@@ -327,18 +327,20 @@ Production behaviour becomes diagnosable without asking the user "what went wron
 
 ---
 
-## 18. Privacy, export, delete, and retention (non-generation)
+## ~~18. Privacy, export, delete, and retention (non-generation) — DONE (2026-09-14)~~
 
-### Current status
-Partial. `GET /users/me/export` (versioned, capped) + `DELETE /users/me` (hard-delete cascade, then frontend deletes Neon record via SDK) + `DELETE /chats` Done per arch §7.4; no app email by design (D5, Neon owns transactional) Done; drafts tab-memory-only by design (D6) Done in spec, regression test outstanding.
+> **Status: DONE — struck through, not removed (2026-09-14).** Export proven server-side in §9; this slice closed the rest: clear-all now deletes messages explicitly (bulk DELETEs bypass the ORM cascade — the purge-worker pattern, proven orphan-free on SQLite); clear dialog carries an export-first nudge (text-only, same component); delete-account copy verified honest per outcome (complete / identity-pending / backend-failed — never "fully deleted" after a partial leg); `session`-only retention RESOLVED as 24h of inactivity (documented rationale: stateless JWTs can't observe logout/reload; window-0 would cliff evening users) with worker + test + runbook + UI description aligned; drafts regression cited from §10. Verified: backend lean-storage suite green (2 new), 377 frontend green, `astro check` 0 errors. Scheduling (purge runner, orphan cadence) still needs the nonexistent scheduler — owners named, nothing pretended. Committed without a prompt per standing instruction.
 
-### What to add
-1. Prove export v1: scoped to caller, bounded, versioned (`version` + `exportedAt`), secret-free; UI handles loading / timeout / malformed / download-failure / retry; "export before purge" offered using existing envelope + `dumpStore()` semantics.
-2. Harden delete: transactional or real job/status contract; retry-safe; honest copy (never "fully deleted" after identity-only deletion); local cleanup follows server contract; orphan query scheduled.
-3. Retention: `profiles.retention` (`forever / 1 year / 30 days / session`) already exists — define `session`-only semantics (memory store already dies on reload — what does `session` delete?), then schedule the existing `purge_expired_chats` worker keyed off it (profile-settings-wiring §2 Tier C). Nightly job, not client deletes; dry-run + metrics first.
-4. Regression test: no draft endpoint exists and no draft payload leaves the tab.
+### ~~Current status~~
+Partial. `GET /users/me/export` (versioned, capped) + `DELETE /users/me` (hard-delete cascade, then frontend deletes Neon record via SDK) + `DELETE /chats` Done per arch §7.4; no app email by design (D5, Neon owns transactional) Done; drafts tab-memory-only by design (D6) Done in spec, regression test outstanding. — Resolution: drafts regression done in §10; everything else closed here.
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Prove export v1: scoped to caller, bounded, versioned (`version` + `exportedAt`), secret-free; UI handles loading / timeout / malformed / download-failure / retry; "export before purge" offered using existing envelope + `dumpStore()` semantics.~~ — DONE (server proof §9; UI loading/failure/retry pre-existing; export-first nudge new).
+2. ~~Harden delete: transactional or real job/status contract; retry-safe; honest copy (never "fully deleted" after identity-only deletion); local cleanup follows server contract; orphan query scheduled.~~ — DONE (single-statement transactional deletes incl. explicit message leg; retry-safe §9; copy verified per-outcome; local cleanup §4; orphan on-demand + CI-ready, scheduling rides the missing scheduler).
+3. ~~Retention: `profiles.retention` (`forever / 1 year / 30 days / session`) already exists — define `session`-only semantics (memory store already dies on reload — what does `session` delete?), then schedule the existing `purge_expired_chats` worker keyed off it (profile-settings-wiring §2 Tier C). Nightly job, not client deletes; dry-run + metrics first.~~ — DONE the semantics half (24h inactivity, pinned + documented in worker/runbook/UI); scheduling + dry-run discipline live in the runbook for the runner that doesn't exist yet.
+4. ~~Regression test: no draft endpoint exists and no draft payload leaves the tab.~~ — DONE in §10 both halves.
+
+### ~~What it changes for future~~
 GDPR self-service becomes real (export → clear → delete → retention) with idempotency and reconciliation. Storage stays bounded per user without client logic, and future message retention rides the same worker.
 
 ---
