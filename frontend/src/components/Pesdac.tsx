@@ -471,6 +471,7 @@ function ConversationItem({
   isPending,
   isDisabled,
   isModalOpen,
+  endContent,
 }: {
   label: string;
   isSelected?: boolean;
@@ -479,6 +480,9 @@ function ConversationItem({
   icon?: ReactNode | IconType;
   isPending?: boolean;
   isDisabled?: boolean;
+  // Trailing affordance (e.g. the "Demo"/"Soon" honesty tokens) —
+  // passed straight to the Astryx row.
+  endContent?: ReactNode;
   // True while any sidebar-scope modal is open (see isAnyModalOpen).
   // The hover-mounted MoreMenu carries an ungated "Conversation options"
   // tooltip (Astryx hardcodes it, no opt-out prop), and a tooltip that is
@@ -504,6 +508,7 @@ function ConversationItem({
         isSelected={isSelected}
         isDisabled={isDisabled}
         icon={isPending ? <Spinner size="sm" /> : icon}
+        endContent={endContent}
         onClick={(event) => {
           if (isPending || isDisabled) {
             event.preventDefault();
@@ -1921,6 +1926,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                         isModalOpen={isAnyModalOpen}
                         onClick={() => openRef(ref)}
                         menu={listedMenu(ref, title)}
+                        endContent={ref.kind === "demo" ? <Token label="Demo" /> : undefined}
                       />
                     );
                   })}
@@ -1979,6 +1985,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                             isModalOpen={isAnyModalOpen}
                             onClick={() => openConversation(chat.label)}
                             menu={listedMenu(ref, display)}
+                            endContent={<Token label="Demo" />}
                           />
                         );
                       })}
@@ -2038,6 +2045,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
                         isModalOpen={isAnyModalOpen}
                         onClick={() => openRef(ref)}
                         menu={archivedMenu(ref, title)}
+                        endContent={ref.kind === "demo" ? <Token label="Demo" /> : undefined}
                       />
                     );
                   })}

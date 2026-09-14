@@ -119,10 +119,10 @@ export function planResponse(
 3. Explain the idea in two sentences, as if to a friend who missed
    the lecture.
 
-Reply with your answers, then pick **Show me the answers** below to
-compare step by step.`,
+Try these, then ask for the walkthrough — answer checking arrives
+with the backend phase, so compare against your slides for now.`,
       followUps: [
-        "Show me the answers",
+        "Walk me through it step by step",
         "Ask harder questions",
         "Quiz me on something else",
       ],
