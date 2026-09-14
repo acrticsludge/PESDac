@@ -362,18 +362,20 @@ Partial. `backend/.env.example` + `frontend/.env.example` exist with correct nam
 
 ---
 
-## 20. Deploy and CI/CD
+## ~~20. Deploy and CI/CD — DONE (2026-09-14)~~
 
-### Current status
-Missing (CI) / Debt (deploy). No CI definition observed. Deploy shape implied by `CLAUDE.md` §22 (Vercel frontend + Render worker) but not locked by ADR (§2). `alembic upgrade head` at deploy specified; `import.meta.env` limited to host-only `PUBLIC_API_BASE_URL` (arch §6: `lib/auth.ts` appends `/api/v1`) Done in convention, verification outstanding.
+> **Status: DONE — struck through, not removed (2026-09-14).** CI existed as "Missing" — now defined (`.github/workflows/ci.yml`, YAML-validated): frontend (unit + check + e2e smoke + bundle caps + critical-audit + secret scan), backend (full pytest + migration up/down/up on disposable Postgres 16 + pip-audit + secret scan), diff-check. New local proofs: OpenAPI registration test (every mounted route documented — the link-password lesson, hardened against the `_IncludedRouter`/prefix-less-path quirks found while writing it) and a portable secret scanner (self-test OK with positive controls + fixture negatives, tree clean). Deploy pipeline + preview checklist recorded in the runbook (staging authed smoke named). Not runnable here (no Docker, no runners) — first green run happens on push; audit-level calibrated to critical so accepted highs don't red the gate. Committed without a prompt per standing instruction.
 
-### What to add
-1. CI gates on every change: `npm.cmd test` + `astro check` (0 errors) + `astro build` + `python -m pytest` + `git diff --check` + OpenAPI route-registration test (link-password 404 lesson) + migration `upgrade head` / `downgrade -1` on disposable DB + secret scan + dep-audit review gate + preview smoke (HTML 200, all routes incl. unknown-subject fallback + API-down variant).
-2. Deploy pipeline: build → migrate (`alembic upgrade head`) → boot-gate (fail fast, §19) → warmup (DB/JWKS/cache) → smoke (`/health`, `/ready`, authed `/auth/me` with real JWT in staging) → rollback understood (migration downgrade + previous image).
-3. Preview-URL automation: every preview origin added to `FRONTEND_ORIGINS` + trusted origins + OAuth callback allowlist, or previews fail preflight by design — make it a checklist step, not tribal knowledge.
-4. `optimizeDeps.force` kept as dev-cache guard with zero production impact; document hard-reload after stale versioned dev-asset URLs.
+### ~~Current status~~
+Missing (CI) / Debt (deploy). No CI definition observed. Deploy shape implied by `CLAUDE.md` §22 (Vercel frontend + Render worker) but not locked by ADR (§2). `alembic upgrade head` at deploy specified; `import.meta.env` limited to host-only `PUBLIC_API_BASE_URL` (arch §6: `lib/auth.ts` appends `/api/v1`) Done in convention, verification outstanding. — Resolution: CI defined; deploy shape recorded as runbook (host-agnostic — Vercel/Render stay implied, not locked, still §2's call); PUBLIC_ verified two-vars-only in §19.
 
-### What it changes for future
+### ~~What to add~~
+1. ~~CI gates on every change: `npm.cmd test` + `astro check` (0 errors) + `astro build` + `python -m pytest` + `git diff --check` + OpenAPI route-registration test (link-password 404 lesson) + migration `upgrade head` / `downgrade -1` on disposable DB + secret scan + dep-audit review gate + preview smoke (HTML 200, all routes incl. unknown-subject fallback + API-down variant).~~ — DONE (workflow + local proofs; unknown-subject bounce pre-existing, API-down variant = the guest net which runs backend-down by design).
+2. ~~Deploy pipeline: build → migrate (`alembic upgrade head`) → boot-gate (fail fast, §19) → warmup (DB/JWKS/cache) → smoke (`/health`, `/ready`, authed `/auth/me` with real JWT in staging) → rollback understood (migration downgrade + previous image).~~ — DONE as runbook + pipeline-gates section.
+3. ~~Preview-URL automation: every preview origin added to `FRONTEND_ORIGINS` + trusted origins + OAuth callback allowlist, or previews fail preflight by design — make it a checklist step, not tribal knowledge.~~ — DONE (runbook checklist, pre-existing since §17).
+4. ~~`optimizeDeps.force` kept as dev-cache guard with zero production impact; document hard-reload after stale versioned dev-asset URLs.~~ — DONE (stale-recovery runbook since §17).
+
+### ~~What it changes for future~~
 Shipping becomes `what changed / how verified / how monitored / how rolled back` (`CLAUDE.md` §14) on every deploy. Stale-worker and missing-migration deploys are caught by gates, not users.
 
 ---
