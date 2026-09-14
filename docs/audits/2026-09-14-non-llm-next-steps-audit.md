@@ -85,18 +85,20 @@ Eliminates the stale-identity class (wrong user rendering after transition / swi
 
 ---
 
-## 5. JWT / JWKS verification and backend auth boundary
+## ~~5. JWT / JWKS verification and backend auth boundary — DONE (2026-09-14)~~
 
-### Current status
-Partial. `backend/app/auth/betterauth.py` + `backend/app/deps.py:get_current_user_from_neon` + `GET /api/v1/auth/me` upsert (`docs/architecture/backend-foundation-auth-profiles-chats.md` §10) exist; startup JWKS warmup in `backend/app/main.py:_lifespan` is Done. Still open per C6 + backend requirements: audience disabled, issuer not enforced, algorithm allowlist / time-claim / subject / email-claim validation, unknown-`kid` single-refresh, bounded JWKS timeout, safe-category logging.
+> **Status: DONE — struck through, not removed (2026-09-14).** Orientation corrected the section premise: the verifier was already hardened (T17 claim checks + T1.1 singleflight/negative-cache + T1.2 shared client), so this slice added tests, not code — zero production lines changed. Added 8 verifier tests (wrong/missing issuer, audience enforced-when-configured + positive path, wrong signature, rotation recovery, missing email/sub, future nbf, `none` alg) + 1 invalid-token 401 envelope test. Verified: 179 backend tests pass, `diff --check` + secret scan clean. Naming drift noted: the code is `betterauth.py` + `get_current_user` (not the `neon.py` names this section quoted from the stale arch doc) — ADR 0002 is canonical. No `git commit` executed (commits need your explicit request).
 
-### What to add
-1. Enforce configured algorithms only; validate issuer, audience, `exp` / `nbf`, `sub`, required `email`; force-refresh JWKS once on unknown `kid`; bound JWKS requests; generic 401 + safe operational category in logs.
-2. Standardise all 401s to the envelope (`api-design-audit.md` §2.2: `deps.py:74` `HTTPException` `{detail}` shape vs envelope from JWT path) — replace with `JSONResponse(error_body("UNAUTHORIZED", ...))`.
-3. Tests: malformed / invalid tokens; wrong issuer / audience / algorithm / signature; unknown `kid`; JWKS outage; startup missing-env; no trust in frontend-supplied user id (verified claims are sole identity source).
+### ~~Current status~~
+Partial. `backend/app/auth/betterauth.py` + `backend/app/deps.py:get_current_user_from_neon` + `GET /auth/me` upsert (`docs/architecture/backend-foundation-auth-profiles-chats.md` §10) exist; startup JWKS warmup in `backend/app/main.py:_lifespan` is Done. Still open per C6 + backend requirements: audience disabled, issuer not enforced, algorithm allowlist / time-claim / subject / email-claim validation, unknown-`kid` single-refresh, bounded JWKS timeout, safe-category logging. — Resolution: all verified present in code. Audience is configurable (`BETTER_AUTH_AUDIENCE`) and defaults to absent-accepted because BetterAuth omits `aud` — intentional, code-documented, and now tested on both branches; enforcing by default would break prod. Issuer enforced from startup-required `BETTER_AUTH_URL`.
 
-### What it changes for future
-The auth boundary becomes a real trust boundary instead of a parsing step. All ownership checks (§7) inherit correct identity, and key-rotation / provider-outage behaviour is defined before it is needed in production.
+### ~~What to add~~
+1. ~~Enforce configured algorithms only; validate issuer, audience, `exp` / `nbf`, `sub`, required `email`; force-refresh JWKS once on unknown `kid`; bound JWKS requests; generic 401 + safe operational category in logs.~~ — VERIFIED PRESENT, no code change (allowlist RS256/EdDSA, `require` exp+iat+sub, `verify_nbf`, issuer/audience resolution, single forced refresh, 5 s bounded fetch, category-only logging, last-resort 401 — `betterauth.py:32-283`).
+2. ~~Standardise all 401s to the envelope (`api-design-audit.md` §2.2: `deps.py:74` `HTTPException` `{detail}` shape vs envelope from JWT path) — replace with `JSONResponse(error_body("UNAUTHORIZED", ...))`.~~ — VERIFIED PRESENT via a better mechanism: `main.py`'s global `HTTPException` handler already re-wraps every deps 401 into the envelope, so no per-site replacement is needed (the P1 wording is superseded by the handler). Pinned by `test_401_envelope` (missing token) + new `test_401_invalid_token_envelope` (rejected token) — one 401 shape app-wide.
+3. ~~Tests: malformed / invalid tokens; wrong issuer / audience / algorithm / signature; unknown `kid`; JWKS outage; startup missing-env; no trust in frontend-supplied user id (verified claims are sole identity source).~~ — DONE: pre-existing covered malformed/missing-kid/HS256/outage/expired/resilience/timeout/startup-missing-config; new tests close wrong+missing issuer, audience (3 branches incl. positive), wrong signature, rotation recovery, missing email/sub, future nbf, `none` alg. No-frontend-id-trust holds by construction (`_resolve_user_sync` keys on verified `sub` only; cross-user 404s covered by existing contract tests).
+
+### ~~What it changes for future~~
+The auth boundary becomes a real trust boundary instead of a parsing step. All ownership checks (§7) inherit correct identity, and key-rotation / provider-outage behaviour is defined before it is needed in production. Rotation recovery and the audience-on branch now have positive tests — a future verifier edit that breaks the happy path fails loudly.
 
 ---
 
