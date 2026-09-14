@@ -40,8 +40,14 @@ def gen_chat_code() -> str:
 
 
 def clean_title(title: str) -> str | None:
-    """Trim + enforce 1..34 chars (mirrors session.ts rename/create rules)."""
-    clean = title.strip()[:34].strip()
-    if not clean:
+    """Trim + enforce 1..34 chars (§9: validate, don't silently clip).
+
+    Overlong titles are REJECTED (None → the schema raises 422), never
+    truncated — the server persists exactly what it accepts. Guest-local
+    truncation still lives in session.ts (memory-only, no persistence,
+    no surprise), so this changes server behavior only.
+    """
+    clean = title.strip()
+    if not clean or len(clean) > 34:
         return None
     return clean

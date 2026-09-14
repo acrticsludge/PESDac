@@ -17,6 +17,8 @@ MESSAGE_CONTENT_MAX_BYTES = 100 * 1024
 
 
 class ChatCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     subject: str
     title: str
     # Adopt idempotency key (caching Phase 5, spec §10.2): one UUID per

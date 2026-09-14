@@ -89,3 +89,45 @@ def test_chats_single_dev_user_sees_own_chats(client):
     code = _create(client)["code"]
     assert client.get("/api/v1/chats").json()["pagination"]["total"] == 1
     assert client.patch(f"/api/v1/chats/{code}", json={"title": "x"}).status_code == 200
+
+
+def test_chat_create_rejects_unknown_fields_and_bad_lengths(client):
+    # §9 item 1: ChatCreate now forbids extras like every other input
+    # schema — unknown fields fail loudly instead of being dropped.
+    r = client.post(
+        "/api/v1/chats", json={"subject": "CN", "title": "t", "owner": "mallory"}
+    )
+    assert r.status_code == 422, r.text
+    # 35 chars > 34-col title budget.
+    r = client.post("/api/v1/chats", json={"subject": "CN", "title": "x" * 35})
+    assert r.status_code == 422, r.text
+    # Patch path: overlong + unknown field.
+    code = _create(client)["code"]
+    assert client.patch(f"/api/v1/chats/{code}", json={"title": "y" * 35}).status_code == 422
+    assert client.patch(f"/api/v1/chats/{code}", json={"subject": "OS"}).status_code == 422
+    # Adopt key over budget.
+    r = client.post(
+        "/api/v1/chats",
+        json={"subject": "CN", "title": "t", "clientAdoptKey": "k" * 65},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_clear_chats_empty_is_retry_safe(client):
+    # §9 item 3: delete-all on an empty account is a clean 200 with
+    # zero deleted — safe to retry, profile untouched.
+    for _ in range(2):
+        r = client.delete("/api/v1/chats")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["data"] == {"deleted": 0}
+        assert body["pagination"]["total"] == 0
+    assert client.get("/api/v1/profiles/me").status_code == 200
+
+
+def test_delete_account_twice_is_204_both_times(client):
+    # §9 item 3: the second DELETE finds no row (or a re-upserted empty
+    # one) and still answers 204 — the frontend retry-after-partial
+    # contract holds.
+    assert client.delete("/api/v1/users/me").status_code == 204
+    assert client.delete("/api/v1/users/me").status_code == 204
