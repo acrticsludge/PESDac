@@ -256,19 +256,21 @@ Verification becomes evidence instead of confidence (`CLAUDE.md` §10). Future s
 
 ---
 
-## 14. Performance, bundle, and Astro runtime
+## ~~14. Performance, bundle, and Astro runtime — DONE (2026-09-14)~~
 
-### Current status
-Partial. Lifespan warmup Done (DB pool `SELECT 1` + JWKS prefetch + cache probe, failure-tolerant, awaited so "startup complete" means ready — `main.py:46-94`); pooled-first URL + small pool + bounded timeouts Done (T2); threadpool for sync routes Done (T3.2); export/paging/purge/index hardening Done (T4); profile lazy-load Done (T63); Astro/Node pin `astro@6.0.5` + `@astrojs/node@10.0.2` Done (preview `getAdapterLogger` mismatch fixed). Pending: measured LCP/INP/CLS (T62/T64 explicitly not fabricated); dep advisories (2 high + 1 low, deferred upgrade rationale in T45 decision doc); `document.execCommand` deprecation hint in `ThreadView.tsx` (T-report risk 5, separate editor task).
+> **Status: DONE — struck through, not removed (2026-09-14).** Measured instead of estimated: real Lighthouse lab run on preview (`/new` 0.94 — paint instant, TTI 2.6 s hydration cost named as the biggest lever; `/login` 1.0), recorded in `docs/audits/2026-09-14-web-vitals-baseline.md` with conditions + pending list. Bundle now gated (`scripts/check-bundle.mjs` + `npm run bundle:check`: total ~1020 KB / cap 1200 KB, no chunk over 500 KB). Middleware verified + hardened (explicit `/_astro/` + favicon bypass so static assets never pay the getSession round-trip regardless of adapter routing). Liveness/readiness verified tested (`test_health_contract.py` incl. 503 envelope). `execCommand` deliberately RETAINED (contained non-secure-context fallback; the async API throws where it works — removal would be a behavior change, not a modernisation). Verified: `astro check` 0 errors, `astro build` green, bundle check green. Mobile-throttled + INP + field data stay pending (need staging rig — §20). Committed without a prompt per standing instruction.
 
-### What to add
-1. Lighthouse / DevTools run with fixed viewport + CPU/network throttling + repeated runs; record LCP / INP / CLS / FCP / TTFB / long-tasks / waterfall / LCP element. Preview timings taken so far (8–608 ms TTFB) are smoke, not Web-Vitals.
-2. Bundle: confirm Astryx+React baseline vs bloat; decide `chunkSizeWarningLimit` vs route-split; add bundle-regression check; never `npm audit fix --force` unreviewed.
-3. Middleware: verify `matcher` scope, static-asset exclusion, auth behaviour, cache behaviour, runtime compat, perf impact.
-4. Replace `document.execCommand` as a focused editor-modernisation task (no behaviour change).
-5. Keep `liveness` (`/health`, no DB) vs `readiness` (`/ready`, DB + JWKS + cache probe) truthful and separately tested.
+### ~~Current status~~
+Partial. Lifespan warmup Done (DB pool `SELECT 1` + JWKS prefetch + cache probe, failure-tolerant, awaited so "startup complete" means ready — `main.py:46-94`); pooled-first URL + small pool + bounded timeouts Done (T2); threadpool for sync routes Done (T3.2); export/paging/purge/index hardening Done (T4); profile lazy-load Done (T63); Astro/Node pin `astro@6.0.5` + `@astrojs/node@10.0.2` Done (preview `getAdapterLogger` mismatch fixed). Pending: measured LCP/INP/CLS (T62/T64 explicitly not fabricated); dep advisories (2 high + 1 low, deferred upgrade rationale in T45 decision doc); `document.execCommand` deprecation hint in `ThreadView.tsx` (T-report risk 5, separate editor task). — Resolution: LCP/CLS measured (not fabricated); dep advisories untouched (T45 rationale stands); execCommand resolved as retain-with-rationale.
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Lighthouse / DevTools run with fixed viewport + CPU/network throttling + repeated runs; record LCP / INP / CLS / FCP / TTFB / long-tasks / waterfall / LCP element. Preview timings taken so far (8–608 ms TTFB) are smoke, not Web-Vitals.~~ — DONE the desktop-lab half (devtools throttling, recorded); mobile + INP + field pending with owners.
+2. ~~Bundle: confirm Astryx+React baseline vs bloat; decide `chunkSizeWarningLimit` vs route-split; add bundle-regression check; never `npm audit fix --force` unreviewed.~~ — DONE (baseline recorded: AppLayout ~372 KB is the Astryx+React baseline; caps chosen at total 1200 KB / chunk 500 KB = Vite warn level, no route-split needed today; regression check script added; no audit-fix run).
+3. ~~Middleware: verify `matcher` scope, static-asset exclusion, auth behaviour, cache behaviour, runtime compat, perf impact.~~ — DONE (no matcher concept in Astro — explicit path bypass added + measured: assets 14–29 ms, warm pages 10–25 ms; auth tri-state + 800 ms race + warn-only logging pre-existing and untouched).
+4. ~~Replace `document.execCommand` as a focused editor-modernisation task (no behaviour change).~~ — RESOLVED as retain (rationale above; a removal that breaks copy on plain-HTTP is the opposite of "no behaviour change").
+5. ~~Keep `liveness` (`/health`, no DB) vs `readiness` (`/ready`, DB + JWKS + cache probe) truthful and separately tested.~~ — VERIFIED (health/ready/503-envelope tests green; `/ready` checks DB — JWKS/cache probe wording in the audit overclaims slightly: the route checks DB; warmup covers the rest at boot).
+
+### ~~What it changes for future~~
 Cold-start cost stays in lifespan (not first paint); pool + threadpool + paging + indexes hold under load; bundle stays measured so future features cannot hide bloat inside an unmeasured chunk.
 
 ---
