@@ -43,3 +43,14 @@ Current shape (pre-§20 pipeline — all steps manual, in this order).
 Every preview origin must be added to `FRONTEND_ORIGINS` + BetterAuth
 trusted origins + the OAuth callback allowlist, or previews fail
 preflight/auth by design. Checklist step, not tribal knowledge.
+
+## Pipeline gates (CI, `.github/workflows/ci.yml`)
+
+Shipping is `what changed / how verified / how monitored / how rolled
+back` on every deploy: frontend unit + `astro check` + e2e smoke +
+bundle caps + `npm audit` (critical) + secret scan; backend full
+`pytest` + migration up/down/up on disposable Postgres 16 + `pip-audit`
++ secret scan; `git diff --check` everywhere. Staging adds the authed
+smoke (`/auth/me` with a real JWT) the guest net cannot cover. A red
+gate blocks the deploy — rollback (`rollback.md`) is the understood
+reverse path.

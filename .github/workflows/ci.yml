@@ -1,0 +1,81 @@
+# CI (audit §20 item 1): every step mirrors a locally-verified command.
+# Backend needs Postgres for the migration leg (service container);
+# frontend e2e needs its own origin-pinned build (see test:e2e).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run astro -- check
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run bundle:check
+      # Audit level is critical (not high): 2 high + 1 low advisories
+      # are accepted with rationale (T45 decision doc) — a gate that
+      # fails on accepted findings is a broken gate. Criticals fail.
+      - run: npm audit --audit-level=critical
+      - run: python ../scripts/check_secrets.py
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pesdac_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pesdac_ci
+      FRONTEND_ORIGINS: http://localhost:4321
+      BETTER_AUTH_URL: http://localhost:4321
+      BETTER_AUTH_SECRET: ci-secret-32-characters-long!!!!!!
+      COOKIE_SECURE: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install -e ".[test]" && pip install pip-audit
+      - run: python -m pytest
+        timeout-minutes: 20
+      # Migration leg on a disposable database: forward to head, one
+      # step back, forward again (the 0002→0001 anchor is unit-pinned;
+      # this proves the SQL actually runs on Postgres 16).
+      - run: alembic upgrade head
+      - run: alembic downgrade -1
+      - run: alembic upgrade head
+      - run: pip-audit
+      - run: python ../scripts/check_secrets.py
+
+  diff-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git diff --check
