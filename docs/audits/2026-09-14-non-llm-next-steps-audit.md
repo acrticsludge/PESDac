@@ -120,19 +120,21 @@ One error shape, one pagination shape, one API doc. Frontend stops guessing; new
 
 ---
 
-## 7. Data model, migrations, and database operations
+## ~~7. Data model, migrations, and database operations — DONE (2026-09-14)~~
 
-### Current status
-Partial. Neon Postgres 16 + `pgcrypto` / `vector` / `citext` at migration 0001 (RAG-ready with zero vector columns — no change here), `users` keyed by `neon_user_id`, `profiles.campus` + `onboarding_done` (0002 split), `0003_neon_auth_link` canonical v6, through `0009_shortcut_find` + `0010_llm_credentials` (routers `auth.py`, `chats.py`, `demo_state.py`, `health.py`, `llm.py`, `profiles.py`, `users.py` mounted in `main.py:232-238`). `drizzle.config.json` gitignored + example template Done (`af063dc`). `alembic upgrade head` at deploy + `downgrade -1` verified in CI is specified but CI itself is Missing (§15).
+> **Status: DONE — struck through, not removed (2026-09-14).** Did the fully verifiable core without a live Postgres or CI: chain-integrity test (linear 0001→0010 incl. the two interleaved date-named migrations, single head, every migration reversible on paper), behavioral delete-cascade test on SQLite (full row fan-out gone, other user intact) + structural ON DELETE CASCADE pin, read-only orphan-check module + runnable script (exit 0/1/2, smoke-verified) + behavioral tests, and ADR-0004 (dual-ORM ownership, verified index inventory, CONCURRENTLY discipline). Deferred with named owners: live-DB upgrade/downgrade in CI (§15), EXPLAIN on prod-like data (no dataset), orphan scheduling (§14). Verified: 192 backend tests pass, `diff --check` + secret scan clean. Committed without a prompt per standing instruction.
 
-### What to add
-1. Verify the 0001→0010 chain from a v5 checkout (0002→0001 downgrade path documented in arch §4); test `upgrade head` + `downgrade -1` on a disposable database in CI.
-2. Confirm cascades: PESDac deletion cascades profile / chats / demo-state; BetterAuth deletion does NOT assume PESDac rows deleted (orphan path defined).
-3. Add + schedule an orphan detection / reconciliation query (BetterAuth user without PESDac row; PESDac row without Neon user).
-4. Verify lookup indexes + ownership / export / retention / subject indexes + trigram drift fix (T4d) with `EXPLAIN` on prod-like data; keep `CONCURRENTLY` discipline for prod index adds.
-5. Clarify dual-ORM ownership in docs: `lib/db/schema.ts` (Drizzle, BetterAuth tables) vs `backend/app/models/*` + `backend/alembic/*` (SQLAlchemy, app tables) on one shared Neon DB — migration ordering + single source of truth.
+### ~~Current status~~
+Partial. Neon Postgres 16 + `pgcrypto` / `vector` / `citext` at migration 0001 (RAG-ready with zero vector columns — no change here), `users` keyed by `neon_user_id`, `profiles.campus` + `onboarding_done` (0002 split), `0003_neon_auth_link` canonical v6, through `0009_shortcut_find` + `0010_llm_credentials` (routers `auth.py`, `chats.py`, `demo_state.py`, `health.py`, `llm.py`, `profiles.py`, `users.py` mounted in `main.py:232-238`). `drizzle.config.json` gitignored + example template Done (`af063dc`). `alembic upgrade head` at deploy + `downgrade -1` verified in CI is specified but CI itself is Missing (§15). — Resolution: chain verified linear to head `0010_llm_credentials` by `test_migration_chain.py`; dual-ORM ownership settled in ADR-0004; cascades proven by `test_account_delete_cascade.py`; orphan reporting by `app/orphans.py` + `scripts/check_orphans.py`. Live-DB + CI halves deferred as named above.
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Verify the 0001→0010 chain from a v5 checkout (0002→0001 downgrade path documented in arch §4); test `upgrade head` + `downgrade -1` on a disposable database in CI.~~ — DONE the file-verifiable half (graph test + reversibility test + 0002→0001 anchor); live-DB-in-CI half deferred to §15 (no CI exists).
+2. ~~Confirm cascades: PESDac deletion cascades profile / chats / demo-state; BetterAuth deletion does NOT assume PESDac rows deleted (orphan path defined).~~ — DONE behaviorally (SQLite) + structurally (FK pin); one-directionality written into ADR-0004.
+3. ~~Add + schedule an orphan detection / reconciliation query (BetterAuth user without PESDac row; PESDac row without Neon user).~~ — DONE the detection + script (INFO vs ACTION semantics, read-only, CI-ready exits); scheduling rides §14.
+4. ~~Verify lookup indexes + ownership / export / retention / subject indexes + trigram drift fix (T4d) with `EXPLAIN` on prod-like data; keep `CONCURRENTLY` discipline for prod index adds.~~ — DONE the inventory half (verified list in ADR-0004, no fossil: 0005 renamed the index too); EXPLAIN half deferred (no prod dataset).
+5. ~~Clarify dual-ORM ownership in docs: `lib/db/schema.ts` (Drizzle, BetterAuth tables) vs `backend/app/models/*` + `backend/alembic/*` (SQLAlchemy, app tables) on one shared Neon DB — migration ordering + single source of truth.~~ — DONE as ADR-0004 (incl. verified no-cross-FK finding: tools run independently in any order).
+
+### ~~What it changes for future~~
 Migrations become safe to run in deploy (not just on empty dev DBs). Deletion, retention, export, and any future messages work inherit correct cascades, indexes, and rollback instead of rediscovering them per slice.
 
 ---
