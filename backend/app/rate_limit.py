@@ -48,6 +48,15 @@ _last_sweep = 0.0
 
 _buckets: dict[tuple[str, str], deque[float]] = {}
 
+# Test-only clock override (boundary tests). None = live monotonic clock.
+_test_now: float | None = None
+
+
+def __set_now_for_testing(now: float | None) -> None:
+    """Test hook only: freeze (float) or thaw (None) the limiter clock."""
+    global _test_now
+    _test_now = now
+
 
 def _client_ip(request: Request) -> str:
     if _trusted_proxy_hosts:
@@ -146,7 +155,7 @@ def _check_redis(
 def _check_memory(
     key: str, ip: str, request: Request, max_hits: int, window_s: int
 ) -> JSONResponse | None:
-    now = time.monotonic()
+    now = _test_now if _test_now is not None else time.monotonic()
     _sweep(now, window_s)
     bucket_key = (key, ip)
     bucket = _buckets.setdefault(bucket_key, deque())
@@ -171,8 +180,9 @@ def _check_memory(
 def reset() -> None:
     """Test hook only."""
     _buckets.clear()
-    global _last_sweep
+    global _last_sweep, _test_now
     _last_sweep = 0.0
+    _test_now = None
 
 
 async def empty_ok() -> None:
