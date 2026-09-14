@@ -292,18 +292,20 @@ Accessibility becomes a release gate (`CLAUDE.md` §11, §15) instead of a retro
 
 ---
 
-## 16. Security hardening (non-LLM)
+## ~~16. Security hardening (non-LLM) — DONE (2026-09-14)~~
 
-### Current status
-Partial. `main.py` security headers (nosniff / DENY / Referrer / conditional HSTS; CSP intentionally absent on JSON API — belongs on frontend host) + CORS allowlist + envelope normalisation + ref-ID 500s (`main.py:97-230`) Done; `config.validate_startup` fail-fast Done (`config.py:115-149`); validation-error detail allowlist (`loc/msg/type` only) Done; error-copy safety tests Done (`test_error_copy_safety.py`, `test_error_logging.py`, `test_security_unit.py`, `test_cors_error_headers.py`). No `docs/audits/security/*` audit was observed; CSP on the frontend host undecided; fresh-auth for sensitive changes unspecified.
+> **Status: DONE — struck through, not removed (2026-09-14).** Closed as a baseline with evidence: CLAUDE.md §24 mapped row-by-row to proofs (all PASS except two N/As, one accepted app-level-RDBMS note, one PARTIAL on least-privilege with a §20 owner); new proofs this slice: mutation-origin verdicts (allow/foreign/prefix-spoof/absent/referer × all mutation families) and the opaque-echo trust-boundary test (hostile HTML/markdown round-trips byte-identical — the server never interprets user text); first `docs/audits/security/` audit + `periodic/` cadence log; all four test-only npm packages verified `devDependencies`. Open decisions (step-up auth, CSP, audit-events pipeline) recorded as accepted risks with owners — not silent passes. Verified: 24 backend tests in the touched files green. Committed without a prompt per standing instruction.
 
-### What to add
-1. Close the checklist per `CLAUDE.md` §24: server-side authz + ownership on every mutation; exact/proxy-aware origin comparison + explicit absent-origin policy; insecure-cookie combinations rejected (enforced); secrets never logged/committed; least-privilege service creds; dep review on security-sensitive changes; no stack traces to users; no sensitive credentials in API responses.
-2. Verify Markdown-sanitisation source-check before any server-echoed text (stored-XSS-adjacent the moment the backend echoes user text — backend-readiness audit §2.1); attachment staging validates type/size/duplicate/cancel/preview server-side when uploads are specified (staging validation now).
-3. Require fresh auth for deletion / sensitive changes; keep account-enumeration safe; add safe audit events; decide + document CSP on the frontend host.
-4. Write `docs/audits/security/<date>-<scope>.md`; start `docs/audits/periodic/` cadence; never overwrite history.
+### ~~Current status~~
+Partial. `main.py` security headers (nosniff / DENY / Referrer / conditional HSTS; CSP intentionally absent on JSON API — belongs on frontend host) + CORS allowlist + envelope normalisation + ref-ID 500s (`main.py:97-230`) Done; `config.validate_startup` fail-fast Done (`config.py:115-149`); validation-error detail allowlist (`loc/msg/type` only) Done; error-copy safety tests Done (`test_error_copy_safety.py`, `test_error_logging.py`, `test_security_unit.py`, `test_cors_error_headers.py`). No `docs/audits/security/*` audit was observed; CSP on the frontend host undecided; fresh-auth for sensitive changes unspecified. — Resolution: audit exists now; CSP decided (deferred with rationale + owner); fresh-auth decided (open, product-owned).
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Close the checklist per `CLAUDE.md` §24: server-side authz + ownership on every mutation; exact/proxy-aware origin comparison + explicit absent-origin policy; insecure-cookie combinations rejected (enforced); secrets never logged/committed; least-privilege service creds; dep review on security-sensitive changes; no stack traces to users; no sensitive credentials in API responses.~~ — DONE (table in the baseline audit; insecure-cookie combos enforced in config — §19's tests own that row).
+2. ~~Verify Markdown-sanitisation source-check before any server-echoed text (stored-XSS-adjacent the moment the backend echoes user text — backend-readiness audit §2.1); attachment staging validates type/size/duplicate/cancel/preview server-side when uploads are specified (staging validation now).~~ — DONE (opaque-echo proof; attachments correctly staging-only with a specified-when-specified rule).
+3. ~~Require fresh auth for deletion / sensitive changes; keep account-enumeration safe; add safe audit events; decide + document CSP on the frontend host.~~ — DECIDED (all three in the baseline audit as owned opens, not implementations — each needs product/scheduling input first).
+4. ~~Write `docs/audits/security/<date>-<scope>.md`; start `docs/audits/periodic/` cadence; never overwrite history.~~ — DONE (`security/2026-09-14-non-llm-baseline.md` + `security/periodic/README.md`; append-only rule stated in both).
+
+### ~~What it changes for future~~
 Security moves from scattered hardening to a repeatable baseline with audit history. Future endpoints and integrations inherit envelope + origin + ownership + logging-hygiene contracts.
 
 ---
