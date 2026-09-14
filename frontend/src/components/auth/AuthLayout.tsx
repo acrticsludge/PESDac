@@ -20,7 +20,7 @@
 // D1: Google + email (no Apple button). D4: no legal line.
 // D5: muted cover (see COVER_IMAGE_URL).
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { VStack, HStack, StackItem } from "@astryxdesign/core/Layout";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Center } from "@astryxdesign/core/Center";
@@ -33,6 +33,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
 import { Divider } from "@astryxdesign/core/Divider";
+import { Banner } from "@astryxdesign/core/Banner";
 import { LayerProvider } from "@astryxdesign/core/Layer";
 import { Theme } from "@astryxdesign/core/theme";
 import { PESDacMockupTheme } from "../../theme/PESDacMockup";
@@ -156,26 +157,11 @@ type FieldError = {
   message: string;
 };
 
-/**
- * Server failure → user-safe copy. Sign-in stays non-enumerating (the
- * server answers the same INVALID_EMAIL_OR_PASSWORD for unknown email
- * and wrong password, and the copy never distinguishes them). Sign-up
- * names the already-registered case because the server itself reveals
- * it — and "log in instead" is the fix.
- */
-function toEmailAuthMessage(error: unknown, isSignup: boolean): string {
-  let haystack = "";
-  if (typeof error === "object" && error !== null) {
-    const e = error as { code?: unknown; message?: unknown };
-    haystack = `${String(e.code ?? "")} ${String(e.message ?? "")}`;
-  }
-  if (isSignup && (/EXISTS/.test(haystack) || /already/i.test(haystack))) {
-    return "That email is already registered. Log in instead.";
-  }
-  return isSignup
-    ? "Couldn't create your account. Try again."
-    : "Couldn't sign in with those details. Check your email and password and try again.";
-}
+import {
+  toEmailAuthMessage,
+  toGoogleSignInMessage,
+  toTwoFactorMessage,
+} from "../../lib/auth-errors";
 
 export default function AuthLayout(props: AuthLayoutProps) {
   const isSignup = props.pathname === "sign-up";
@@ -196,18 +182,40 @@ export default function AuthLayout(props: AuthLayoutProps) {
 
   const auth = useAuth();
 
+  // Focus targets for error-ui.md E1/E2: validation failures focus the
+  // first invalid field (TextInput forwards ref to the <input>); a
+  // form-level Banner moves focus to its wrapper so the alert is
+  // announced. Refs only — no visual or layout change.
+  const nameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
+  const formErrorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error?.field === "form") formErrorRef.current?.focus();
+  }, [error]);
+
   // Logged-in users don't need this page.
   useEffect(() => {
     if (auth.status === "authenticated") navigate("/new");
   }, [auth.status]);
 
   // Field-level failures paint the field itself (Astryx renders the
-  // message box from status.message); server failures have no single
-  // field, so they render as plain copy under the form instead.
+  // message box from status.message); form-level failures render the
+  // Banner below (error-ui.md E2), never a second inline copy.
   function statusFor(field: FieldError["field"]) {
     return error?.field === field
       ? { type: "error" as const, message: error.message }
       : undefined;
+  }
+
+  // E2: a form error clears on the next keystroke so a corrected retry
+  // never sits under a stale alert. Validation re-runs on submit.
+  function handleChange(setter: (value: string) => void) {
+    return (value: string) => {
+      if (error) setError(null);
+      setter(value);
+    };
   }
 
   // Google sign-in (T10). Promise ownership: we AWAIT the OAuth call so
@@ -234,43 +242,11 @@ export default function AuthLayout(props: AuthLayoutProps) {
       // authenticated effect above navigates to /new with the loader on.
       return;
     } catch (e: unknown) {
-      const raw = e instanceof Error ? e.message : "";
-      const haystack = `${raw}`.toLowerCase();
-      let message = "Google sign-in failed. Try again.";
-      if (
-        haystack.includes("invalid_client") ||
-        haystack.includes("client_id") ||
-        haystack.includes("oauth_client")
-      ) {
-        message = "Google sign-in isn't set up. Contact support.";
-      } else if (
-        haystack.includes("redirect_uri") ||
-        haystack.includes("redirect_mismatch")
-      ) {
-        message = "Google sign-in redirect was blocked. Try again.";
-      } else if (
-        haystack.includes("access_denied") ||
-        haystack.includes("user_cancelled") ||
-        haystack.includes("canceled") ||
-        haystack.includes("cancelled")
-      ) {
-        message = "Google sign-in was cancelled. Try again when you're ready.";
-      } else if (
-        haystack.includes("state") ||
-        haystack.includes("invalid_request") ||
-        haystack.includes("expired")
-      ) {
-        message = "Google sign-in link expired. Try again.";
-      } else if (
-        haystack.includes("network") ||
-        haystack.includes("failed to fetch") ||
-        haystack.includes("timeout")
-      ) {
-        message = "Couldn't reach Google. Check your connection and try again.";
-      }
-      setError({ field: "form", message });
+      // Typed local copy (error-ui.md E7): the rejection lands here
+      // because the call above is awaited — never the global net.
+      setError({ field: "form", message: toGoogleSignInMessage(e) });
       // Error path only: the redirect never started, so the loader must
-      // clear and the typed inline error above renders.
+      // clear and the Banner above renders.
       setIsGoogleLoading(false);
     }
   }
@@ -280,10 +256,12 @@ export default function AuthLayout(props: AuthLayoutProps) {
     const cleanEmail = email.trim();
     if (isSignup && !name.trim()) {
       setError({ field: "name", message: "Enter your name." });
+      nameRef.current?.focus();
       return;
     }
     if (!/.+@.+\..+/.test(cleanEmail)) {
       setError({ field: "email", message: "Enter a valid email address." });
+      emailRef.current?.focus();
       return;
     }
     if (password.length < MIN_PASSWORD_LENGTH) {
@@ -291,6 +269,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
         field: "password",
         message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
       });
+      passwordRef.current?.focus();
       return;
     }
     setIsLoading(true);
@@ -312,6 +291,18 @@ export default function AuthLayout(props: AuthLayoutProps) {
         setNeedsTwoFactor(true);
         return;
       }
+      // Navigate only on a confirmed result: no error AND a payload.
+      // A null-data edge never navigates — it renders the form Banner
+      // instead of dropping the user on /new unauthenticated. (res.error
+      // is narrowed to never here: success and failure payloads are
+      // exclusive, so the funnel gets an explicit null → generic copy.)
+      if (res.data == null) {
+        setError({
+          field: "form",
+          message: toEmailAuthMessage(null, isSignup),
+        });
+        return;
+      }
       navigate("/new");
     } catch (e: unknown) {
       setError({
@@ -330,6 +321,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
         field: "code",
         message: "Enter the 6-digit code from your authenticator app.",
       });
+      codeRef.current?.focus();
       return;
     }
     setIsLoading(true);
@@ -338,10 +330,9 @@ export default function AuthLayout(props: AuthLayoutProps) {
       await verifySignInTwoFactor(totpCode);
       navigate("/new");
     } catch (e: unknown) {
-      setError({
-        field: "code",
-        message: toUserMessage(e, "That code didn't work. Try again."),
-      });
+      // Rate-limit and expiry get their own copy (wait vs fresh code);
+      // everything else keeps the long-standing fallback.
+      setError({ field: "code", message: toTwoFactorMessage(e) });
     } finally {
       setIsLoading(false);
     }
@@ -397,14 +388,21 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 label="Authenticator code"
                                 placeholder="6-digit code"
                                 value={totpCode}
-                                onChange={setTotpCode}
+                                onChange={handleChange(setTotpCode)}
                                 status={statusFor("code")}
+                                ref={codeRef}
                                 onEnter={() => {
                                   void handleVerifySecondFactor();
                                 }}
                               />
                               {error?.field === "form" && (
-                                <Text type="supporting">{error.message}</Text>
+                                <div ref={formErrorRef} tabIndex={-1}>
+                                  <Banner
+                                    status="error"
+                                    title="Verification failed"
+                                    description={error.message}
+                                  />
+                                </div>
                               )}
                               <Button
                                 label="Verify and log in"
@@ -434,8 +432,9 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 isLabelHidden
                                 placeholder="Your name"
                                 value={name}
-                                onChange={setName}
+                                onChange={handleChange(setName)}
                                 status={statusFor("name")}
+                                ref={nameRef}
                                 size="lg"
                               />
                               )}
@@ -445,8 +444,9 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                 type="email"
                                 placeholder="name@college.com"
                                 value={email}
-                                onChange={setEmail}
+                                onChange={handleChange(setEmail)}
                                 status={statusFor("email")}
+                                ref={emailRef}
                                 size="lg"
                               />
                               <TextInput
@@ -462,15 +462,24 @@ export default function AuthLayout(props: AuthLayoutProps) {
                                     : undefined
                                 }
                                 value={password}
-                                onChange={setPassword}
+                                onChange={handleChange(setPassword)}
                                 status={statusFor("password")}
+                                ref={passwordRef}
                                 onEnter={() => {
                                   void handleEmailAuth();
                                 }}
                                 size="lg"
                               />
                               {error?.field === "form" && (
-                                <Text type="supporting">{error.message}</Text>
+                                <div ref={formErrorRef} tabIndex={-1}>
+                                  <Banner
+                                    status="error"
+                                    title={
+                                      isSignup ? "Sign-up failed" : "Sign-in failed"
+                                    }
+                                    description={error.message}
+                                  />
+                                </div>
                               )}
                               <Button
                                 label={
