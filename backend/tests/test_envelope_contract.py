@@ -66,3 +66,23 @@ def test_422_envelope_has_safe_details(client):
         text = str(details)
         assert "Traceback" not in text
         assert "site-packages" not in text
+
+
+def test_401_invalid_token_envelope(monkeypatch):
+    """Rejected session (bad/expired token) → 401 with the SAME envelope
+    as the missing-token path (audit §5: one 401 shape app-wide). The
+    verifier is stubbed to None — no network, no JWKS."""
+    from unittest.mock import AsyncMock
+
+    import app.deps as deps
+    from app.main import create_app
+
+    app = create_app(validate=False)
+    if deps.get_current_user in app.dependency_overrides:
+        del app.dependency_overrides[deps.get_current_user]
+    monkeypatch.setattr(deps, "verify_betterauth_token", AsyncMock(return_value=None))
+    with TestClient(app) as c:
+        r = c.get("/api/v1/auth/me", headers={"Authorization": "Bearer dead-token"})
+    assert r.status_code == 401, r.text
+    _envelope(r.json())
+    assert r.json()["error"]["code"] == "UNAUTHORIZED"
