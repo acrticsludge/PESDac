@@ -1,6 +1,10 @@
 # SPEC: Customizable quizzes — global defaults + per-subject / per-chat compartments
 
-Status: **proposed, not implemented.** No code touched.
+Status: **Implemented except per-chat panel + engine** — global persist,
+per-subject UI (Study → Quiz format rows), three-tier resolve
+(`resolveQuizConfig`, resolve-table tests in `setting-study-quiz.test.ts`) are
+done. Open: per-chat "Quiz settings" panel (§5), question generation/delivery
+engine (§8).
 Rule: UI uses existing Astryx components only; no dialog redesign (`AGENTS.md` holds).
 Note: no quiz engine exists yet. This spec covers **configuration + contract** (what the
 user customizes, where it lives, how it resolves). Question generation/delivery is a

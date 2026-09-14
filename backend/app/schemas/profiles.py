@@ -43,6 +43,7 @@ class ProfileOut(BaseModel):
     shortcutNewChat: bool = True
     shortcutCancel: bool = True
     shortcutFocus: bool = True
+    shortcutFind: bool = True
 
 
 class ProfilePatch(BaseModel):
@@ -72,6 +73,7 @@ class ProfilePatch(BaseModel):
     shortcutNewChat: bool | None = None
     shortcutCancel: bool | None = None
     shortcutFocus: bool | None = None
+    shortcutFind: bool | None = None
 
     _t120a = field_validator("institution", "examMonth", mode="before")(
         lambda cls, v: v if v is None else _text(120)(cls, v)
@@ -204,6 +206,7 @@ PROFILE_FIELDS: tuple[tuple[str, str], ...] = (
     ("shortcut_new_chat", "shortcutNewChat"),
     ("shortcut_cancel", "shortcutCancel"),
     ("shortcut_focus", "shortcutFocus"),
+    ("shortcut_find", "shortcutFind"),
 )
 
 

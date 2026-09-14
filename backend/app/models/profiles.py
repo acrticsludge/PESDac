@@ -68,6 +68,7 @@ class Profile(Base):
     shortcut_new_chat: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     shortcut_cancel: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     shortcut_focus: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    shortcut_find: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )

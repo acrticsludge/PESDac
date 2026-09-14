@@ -1,6 +1,9 @@
 # SPEC: Answer shaping — verbosity + citations, global defaults + per-chat override
 
-Status: **proposed, not implemented.** No code touched.
+Status: **Partially implemented** — global persist + per-chat resolve
+(`resolveAnswerStyle`, tests in `setting-shaping.test.ts`) are done; the per-chat
+"Answer style" menu panel (§3) is not built, and no send-path/AI binding consumes
+the values yet.
 Rule: UI uses existing Astryx components only; no dialog redesign (`AGENTS.md` holds).
 Note: no AI send-path integration exists yet (`depth` is the only shaping field the
 send path reads). This spec covers **persistence + scoping**; the backend/AI phase

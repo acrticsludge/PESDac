@@ -1,6 +1,8 @@
 # SPEC: Study context — exam month + weekly goal, global + per-subject compartments
 
-Status: **proposed, not implemented.** No code touched.
+Status: **Implemented** (persist + per-subject scoping + resolve-table tests in
+`setting-study-quiz.test.ts`). Consumers pending — the spec's own note holds: no
+countdown/streak surface reads these yet.
 Rule: UI uses existing Astryx components only; no dialog redesign (`AGENTS.md` holds).
 Note: no tracker/streak/countdown surface exists yet. This spec covers **persistence +
 scoping**; the surfaces consume the resolved values later.

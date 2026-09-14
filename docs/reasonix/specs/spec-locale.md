@@ -1,6 +1,9 @@
 # SPEC: Locale — language + region + time zone, persisted globals
 
-Status: **proposed, not implemented.** No code touched.
+Status: **Partially implemented** — persist-now half done (locale triple roams via
+`PATCH /profiles/me`, tests in `setting-locale.test.ts`); application layer 1
+done for chat timestamps + day dividers (time-zone-aware, reactive). Open: layer 2
+numbers/currency, layer 3 full UI-language i18n.
 Rule: UI uses existing Astryx components only; no dialog redesign (`AGENTS.md` holds).
 Footnote today: "Stored, not applied." This spec splits that into two shippable halves:
 **persist now** (roaming), **apply in layers** (cheap formatting first, full i18n later).
