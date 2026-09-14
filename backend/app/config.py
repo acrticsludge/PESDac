@@ -103,6 +103,14 @@ COOKIE_SECURE: bool = _get_bool("COOKIE_SECURE", True)
 UPSTASH_REDIS_REST_URL: str | None = _get("UPSTASH_REDIS_REST_URL")
 UPSTASH_REDIS_REST_TOKEN: str | None = _get("UPSTASH_REDIS_REST_TOKEN")
 
+# LLM BYOK encryption (specs/llm-byok-settings). Fernet key backing the
+# `llm_credentials` table. Optional outside prod — unset ⇒ the LLM
+# endpoints answer 503 (degraded, never crash). Required in prod.
+# Mint with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Custodian: whoever deploys prod stores it in the host secrets manager
+# (never in the repo). Rotation orphans stored keys — users re-save.
+LLM_KEY_ENCRYPTION_KEY: str | None = _get("LLM_KEY_ENCRYPTION_KEY")
+
 
 def validate_startup(require_db: bool = True) -> None:
     """Called by the app factory (and alembic env). Raises on misconfiguration.
@@ -134,6 +142,8 @@ def validate_startup(require_db: bool = True) -> None:
             errors.append("COOKIE_SECURE=true is required in prod")
         if not all(o.startswith("https://") for o in FRONTEND_ORIGINS):
             errors.append("FRONTEND_ORIGINS must be https in prod")
+        if not LLM_KEY_ENCRYPTION_KEY or len(LLM_KEY_ENCRYPTION_KEY) < 32:
+            errors.append("LLM_KEY_ENCRYPTION_KEY must be set in prod")
     if errors:
         # Never log the secret values themselves — only the category names.
         raise RuntimeError("Backend misconfigured: " + "; ".join(errors))

@@ -16,7 +16,8 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import config
-from app.routers import auth, chats, demo_state, health, profiles, users
+from app import timing
+from app.routers import auth, chats, demo_state, health, llm, profiles, users
 from app.schemas.common import error_body
 
 # Map HTTP status → error code used in the standard envelope. Covers
@@ -72,6 +73,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning(
             "startup warmup: jwks prefetch skipped category=%s",
+            type(exc).__name__,
+        )
+    try:
+        from app import cache
+
+        # One line so ops can tell NullCache (unset URL) from shared Redis
+        # without touching values: rate limiting follows the same backend
+        # (Redis fixed-window when enabled, local buckets on fallback).
+        logger.info(
+            "startup warmup: cache=%s ratelimit=%s",
+            "upstash-rest" if cache.is_enabled() else "null",
+            "redis" if cache.is_enabled() else "memory",
+        )
+    except Exception as exc:
+        logger.warning(
+            "startup warmup: cache probe skipped category=%s",
             type(exc).__name__,
         )
     yield
@@ -133,6 +150,13 @@ def create_app(validate: bool = True) -> FastAPI:
                 "max-age=31536000; includeSubDomains"
             )
         return response
+
+    @app.middleware("http")
+    async def _timing(request: Request, call_next):
+        # Registered after _security_headers, so it sits inside it and
+        # measures route handling. One log line + timing headers per
+        # request (see app/timing.py); never alters the response body.
+        return await timing.timing_middleware(request, call_next)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, exc: RequestValidationError):
@@ -211,6 +235,7 @@ def create_app(validate: bool = True) -> FastAPI:
     app.include_router(chats.router, prefix="/api/v1")
     app.include_router(demo_state.router, prefix="/api/v1")
     app.include_router(users.router, prefix="/api/v1")
+    app.include_router(llm.router, prefix="/api/v1")
     logger.info(
         "PESDac API ready (env=%s, routes=%d)",
         config.ENV,

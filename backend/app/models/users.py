@@ -47,3 +47,8 @@ class User(Base):
     demo_states: Mapped[list["DemoState"]] = relationship(
         "DemoState", back_populates="user", cascade="all, delete-orphan"
     )
+    # LLM BYOK keys (spec llm-byok-settings): wiped with the account, same
+    # as profile/chats — a deleted identity keeps no secrets behind.
+    llm_credentials: Mapped[list["LlmCredential"]] = relationship(
+        "LlmCredential", back_populates="user", cascade="all, delete-orphan"
+    )
