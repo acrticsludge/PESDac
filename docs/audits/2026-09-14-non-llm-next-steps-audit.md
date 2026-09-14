@@ -380,18 +380,20 @@ Shipping becomes `what changed / how verified / how monitored / how rolled back`
 
 ---
 
-## 21. Documentation, specs, and repo hygiene
+## ~~21. Documentation, specs, and repo hygiene — DONE (2026-09-14)~~
 
-### Current status
-Debt. 46 specs + 37 plans + 11 slices + 14 audits exist under `docs/` — the canonical tree per `CLAUDE.md` §30 — but v5-vs-v6 status is uneven (arch §5 documents the v5→v6 auth tear-out; many specs predate it). `docs/API.md`, `docs/decisions/*`, `docs/operations/*`, `LESSONS.md` are Missing. Agent instructions are divergent (`AGENTS.md`: Astro/Astryx/StyleX vs `CLAUDE.md` §22: Next.js/Tailwind/Radix/Supabase/Vercel/Render — the latter is stale for this tree).
+> **Status: DONE — struck through, not removed (2026-09-14).** Structural hygiene, not a rewrite: `README.md` written (setup/env/servers/migrations/verify/stale/map — including the previously missing backend serve entrypoint, `backend/serve.py`, proven live with /health + /ready); `CLAUDE.md` §22 synchronized to the actual tree (Astro/Astryx/BetterAuth/Neon-DB, legacy stack explicitly marked stale — no other agent files exist to sync per §37); `docs/reasonix/README.md` declares specs/plans as artifacts with a canonical map; dead-code audit re-run (all seven 09-04 removals stayed removed, 3 stale TODOs resolved, zero TODOs left, no `console.log`/`debugger`, new files all live, zero new runtime deps). Verified: serve smoke live, backend contract tests green. Per-file status labels for 80+ specs/plans tracked as follow-up (mark-superseded-inline rule set). Committed without a prompt per standing instruction.
 
-### What to add
-1. Status-label every spec/plan (Proposed / In Progress / Implemented / Deprecated / Superseded); update canonical docs in the same task that changes behaviour (PRD → spec → architecture → plan → feature doc → tests → audits → migrations → operations per §38 lifecycle); never document planned behaviour as shipped.
-2. Write the missing docs: `docs/API.md` (§6), `docs/decisions/*` (§2), `docs/operations/*` (§17), `LESSONS.md` (§17); update `README` (setup, env copy, both dev servers, migration commands, stale-asset hard-refresh, preview + smoke commands, browser matrix).
-3. Re-run the 2026-09-04 dead-code audit; enforce naming (lowercase kebab-case, stable canonical names, dates for history, sequential ADRs); keep `docs/reasonix/specs|plans/` as execution artifacts, not sources of truth post-implementation.
-4. Synchronise `CLAUDE.md` §22 stack description with the actual tree (or scope it as legacy) without blindly overwriting tool-native structure (`CLAUDE.md` §37).
+### ~~Current status~~
+Debt. 46 specs + 37 plans + 11 slices + 14 audits exist under `docs/` — the canonical tree per `CLAUDE.md` §30 — but v5-vs-v6 status is uneven (arch §5 documents the v5→v6 auth tear-out; many specs predate it). `docs/API.md`, `docs/decisions/*`, `docs/operations/*`, `LESSONS.md` are Missing. Agent instructions are divergent (`AGENTS.md`: Astro/Astryx/StyleX vs `CLAUDE.md` §22: Next.js/Tailwind/Radix/Supabase/Vercel/Render — the latter is stale for this tree). — Resolution: the four missing-doc gaps were already closed in §§6/2/17; README + §22 sync + reasonix declaration + dead-code re-run close the rest.
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Status-label every spec/plan (Proposed / In Progress / Implemented / Deprecated / Superseded); update canonical docs in the same task that changes behaviour (PRD → spec → architecture → plan → feature doc → tests → audits → migrations → operations per §38 lifecycle); never document planned behaviour as shipped.~~ — DONE structurally (canonical map + mark-inline rule + one superseded marking demonstrated on arch §11); file-by-file labeling tracked as follow-up.
+2. ~~Write the missing docs: `docs/API.md` (§6), `docs/decisions/*` (§2), `docs/operations/*` (§17), `LESSONS.md` (§17); update `README` (setup, env copy, both dev servers, migration commands, stale-asset hard-refresh, preview + smoke commands, browser matrix).~~ — DONE (all four existed; README new).
+3. ~~Re-run the 2026-09-04 dead-code audit; enforce naming (lowercase kebab-case, stable canonical names, dates for history, sequential ADRs); keep `docs/reasonix/specs|plans/` as execution artifacts, not sources of truth post-implementation.~~ — DONE (`2026-09-14-dead-code-rerun.md`).
+4. ~~Synchronise `CLAUDE.md` §22 stack description with the actual tree (or scope it as legacy) without blindly overwriting tool-native structure (`CLAUDE.md` §37).~~ — DONE (rewritten + legacy scoped; AGENTS.md already correct; no other agent files exist).
+
+### ~~What it changes for future~~
 Docs describe the system that exists. Future agents update one canonical document instead of creating the Nth similar file, and audits / ADRs / runbooks accumulate instead of being re-derived.
 
 ---
