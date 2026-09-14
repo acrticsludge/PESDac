@@ -1329,6 +1329,21 @@ export type LogoutOutcome =
   | { kind: "server-failed"; message: string };
 
 /**
+ * Drop the whole identity heap in one spelling: auth caches (token /
+ * me / profile / accounts) + chat store + epoch, the local profile
+ * seed (separate store — without this the old identity's
+ * campus/semester/branch/subjects survive into the next identity),
+ * and the sibling-tab ping. Used by every terminal identity
+ * transition (logout, 401 epoch kill, completed deletion) so no path
+ * can forget one store.
+ */
+export function clearIdentityHeap(): void {
+  clearAuthCache();
+  clearLocalProfileSeed();
+  broadcastLogoutPing();
+}
+
+/**
  * Sign out everywhere: drop cached auth material, attempt backend logout,
  * then clear the BetterAuth session cookie. Every step is best-effort —
  * we always clear local state regardless of outcome so the user lands
@@ -1337,14 +1352,7 @@ export type LogoutOutcome =
  * local cleanup (per slice 15 + audit C5).
  */
 export async function apiLogout(): Promise<LogoutOutcome> {
-  clearAuthCache();
-  // Cross-tab logout ping (caching Fix 4): sibling tabs drop their chat
-  // caches immediately via the storage receiver. This tab navigates below.
-  broadcastLogoutPing();
-  // Identity hygiene (logout/relogin fix): the local profile seed is a
-  // separate store from the server caches above — without this, user-A's
-  // campus/semester/branch/subjects survive into user-B's session.
-  clearLocalProfileSeed();
+  clearIdentityHeap();
   let serverFailed = false;
   let message = "";
   try {
@@ -1428,7 +1436,9 @@ export async function apiDeleteAccount(): Promise<DeleteAccountOutcome> {
     return { kind: "identity-pending", reference };
   }
   // 3. Local cleanup only after both upstream steps are confirmed.
-  clearAuthCache();
+  // Same heap-drop as logout: a deleted identity must leave nothing
+  // for the next sign-up to inherit.
+  clearIdentityHeap();
   try {
     await authClient.signOut();
   } catch {
