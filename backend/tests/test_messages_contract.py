@@ -130,3 +130,23 @@ def test_messages_append_touches_chat_updated_at(client):
     assert _append(client, code).status_code == 201
     after = client.get("/api/v1/chats").json()["data"][0]
     assert datetime.fromisoformat(after["updatedAt"]) >= datetime.fromisoformat(before["updatedAt"])
+
+
+def test_server_echoes_user_content_opaquely_byte_identical(client):
+    # §16 item 2 trust boundary: the backend never renders, interpolates,
+    # or sanitizes user text — it stores opaque JSON and returns it
+    # byte-identical. Rendering (and its XSS burden) belongs to the
+    # frontend Astryx Markdown surface, which receives exactly this.
+    hostile = {
+        "text": "<script>alert(1)</script>",
+        "md": "# hi\n[click](javascript:alert(2))",
+        "img": '<img src=x onerror=alert(3)>',
+        "nested": {"deep": ["<svg onload=alert(4)>"]},
+    }
+    code = _create_chat(client)["code"]
+    r = _append(client, code, content=hostile)
+    assert r.status_code == 201, r.text
+    stored = r.json()["content"]
+    assert stored == hostile
+    listed = client.get(f"/api/v1/chats/{code}/messages").json()["data"][0]["content"]
+    assert listed == hostile
