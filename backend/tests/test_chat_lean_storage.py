@@ -114,3 +114,36 @@ def test_retention_forever_keeps_stale_chats(client, dbsession):
     dbsession.commit()
     assert purge_expired_chats(dbsession) == {}
     assert dbsession.query(Chat).filter(Chat.code == code).count() == 1
+
+
+def test_retention_session_means_a_day_of_inactivity(client, dbsession):
+    # §18 decision: the stateless backend cannot observe logout/reload,
+    # so "session" purges chats untouched for 24h — no midnight cliff.
+    from app.models.chats import Chat
+
+    assert client.patch("/api/v1/profiles/me", json={"retention": "session"}).status_code == 200
+    old_code = _create(client, title="yesterday")["code"]
+    new_code = _create(client, title="today")["code"]
+    day_ago = datetime.now(timezone.utc) - timedelta(days=1, minutes=1)
+    dbsession.query(Chat).filter(Chat.code == old_code).update({"updated_at": day_ago})
+    dbsession.commit()
+    assert purge_expired_chats(dbsession) == {"session": 1}
+    assert dbsession.query(Chat).filter(Chat.code == old_code).count() == 0
+    assert dbsession.query(Chat).filter(Chat.code == new_code).count() == 1
+
+
+def test_clear_chats_deletes_messages_too_not_just_containers(client, dbsession):
+    # §18: bulk DELETEs bypass the ORM cascade — clear deletes messages
+    # first explicitly (mirrors the purge worker), so no orphans on any
+    # backend. SQLite (unenforced FKs) proves it here.
+    import uuid
+
+    from app.models.chats import Chat, Message
+
+    code = _create(client, title="doomed")["code"]
+    _append(client, code)
+    _append(client, code)
+    assert client.delete("/api/v1/chats").status_code == 200
+    user_id = uuid.UUID(client.get("/api/v1/auth/me").json()["user"]["id"])
+    assert dbsession.query(Chat).filter(Chat.user_id == user_id).count() == 0
+    assert dbsession.query(Message).count() == 0

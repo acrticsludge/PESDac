@@ -3,6 +3,15 @@
 Worker body: `purge_expired_chats(db)` in `backend/app/routers/chats.py`
 (no scheduler wired — call it from the nightly runner when one lands).
 
+## Windows
+
+Per `profiles.retention`: `1 year` → 365 d, `30 days` → 30 d,
+`forever` → skipped. `session` is RESOLVED (§18): 24h of inactivity —
+the stateless backend cannot observe logout/reload, so a nightly wipe
+of everything (window 0) would cliff users who chatted hours before
+the run; a day untouched approximates "last session". Pinned by
+`test_retention_session_means_a_day_of_inactivity`.
+
 ## What it does
 
 Per `profiles.retention` window (`1 year` → 365 d, `30 days` → 30 d,
@@ -25,6 +34,5 @@ high-contention paths).
    returns 200 with coherent data; orphan script exits 0 (purge must
    not strand message rows — the worker deletes messages first for
    exactly this reason).
-4. `session`-only semantics are UNRESOLVED (memory already dies on
-   reload — what server-side `session` deletes is a §18 decision). Do
-   not schedule the `session` window until that decision lands.
+4. `session` means 24h of inactivity (resolved §18 — see Windows
+   above). Schedule it like any other window; no special-casing.

@@ -62,11 +62,16 @@ def _preview_from_content(content: object, limit: int = PREVIEW_MAX_CHARS) -> st
 # Nightly-purge windows per profiles.retention (models/profiles.py
 # RETENTIONS — note the spec FR4 names `30d | 90d | 1y` do NOT match the
 # shipped values; the code values below rule). "forever" keeps everything
-# and is absent by design; "session" purges anything older than the run.
+# and is absent by design.
+# "session" (§18 decision): 24h of inactivity, NOT zero. A stateless JWT
+# backend cannot observe logout or reload, so "this session" has no
+# server-meaningful end; a nightly wipe of everything (window 0) would
+# surprise users who chatted hours before the run. A day of untouched
+# history approximates "last session" without the midnight cliff.
 RETENTION_MAX_AGE = {
     "1 year": timedelta(days=365),
     "30 days": timedelta(days=30),
-    "session": timedelta(days=0),
+    "session": timedelta(days=1),
 }
 
 # Phase 4 (T4c): user-id chunk size for the purge bulk DELETEs — keeps
@@ -299,6 +304,12 @@ def clear_chats(request: Request, result: User = Depends(get_current_user), db: 
         return denied
     if limited := rate_limit.check("chats-clear", request, 10, 300):
         return limited
+    # Messages first, then chats (mirrors purge_expired_chats): the DB FK
+    # cascade covers prod, but bulk DELETEs bypass the ORM cascade, so
+    # an explicit message delete keeps this portable (and test-honest
+    # on SQLite, where FKs are unenforced).
+    own_ids = select(Chat.id).where(Chat.user_id == result.id)
+    db.execute(delete(Message).where(Message.chat_id.in_(own_ids)))
     count = db.query(Chat).filter(Chat.user_id == result.id).delete()
     db.commit()
     # Clear is chats-only: profile/demos keys untouched (spec §5).

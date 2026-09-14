@@ -1484,7 +1484,7 @@ export function PrivacySection() {
         <CardRows>
           <SettingsRow
             title="Chat history retention"
-            description="Enforced after the backend phase; stored as your preference today."
+            description="Enforced after the backend phase; “Session only” keeps chats touched in the last day. Stored as your preference today."
             icon={ClockIcon}
             control={
               <Selector
@@ -1555,7 +1555,7 @@ export function PrivacySection() {
           if (!open) setConfirmingClear(false);
         }}
         title="Delete all chats?"
-        description="Every chat and its messages will be permanently removed. This cannot be undone."
+        description="Every chat and its messages will be permanently removed. Export your data first if you want to keep a copy. This cannot be undone."
         actionLabel="Delete"
         isActionLoading={isClearingAll}
         onAction={() => void handleClearAll()}
