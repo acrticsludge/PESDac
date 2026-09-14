@@ -345,17 +345,19 @@ GDPR self-service becomes real (export → clear → delete → retention) with 
 
 ---
 
-## 19. Environment, configuration, and secrets
+## ~~19. Environment, configuration, and secrets — DONE (2026-09-14)~~
 
-### Current status
-Partial. `backend/.env.example` + `frontend/.env.example` exist with correct names-only discipline; `config.py` fail-fast validation Done (ENV enum, DB required, `BETTER_AUTH_URL/SECRET` + 32-char floor, `FRONTEND_ORIGINS` non-empty, `COOKIE_SECURE=false + https` forbidden, prod `https` + `COOKIE_SECURE=true` + encryption-key floor); sibling-`.env` gap-filler loader Done (`config.py:14-46`, real env wins). Root `.env` + root `package.json` (CommonJS, drizzle deps, stub `test` script) vs `frontend/` vs `backend/` vs `lib/db` ownership is Debt (§7.5). `PUBLIC_*` naming has two variants in tree (`PUBLIC_API_BASE_URL` + `PUBLIC_NEON_AUTH_URL` in arch §6 vs `PUBLIC_BETTER_AUTH_URL` in `frontend/.env.example`) — reconcile to one.
+> **Status: DONE — struck through, not removed (2026-09-14).** Closed the gaps around already-good config: fixed a real `TypeError`-on-missing-secret bug (now a clean category-named `RuntimeError`); `_load_dotenv` takes a path seam so gap-fill-vs-override is tested with tmp files (plus empty values now skipped); 9-test prod matrix (each missing piece refused, https/cookie rules, bad ENV, secret-values-never-in-messages, explicit test bypass, dotenv semantics); `PUBLIC_` reconciled to exactly two vars (canonical arch doc fixed, stale Neon name marked superseded; historical specs left as artifacts per §21); root `package.json` decided (explicit no-workspaces + real scripts: test, test:e2e, db:generate/push); env parity doc (who-runs-what, per-env requirements, alignment notes, key mint/custodian/rotation). Verified: 9 config tests green. Committed without a prompt per standing instruction.
 
-### What to add
-1. Env parity doc: required per environment (dev / staging / prod); `PUBLIC_` hygiene (only `PUBLIC_API_BASE_URL` + one auth URL ever reach the browser; no secret ever gets `PUBLIC_`); `GOOGLE_CLIENT_ID` localhost vs prod; `FRONTEND_ORIGINS` lists every origin (dev port, preview URLs, prod domain); `BETTER_AUTH_TRUSTED_ORIGINS/PROXIES` aligned; `COOKIE_SECURE` matrix; `UPSTASH_*` optional (NullCache); encryption-key mint + custodian + rotation-orphans procedure.
-2. Prove in tests: production refuses to boot on missing/invalid config; test mode bypass explicit; local files never silently override deployment env; values never logged.
-3. Decide monorepo tooling (workspaces vs explicit no-workspace) and fix the root `test` stub; document who runs what from where (`frontend/`, `backend/`, repo root).
+### ~~Current status~~
+Partial. `backend/.env.example` + `frontend/.env.example` exist with correct names-only discipline; `config.py` fail-fast validation Done (ENV enum, DB required, `BETTER_AUTH_URL/SECRET` + 32-char floor, `FRONTEND_ORIGINS` non-empty, `COOKIE_SECURE=false + https` forbidden, prod `https` + `COOKIE_SECURE=true` + encryption-key floor); sibling-`.env` gap-filler loader Done (`config.py:14-46`, real env wins). Root `.env` + root `package.json` (CommonJS, drizzle deps, stub `test` script) vs `frontend/` vs `backend/` vs `lib/db` ownership is Debt (§7.5). `PUBLIC_*` naming has two variants in tree (`PUBLIC_API_BASE_URL` + `PUBLIC_NEON_AUTH_URL` in arch §6 vs `PUBLIC_BETTER_AUTH_URL` in `frontend/.env.example`) — reconcile to one. — Resolution: all three resolved (fix + tests + docs above).
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Env parity doc: required per environment (dev / staging / prod); `PUBLIC_` hygiene (only `PUBLIC_API_BASE_URL` + one auth URL ever reach the browser; no secret ever gets `PUBLIC_`); `GOOGLE_CLIENT_ID` localhost vs prod; `FRONTEND_ORIGINS` lists every origin (dev port, preview URLs, prod domain); `BETTER_AUTH_TRUSTED_ORIGINS/PROXIES` aligned; `COOKIE_SECURE` matrix; `UPSTASH_*` optional (NullCache); encryption-key mint + custodian + rotation-orphans procedure.~~ — DONE (`docs/operations/env-parity.md`; rotation procedure in `env-rotation.md` since §17).
+2. ~~Prove in tests: production refuses to boot on missing/invalid config; test mode bypass explicit; local files never silently override deployment env; values never logged.~~ — DONE (`test_config_parity.py`, 9 tests).
+3. ~~Decide monorepo tooling (workspaces vs explicit no-workspace) and fix the root `test` stub; document who runs what from where (`frontend/`, `backend/`, repo root).~~ — DONE (explicit no-workspaces + real root scripts + table in env-parity).
+
+### ~~What it changes for future~~
 `ENV=prod` boot failures become configuration errors at startup (with category names, not secret values) instead of 500-ing servers or CORS-rejected preflights discovered by users.
 
 ---
