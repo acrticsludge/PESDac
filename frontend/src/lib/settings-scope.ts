@@ -55,8 +55,29 @@ type PendingSave = {
 // while unrelated controls flush independently.
 const pendingSaves = new Map<string, PendingSave>();
 
+// In-flight PATCH count per patch shape. A failure consults this (via
+// `pendingSaves`) to tell "a newer save owns the outcome" from "nothing
+// follows me" — an older response must never clobber newer memory.
+const inflightSaves = new Map<string, number>();
+
 function pendingKey(patch: Partial<Profile>): string {
   return Object.keys(patch).sort().join(",");
+}
+
+/**
+ * True while the setting has a queued (debounced, unsent) or in-flight
+ * PATCH. Kernel support for per-control pending affordances; no UI reads
+ * it yet (see the §8 strikethrough — wiring needs a design pass).
+ */
+export function isSettingSaving(setting: keyof Profile): boolean {
+  const needle = setting as string;
+  for (const key of pendingSaves.keys()) {
+    if (key.split(",").includes(needle)) return true;
+  }
+  for (const [key, count] of inflightSaves) {
+    if (count > 0 && key.split(",").includes(needle)) return true;
+  }
+  return false;
 }
 
 function pick(profile: Profile, patch: Partial<Profile>): Partial<Profile> {
@@ -71,27 +92,66 @@ async function flushSave(key: string): Promise<void> {
   const pending = pendingSaves.get(key);
   if (!pending) return;
   pendingSaves.delete(key);
+  // What this send owns: only keys whose memory still shows exactly what
+  // we sent are eligible for reconcile/rollback below. A newer optimistic
+  // save always wins over this (older) response.
+  const sent = pending.latest as Record<string, unknown>;
+  const prev = pending.prev as Record<string, unknown>;
+  const untouched = (): Record<string, unknown> => {
+    const current = getProfile() as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(sent)) {
+      if (Object.is(current[k], v)) out[k] = v;
+    }
+    return out;
+  };
+  inflightSaves.set(key, (inflightSaves.get(key) ?? 0) + 1);
   try {
-    await apiUpdateProfile(
-      Object.fromEntries(Object.entries(pending.latest)) as Record<
+    const canonical = (await apiUpdateProfile(
+      Object.fromEntries(Object.entries(sent)) as Record<
         string,
         string | string[] | boolean
       >,
-    );
-  } catch (error) {
-    // The optimistic memory write was wrong: restore the pre-save values
-    // so local and server can never silently diverge, then name it.
-    updateProfile(pending.prev);
-    // `notify` is caller-owned UI (a Toast in the dialog) — never throws
-    // into the store.
-    try {
-      pending.notify({
-        body: toUserMessage(error, "Couldn't save. Try again."),
-        type: "error",
-      });
-    } catch {
-      // A throwing toast must not wedge future saves.
+    )) as unknown as Record<string, unknown>;
+    // Canonical full-profile response: adopt the server values for keys
+    // this send owns and the user hasn't touched since. Keys the user
+    // re-saved mid-flight keep their newer optimistic values (the newer
+    // flush reconciles them when it lands).
+    const owned = untouched();
+    const adopt: Partial<Profile> = {};
+    for (const k of Object.keys(owned)) {
+      (adopt as Record<string, unknown>)[k] = canonical?.[k] ?? owned[k];
     }
+    if (Object.keys(adopt).length > 0) updateProfile(adopt);
+  } catch (error) {
+    // Roll back only untouched keys — a newer save owns touched ones.
+    // Toast only when no newer server save is queued: a queued flush owns
+    // the outcome (and its own toast). A newer guest (memory-only) save
+    // queues nothing, so the failure still surfaces.
+    const owned = untouched();
+    const restore: Partial<Profile> = {};
+    for (const k of Object.keys(owned)) {
+      if (Object.prototype.hasOwnProperty.call(prev, k)) {
+        (restore as Record<string, unknown>)[k] = prev[k];
+      }
+    }
+    if (Object.keys(restore).length > 0) updateProfile(restore);
+    if (!pendingSaves.has(key)) {
+      // `notify` is caller-owned UI (a Toast in the dialog) — never throws
+      // into the store.
+      try {
+        pending.notify({
+          body: toUserMessage(error, "Couldn't save. Try again."),
+          type: "error",
+        });
+      } catch {
+        // A throwing toast must not wedge future saves.
+      }
+    }
+  } finally {
+    const left = (inflightSaves.get(key) ?? 1) - 1;
+    if (left <= 0) inflightSaves.delete(key);
+    else inflightSaves.set(key, left);
   }
 }
 

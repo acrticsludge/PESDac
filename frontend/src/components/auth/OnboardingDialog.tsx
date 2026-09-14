@@ -50,7 +50,7 @@ import {
   isLogoutTransition,
   isTransitionNoise,
 } from "../../lib/logout-guard";
-import { updateProfile as updateLocalProfile } from "../../lib/session";
+import { seedOnboardingFields as updateLocalProfile } from "../../lib/session";
 import {
   BRANCHES,
   CAMPUSES,
@@ -277,7 +277,7 @@ export default function OnboardingDialog({
       // welcome, responder scoping) reads local-only. The server is
       // source of truth; this is the explicit seed the spec requires.
       updateLocalProfile({
-        institution: campus,
+        campus,
         semester,
         branch,
         subjects,

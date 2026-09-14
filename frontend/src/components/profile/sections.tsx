@@ -1050,7 +1050,11 @@ export function AssistantSection() {
                 label="Default answer depth"
                 size="sm"
                 value={profile.depth}
-                onChange={(value) => updateProfile({ depth: value })}
+                onChange={(value) =>
+                  savePreference({ depth: value }, toast, {
+                    server: auth.status === "authenticated",
+                  })
+                }
               >
                 {DEPTHS.map((d) => (
                   <SegmentedControlItem
@@ -1116,7 +1120,9 @@ export function AssistantSection() {
                 isLabelHidden
                 value={profile.proactiveQuiz}
                 onChange={(checked) =>
-                  updateProfile({ proactiveQuiz: checked })
+                  savePreference({ proactiveQuiz: checked }, (t) => toast(t), {
+                    server: auth.status === "authenticated",
+                  })
                 }
               />
             }
@@ -1187,7 +1193,9 @@ const SHORTCUT_ROWS: {
 
 export function ShortcutsSection() {
   useSessionVersion();
+  const auth = useAuth();
   const profile = getProfile();
+  const toast = useToast();
   return (
     <VStack gap={5}>
       <SettingsCard title="Shortcuts">
@@ -1206,7 +1214,13 @@ export function ShortcutsSection() {
                     isLabelHidden
                     value={profile[row.key]}
                     onChange={(checked) =>
-                      updateProfile({ [row.key]: checked })
+                      savePreference(
+                        { [row.key]: checked } as {
+                          [K in typeof row.key]: boolean;
+                        },
+                        (t) => toast(t),
+                        { server: auth.status === "authenticated" },
+                      )
                     }
                   />
                 </HStack>
@@ -1480,7 +1494,11 @@ export function PrivacySection() {
                 width={CONTROL_WIDTH}
                 options={RETENTIONS}
                 value={profile.retention}
-                onChange={(value) => updateProfile({ retention: value })}
+                onChange={(value) =>
+                  savePreference({ retention: value }, (t) => toast(t), {
+                    server: auth.status === "authenticated",
+                  })
+                }
               />
             }
           />

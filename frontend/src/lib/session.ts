@@ -572,6 +572,35 @@ export function updateProfile(patch: Partial<Profile>) {
   emit();
 }
 
+/** Server-row shape the login seed reads (mirrors ServerProfile). */
+export type ServerOnboardingRow = {
+  campus?: unknown;
+  semester?: unknown;
+  branch?: unknown;
+  subjects?: unknown;
+};
+
+/**
+ * Login-seed writer (audit §8 item 2): the ONLY keys the server→local
+ * seed may touch. Preference keys (difficulty, verbosity, retention, …)
+ * are absent by construction, so a login can never clobber device
+ * prefs — the key-set is pinned by test. Malformed server values fall
+ * back to blanks instead of entering the store.
+ */
+export function seedOnboardingFields(server: ServerOnboardingRow): void {
+  updateProfile({
+    institution:
+      typeof server.campus === "string" && isCampus(server.campus)
+        ? server.campus
+        : "",
+    semester: typeof server.semester === "string" ? server.semester : "",
+    branch: typeof server.branch === "string" ? server.branch : "",
+    subjects: Array.isArray(server.subjects)
+      ? (server.subjects as string[])
+      : [],
+  });
+}
+
 // ---- Settings override map (settings Step 0 kernel) ------------------------
 //
 // Per-scope setting overrides (per-chat today, per-subject next):

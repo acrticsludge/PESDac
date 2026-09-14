@@ -50,6 +50,7 @@ import {
 } from "../src/lib/session.ts";
 import {
   __flushSettingsDebounceForTesting,
+  isSettingSaving,
   resolveTiered,
   savePreference,
 } from "../src/lib/settings-scope.ts";
@@ -266,5 +267,82 @@ test("rapid re-saves collapse to one PATCH carrying the latest value", async () 
   await __flushSettingsDebounceForTesting();
   assert.equal(apiLog.length, 1);
   assert.deepEqual(JSON.parse(apiLog[0].body), { difficulty: "hard" });
+  assert.equal(toasts.length, 0);
+});
+
+test("failed older send keeps newer memory and stays silent when a newer save is queued", async () => {
+  resetState();
+  const apiLog: FetchLog[] = [];
+  __setFetchForTesting(
+    makeRouter(
+      [() => tokenOk("t-old"), () => tokenOk("t-new")],
+      [
+        () => apiJson({ code: "x", message: "boom" }, 500),
+        () => apiJson({ ok: true }),
+      ],
+      apiLog,
+    ),
+  );
+  const toasts: Toast[] = [];
+  const notify = (t: { body: string; type: "error" }) => toasts.push(t as Toast);
+  savePreference({ difficulty: "easy" }, notify, { server: true });
+  // First flush leaves the station; the user re-saves before it lands.
+  const first = __flushSettingsDebounceForTesting();
+  savePreference({ difficulty: "hard" }, notify, { server: true });
+  await first;
+  // The stale failure owns nothing: newer memory stands, no toast — the
+  // queued flush owns the outcome.
+  assert.equal(getProfile().difficulty, "hard");
+  assert.equal(toasts.length, 0);
+  await __flushSettingsDebounceForTesting();
+  assert.equal(apiLog.length, 2);
+  assert.deepEqual(JSON.parse(apiLog[0].body), { difficulty: "easy" });
+  assert.deepEqual(JSON.parse(apiLog[1].body), { difficulty: "hard" });
+  assert.equal(getProfile().difficulty, "hard");
+  assert.equal(toasts.length, 0);
+});
+
+test("success adopts canonical values only for keys untouched since the send", async () => {
+  resetState();
+  const apiLog: FetchLog[] = [];
+  let resolveGate!: (r: Response) => void;
+  const gate = new Promise<Response>((res) => {
+    resolveGate = res;
+  });
+  __setFetchForTesting(
+    makeRouter([() => tokenOk("t-s0")], [(() => gate) as unknown as () => Response], apiLog),
+  );
+  const toasts: Toast[] = [];
+  savePreference({ weeklyGoal: "7 days" }, (t) => toasts.push(t as Toast), {
+    server: true,
+  });
+  const flight = __flushSettingsDebounceForTesting();
+  // Another control writes mid-flight; the canonical response carries a
+  // stale value for it. Newer memory must win.
+  updateProfile({ difficulty: "easy" });
+  resolveGate(
+    apiJson({ weeklyGoal: "7 days", difficulty: "medium", verbosity: "balanced" }),
+  );
+  await flight;
+  assert.equal(getProfile().weeklyGoal, "7 days");
+  assert.equal(getProfile().difficulty, "easy");
+  assert.equal(toasts.length, 0);
+});
+
+test("isSettingSaving tracks queued saves and clears after flush", async () => {
+  resetState();
+  const apiLog: FetchLog[] = [];
+  __setFetchForTesting(
+    makeRouter([() => tokenOk("t-s0")], [() => apiJson({ ok: true })], apiLog),
+  );
+  const toasts: Toast[] = [];
+  assert.equal(isSettingSaving("verbosity"), false);
+  savePreference({ verbosity: "concise" }, (t) => toasts.push(t as Toast), {
+    server: true,
+  });
+  assert.equal(isSettingSaving("verbosity"), true);
+  assert.equal(isSettingSaving("difficulty"), false);
+  await __flushSettingsDebounceForTesting();
+  assert.equal(isSettingSaving("verbosity"), false);
   assert.equal(toasts.length, 0);
 });

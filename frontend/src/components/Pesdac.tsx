@@ -42,7 +42,6 @@ import { tabFromHash } from "./profile/profile-tabs";
 import { useCacheRevalidation } from "../lib/cache-revalidation";
 import { useLlmStatus } from "../lib/llm";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { isCampus } from "../lib/profile-options";
 import AttachButton from "./chat/AttachButton";
 
 const ProfileDialog = lazy(() => import("./profile/ProfileDialog"));
@@ -68,7 +67,7 @@ import {
   readDraft,
   writeDraft,
   getProfile,
-  updateProfile as updateLocalProfile,
+  seedOnboardingFields as updateLocalProfile,
   clearLocalProfileSeed,
   getSeededIdentityKey,
   setSeededIdentityKey,
@@ -752,12 +751,7 @@ export default function ShellSideNav({
       .then((server) => {
         if (cancelled) return;
         if (getAuthEpoch() !== epochAtStart) return;
-        updateLocalProfile({
-          institution: isCampus(server.campus) ? server.campus : "",
-          semester: typeof server.semester === "string" ? server.semester : "",
-          branch: typeof server.branch === "string" ? server.branch : "",
-          subjects: Array.isArray(server.subjects) ? server.subjects : [],
-        });
+        updateLocalProfile(server);
         setSeededIdentityKey(key);
         setProfileSeedPending(false);
       })
