@@ -2,6 +2,18 @@ import { defineMiddleware } from "astro:middleware";
 import { auth } from "../../../lib/auth";
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  // Static-asset bypass (audit §14 item 3): hashed `_astro/*` bundles,
+  // favicons, and public files carry no session meaning — skip the
+  // getSession round-trip for them no matter how the adapter routes
+  // static files (served directly or through middleware).
+  const path = new URL(context.request.url).pathname;
+  if (
+    path.startsWith("/_astro/") ||
+    path === "/favicon.ico" ||
+    path === "/favicon.svg"
+  ) {
+    return next();
+  }
   // Load the session for SSR pages (gate, onboarding). Three outcomes:
   // user locals (session proved), null locals (PROVED guest — getSession
   // affirmatively returned no session), undefined locals (UNKNOWN — the
@@ -33,7 +45,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // open the gate over a session the server never disproved.
     // Method + path + outcome only (no PII/tokens).
     console.warn(
-      `[auth] ${context.request.method} ${new URL(context.request.url).pathname} session=unknown`,
+      `[auth] ${context.request.method} ${path} session=unknown`,
     );
     context.locals.session = undefined;
     context.locals.user = undefined;

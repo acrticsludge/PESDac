@@ -13,7 +13,8 @@
     "theme:build": "astryx theme build src/theme/PESDacMockupTheme.js",
     "test": "node --test --experimental-transform-types tests/*.test.ts",
     "test:e2e": "npm run test:e2e:build && playwright test",
-    "test:e2e:build": "cross-env PUBLIC_BETTER_AUTH_URL=http://localhost:4323 astro build"
+    "test:e2e:build": "cross-env PUBLIC_BETTER_AUTH_URL=http://localhost:4323 astro build",
+    "bundle:check": "node scripts/check-bundle.mjs"
   },
   "dependencies": {
     "@astrojs/react": "^6.0.5",
@@ -42,6 +43,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "cross-env": "^10.1.0",
+    "lighthouse": "^13.4.1",
     "typescript": "^5.9.3"
   }
 }
