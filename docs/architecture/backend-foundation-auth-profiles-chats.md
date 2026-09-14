@@ -131,7 +131,7 @@ this rework. Concretely:
 
 `.env.example` documents all of the above. No other env is read.
 `import.meta.env` in the frontend is limited to
-`PUBLIC_API_BASE_URL` + `PUBLIC_NEON_AUTH_URL` — no secret ever gets
+`PUBLIC_API_BASE_URL` + `PUBLIC_BETTER_AUTH_URL` — no secret ever gets
 a `PUBLIC_` prefix.
 
 ## 7. API contract (`/api/v1`, JSON, error envelope §9)
@@ -293,12 +293,12 @@ def logout():
     return Response(status_code=204)
 ```
 
-## 11. Frontend integration
+## 11. Frontend integration (SUPERSEDED by the BetterAuth migration — see §5; kept for history)
 
-- `@neondatabase/neon-js` + `@neondatabase/auth-ui`. The auth client
+- ~~`@neondatabase/neon-js` + `@neondatabase/auth-ui`. The auth client
   wraps `useNeonSession()`; `apiFetch(path, init)` injects
-  `Authorization: Bearer ${session.access_token}`.
-- `PUBLIC_NEON_AUTH_URL` (frontend env) is the SDK base.
+  `Authorization: Bearer ${session.access_token}`.~~
+- `PUBLIC_BETTER_AUTH_URL` (frontend env) is the SDK base.
 - `PUBLIC_API_BASE_URL` (frontend env) is our backend base.
 - No `import.meta.env.PUBLIC_USE_API` flag — auth via Neon is the
   only path. The previous local-first adapter (`USE_API`) is gone;

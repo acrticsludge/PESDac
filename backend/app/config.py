@@ -11,17 +11,18 @@ import os
 from pathlib import Path
 
 
-def _load_dotenv() -> None:
+def _load_dotenv(path: Path | None = None) -> None:
     """Load the sibling `backend/.env` (stdlib parser, no new dependency).
 
     Uvicorn does not read .env files on its own, so without this the
     process boots with empty env: FRONTEND_ORIGINS=[] makes CORS reject
     every preflight with 400 and DB routes have no DATABASE_URL. Real
     environment variables always win — the file only fills gaps.
+    `path` is a test seam (production always uses the sibling file).
     """
-    path = Path(__file__).resolve().parent.parent / ".env"
+    target = path if path is not None else Path(__file__).resolve().parent.parent / ".env"
     try:
-        text = path.read_text(encoding="utf-8")
+        text = target.read_text(encoding="utf-8")
     except OSError:
         return
     for raw_line in text.splitlines():
@@ -39,7 +40,7 @@ def _load_dotenv() -> None:
             and value[0] in ("'", '"')
         ):
             value = value[1:-1]
-        if key and key not in os.environ:
+        if key and value and key not in os.environ:
             os.environ[key] = value
 
 
@@ -129,7 +130,7 @@ def validate_startup(require_db: bool = True) -> None:
         errors.append("BETTER_AUTH_URL is required")
     if not BETTER_AUTH_SECRET:
         errors.append("BETTER_AUTH_SECRET is required")
-    if len(BETTER_AUTH_SECRET) < 32:
+    elif len(BETTER_AUTH_SECRET) < 32:
         errors.append("BETTER_AUTH_SECRET must be at least 32 characters")
     if not FRONTEND_ORIGINS:
         errors.append("FRONTEND_ORIGINS must list at least one origin")
