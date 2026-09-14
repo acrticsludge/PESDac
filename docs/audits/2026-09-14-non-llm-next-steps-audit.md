@@ -158,18 +158,20 @@ Settings stop being write-only toggles. Cross-device roaming works through the e
 
 ---
 
-## 9. Chats, demo-state, and self-service data (non-message bodies)
+## ~~9. Chats, demo-state, and self-service data (non-message bodies) — DONE (2026-09-14)~~
 
-### Current status
-Partial. Chat containers + demo overrides + export / delete-all / delete-account exist and are keyed by verified Neon user (`routers/chats.py`, `demo_state.py`, `users.py`; ownership checks compare `chat.user_id` to verified `sub`). Perf hardening Done: export hard-cap 200 rows (T4a), default page 200→50 (T4b), purge cutoff-in-WHERE + chunked DELETE (T4c), ownership/export/retention/subject indexes (T4d), threadpool for sync routes (T3.2) + small pool + bounded timeouts (T2.2) + pooled-first URL (T2.1). Still open: title/subject/code length + character validation, duplicate/race/commit-failure handling, cross-user 404 uniformity, delete idempotency, export secret-free proof.
+> **Status: DONE — struck through, not removed (2026-09-14).** Closed the validation gap for real (`ChatCreate` forbids extras like every other input schema; `clean_title` REJECTS overlong titles with 422 instead of silently clipping persisted data — guest-local truncation stays, all server-bound titles were already pre-truncated client-side); fulfilled the old cross-user TODO with a two-identity fixture proving every user-owned route 404s without existence-oracle leakage; proved export scoped/bounded (205 rows → exactly 200)/versioned/secret-free by recursive payload scan; proved delete-all-empty and delete-account-twice retry-safe. Verified: 197 backend tests pass (13 new). Known flake (pre-existing, unrelated): `test_error_logging.py::test_500…` ERRORs intermittently in full-suite runs, passes in isolation and on retry — owned by §13. Committed without a prompt per standing instruction.
 
-### What to add
-1. Validate + test lengths / characters on chat create / patch; handle duplicate-code race + commit failures without 500 leak (envelope + ref ID).
-2. Prove cross-user isolation on every user-owned route (chat, demo-state, profile, export, delete) — other-user id returns 404, never 403-differentiated existence.
-3. Make `DELETE /chats` and `DELETE /users/me` retry-safe; define delete as transactional vs job/status contract with partial-completion reference + recovery path (see §4).
-4. Prove export is scoped + bounded + versioned + secret-free (payload-shape test; excludes tokens/secrets; handles loading / timeout / malformed / download-failure / retry in UI).
+### ~~Current status~~
+Partial. Chat containers + demo overrides + export / delete-all / delete-account exist and are keyed by verified Neon user (`routers/chats.py`, `demo_state.py`, `users.py`; ownership checks compare `chat.user_id` to verified `sub`). Perf hardening Done: export hard-cap 200 rows (T4a), default page 200→50 (T4b), purge cutoff-in-WHERE + chunked DELETE (T4c), ownership/export/retention/subject indexes (T4d), threadpool for sync routes (T3.2) + small pool + bounded timeouts (T2.2) + pooled-first URL (T2.1). Still open: title/subject/code length + character validation, duplicate/race/commit-failure handling, cross-user 404 uniformity, delete idempotency, export secret-free proof. — Resolution: all five closed (race handling was already in code — adopt/message-key winners + seq retry — now pinned by pre-existing idempotency tests; validation + isolation + export + idempotency newly proven).
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Validate + test lengths / characters on chat create / patch; handle duplicate-code race + commit failures without 500 leak (envelope + ref ID).~~ — DONE: forbid-extras + reject-overlong (behavior change, pinned in `test_security_unit.py`); races return 200-winner/409-envelope, commit failures ride the global 500-envelope + ref-ID handler.
+2. ~~Prove cross-user isolation on every user-owned route (chat, demo-state, profile, export, delete) — other-user id returns 404, never 403-differentiated existence.~~ — DONE in `test_cross_user_isolation.py` (chat CRUD, message list/append/truncate, demo/profile/export scoping, delete-only-self).
+3. ~~Make `DELETE /chats` and `DELETE /users/me` retry-safe; define delete as transactional vs job/status contract with partial-completion reference + recovery path (see §4).~~ — DONE the retry-safe half (empty-clear 200×2, delete-twice 204×2); single-statement transactional deletes need no job contract at this scale.
+4. ~~Prove export is scoped + bounded + versioned + secret-free (payload-shape test; excludes tokens/secrets; handles loading / timeout / malformed / download-failure / retry in UI).~~ — DONE the server half in `test_export_proof.py` (exact key sets, recursive secret scan incl. a stored LLM credential, 205→200 bound); export-dialog UI failure states stay with §11.
+
+### ~~What it changes for future~~
 Containers become a trustworthy foundation for any future messages work (extension points in arch §8: `messages.chat_id` cascade, `UNIQUE(chat_id,idx)`, `truncateOverlay(keep)` → `DELETE … idx>=?`, vote-key → `messages.id` migration, retention worker). No ownership or export surprise later.
 
 ---
