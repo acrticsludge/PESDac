@@ -215,18 +215,20 @@ Every action answers the readiness UX contract (what is happening / validating o
 
 ---
 
-## 12. Caching and rate limiting
+## ~~12. Caching and rate limiting — DONE (2026-09-14)~~
 
-### Current status
-Partial. Upstash REST read-through cache + Redis rate-limit Done (`33583e0`, `3526f35`: `backend/app/cache.py`, `timing.py`, `rate_limit.py`, `test_cache*.py`, `test_rate_limit_redis.py`, `test_timing.py`; startup log `cache=upstash-rest|null ratelimit=redis|memory` in `main.py:79-93`). NullCache fallback = zero behaviour delta by design. Still open: per-write-path invalidation proof, key namespacing, TTL/stampede policy, multi-worker store guarantee, `Retry-After` preservation, proxy-IP handling.
+> **Status: DONE — struck through, not removed (2026-09-14).** The substrate was already strong (Upstash read-through, bounded memory fallback, proxy gating, Retry-After on both paths) — the slice added the missing proofs + the missing doc: through-cache invalidation tests per write path (keyspace assertions on FakeRedis, not just fresh reads), NullCache zero-delta proof, second-read HIT proof, proxy spoof/dropped/ honored unit tests, frozen-clock window-boundary test (new `__set_now_for_testing` seam), and `docs/operations/cache-and-rate-limits.md` (TTLs, key schema, invalidation map, full limits table, trust + multi-worker notes, honest stampede position). Verified: 188-test fast subset green. Committed without a prompt per standing instruction.
 
-### What to add
-1. Invalidation test per write path (chats / profile / demo-state / users delete): write → read reflects write through cache; delete cascades purge keys; cross-user keys never collide (per-user namespace).
-2. Document TTLs + stampede protection; verify `NullCache` path (unset URL) has zero behaviour delta under tests.
-3. Rate-limit: bounded dev fallback; shared Redis store or explicit single-worker constraint documented; trusted-proxy IP handling; limits for login / signup / password / 2FA / OAuth / export / clear / delete + general API; `Retry-After` preserved through envelope normalisation (`main.py` handlers); clock-boundary tests.
-4. Timing middleware (`timing.py`): keep one log line + headers per request; never alter body; never log values.
+### ~~Current status~~
+Partial. Upstash REST read-through cache + Redis rate-limit Done (`33583e0`, `3526f35`: `backend/app/cache.py`, `timing.py`, `rate_limit.py`, `test_cache*.py`, `test_rate_limit_redis.py`, `test_timing.py`; startup log `cache=upstash-rest|null ratelimit=redis|memory` in `main.py:79-93`). NullCache fallback = zero behaviour delta by design. Still open: per-write-path invalidation proof, key namespacing, TTL/stampede policy, multi-worker store guarantee, `Retry-After` preservation, proxy-IP handling. — Resolution: all proven (namespacing was already unit-pinned; now also HTTP-level) except the multi-worker guarantee, which is documented as a constraint (Redis required for quota-grade enforcement).
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Invalidation test per write path (chats / profile / demo-state / users delete): write → read reflects write through cache; delete cascades purge keys; cross-user keys never collide (per-user namespace).~~ — DONE in `test_cache_invalidation.py` (populate → keyspace proof → write → purge proof → fresh read; account-delete purges the whole prefix incl. `rl:` buckets).
+2. ~~Document TTLs + stampede protection; verify `NullCache` path (unset URL) has zero behaviour delta under tests.~~ — DONE (ops doc; zero-delta test; stampede honestly documented as unguarded-but-bounded).
+3. ~~Rate-limit: bounded dev fallback; shared Redis store or explicit single-worker constraint documented; trusted-proxy IP handling; limits for login / signup / password / 2FA / OAuth / export / clear / delete + general API; `Retry-After` preserved through envelope normalisation (`main.py` handlers); clock-boundary tests.~~ — DONE (fallback bounded + swept; constraint documented; proxy unit tests; full limits table incl. the Astro link-password bucket; Retry-After proven at HTTP level pre-existing + boundary test new). Login/signup/2FA/OAuth are BetterAuth-owned (no backend buckets by design — stated in the doc).
+4. ~~Timing middleware (`timing.py`): keep one log line + headers per request; never alter body; never log values.~~ — VERIFIED pre-done (headers + category-only logging); HIT/MISS/OFF/SKIP header now also asserted in the invalidation tests.
+
+### ~~What it changes for future~~
 Cache becomes a performance layer with proven correctness (not a stale-read source). Rate limits survive multi-worker deploy and abusive clients without breaking legitimate auth / export / delete flows.
 
 ---
