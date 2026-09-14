@@ -31,18 +31,20 @@ A clean tree + enforced gate stops stale-worker / stale-asset incidents of the `
 
 ---
 
-## 2. Architecture decisions and contradiction close-out
+## ~~2. Architecture decisions and contradiction close-out — DONE (2026-09-14)~~
 
-### Current status
-Debt. `docs/architecture/backend-foundation-auth-profiles-chats.md` is authoritative for backend shape (separate FastAPI service D1, Neon Auth owns identity D2, `/api/v1` versioning D8, drafts never leave tab D6, demo threads static D7). It contradicts the T47–T65 report on Astro output mode (arch: static-only; report: `output: 'server'` configured, `frontend/src/pages` + `astro.config.mjs`). `docs/decisions/` does not exist yet.
+> **Status: DONE — struck through, not removed (2026-09-14).** Ground truth established against the tree (not the stale docs): Astro is `output: 'server'` on Node standalone (`astro.config.mjs:15-17`), subject routes are `prerender = false`, auth is self-hosted BetterAuth with Neon database-only (`config.py:3-6`). Wrote `docs/decisions/0001-hosting-ssr-shape.md`, `0002-auth-provider.md`, `0003-client-data-fate.md`; banner-marked 4 superseded docs (arch foundation partial; login-auth-surface plan; auth-spec v4 audit; neon-rework audit). Zero `src`/`backend` code touched. `git diff --check` clean, secret scan clean. No `git commit` executed (commits need your explicit request).
 
-### What to add
-1. One ADR locking hosting / SSR shape (static vs hybrid, where SSE/uploads would live if ever added, CORS + env config).
-2. One ADR locking identity model (Neon user id as sole key; device-id migration explicitly rejected or accepted).
-3. One ADR locking per-key data fate (drafts drop, votes drop, customs / overlays / pins migrate — from backend-readiness audit §1.4).
-4. Create `docs/decisions/` with sequential numbering per `CLAUDE.md` §30; mark superseded v5 auth docs as Superseded.
+### ~~Current status~~
+Debt. `docs/architecture/backend-foundation-auth-profiles-chats.md` is authoritative for backend shape (separate FastAPI service D1, Neon Auth owns identity D2, `/api/v1` versioning D8, drafts never leave tab D6, demo threads static D7). It contradicts the T47–T65 report on Astro output mode (arch: static-only; report: `output: 'server'` configured, `frontend/src/pages` + `astro.config.mjs`). `docs/decisions/` does not exist yet. — Resolution: both predecessors were stale; the tree (server output, BetterAuth) won. See ADRs 0001/0002.
 
-### What it changes for future
+### ~~What to add~~
+1. ~~One ADR locking hosting / SSR shape (static vs hybrid, where SSE/uploads would live if ever added, CORS + env config).~~ — DONE: ADR 0001 (server-rendered Astro on Node; static-export return needs a new ADR).
+2. ~~One ADR locking identity model (Neon user id as sole key; device-id migration explicitly rejected or accepted).~~ — DONE: ADR 0002 (BetterAuth `sub` in `users.auth_user_id` is the sole scope; device-id rejected; guests memory-only).
+3. ~~One ADR locking per-key data fate (drafts drop, votes drop, customs / overlays / pins migrate — from backend-readiness audit §1.4).~~ — DONE: ADR 0003 (migrate customs/overlays/pins/archive/demo-overrides/profile; drop drafts/votes/skeleton-counts/ephemeral keys; outbox stays client-only transport).
+4. ~~Create `docs/decisions/` with sequential numbering per `CLAUDE.md` §30; mark superseded v5 auth docs as Superseded.~~ — DONE: `docs/decisions/` created with 0001–0003; 4 one-line status banners added, no history rewritten. Deferred to §3: `login-signup.md` (v6) still speaks Neon in places — needs a BetterAuth reconciliation pass.
+
+### ~~What it changes for future~~
 Stops re-litigation of static-vs-server, identity, and data-fate on every slice. All persistence / sync / deletion work inherits the same keys and hosting assumptions.
 
 ---

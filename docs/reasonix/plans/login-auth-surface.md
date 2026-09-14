@@ -1,5 +1,7 @@
 # Plan: auth surface v6 (Neon Auth) — spec `login-signup.md`
 
+> **Status: Superseded** by `docs/decisions/0002-auth-provider.md` (2026-09-14, self-hosted BetterAuth; Neon is database-only). Kept as history; do not implement as written.
+
 ## Source of truth
 
 `docs/reasonix/specs/login-signup.md` (v6, this slice). What changed from

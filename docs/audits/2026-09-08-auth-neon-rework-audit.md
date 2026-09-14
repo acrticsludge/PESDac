@@ -1,5 +1,7 @@
 # Audit: auth spec v5 → v6 (Neon Auth rework)
 
+> **Status: Superseded** as direction (2026-09-14) — the v6 Neon-Auth direction it approves was later replaced by self-hosted BetterAuth per `docs/decisions/0002-auth-provider.md`. Kept as history of the v5→v6 transition.
+
 Date: 2026-09-08. Scope: re-check after the decision to use Neon Auth
 instead of our own FastAPI auth. Source of truth: spec v6
 (`docs/reasonix/specs/login-signup.md`) + plan v6

@@ -1,5 +1,7 @@
 # Architecture: backend foundation, profiles, chats, Neon JWT verify
 
+> **Status: Partially superseded** (2026-09-14) — the Neon-Auth portions (§§1–2, 5–7, 10–11: `NEON_AUTH_*`, `app/auth/neon.py`, `@neondatabase/auth-ui`) are superseded by `docs/decisions/0001-hosting-ssr-shape.md` and `docs/decisions/0002-auth-provider.md` (server-rendered Astro on Node; self-hosted BetterAuth; Neon database-only). Schema, API-contract, ownership, and messages-extension portions stand.
+
 Backend service (`backend/`, FastAPI) for PESDac. **Authentication is
 owned by Neon Auth** (Managed Better Auth in our Neon project) — the
 backend verifies Neon JWTs against `NEON_AUTH_JWKS_URL` and is otherwise

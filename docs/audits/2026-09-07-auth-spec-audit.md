@@ -1,5 +1,7 @@
 # Audit: auth surface spec v4 vs current site + backend
 
+> **Status: Superseded** as direction (2026-09-14) — audited a v4 spec against v5 backend auth (Authlib exchange, backend OAuth callback). Both are history; current direction is `docs/decisions/0002-auth-provider.md` (self-hosted BetterAuth). Kept as history; §G v5 checklist must not be implemented.
+
 Date: 2026-09-07. Scope: `docs/reasonix/specs/login-signup.md` (v4) checked
 claim-by-claim against `frontend/src`, `backend/app`, and CLI-verified
 Astryx 0.5.2 props. Goal: no dummy residue, no unbuildable promises.
