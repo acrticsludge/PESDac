@@ -93,7 +93,7 @@ def test_timing_log_line_shape(client, caplog):
     assert lines, "expected a pesdac.timing log line"
     line = lines[-1]
     assert "GET" in line
-    assert "/api/v1/ready" in line
+    assert " /ready " in line
     assert " 200 " in line
     assert "total_ms=" in line
     assert "db_ms=" in line
@@ -115,3 +115,32 @@ def test_timing_logger_visible_without_root_config():
     log = logging.getLogger("pesdac.timing")
     assert log.getEffectiveLevel() <= logging.INFO
     assert log.handlers, "needs its own console handler"
+
+
+def _last_timing_line(caplog) -> str:
+    lines = [r.getMessage() for r in caplog.records if r.name == "pesdac.timing"]
+    assert lines, "expected a pesdac.timing log line"
+    return lines[-1]
+
+
+def test_log_line_logs_route_template_not_concrete_ids(client, caplog):
+    """§17: low-cardinality labels — path params stay out of logs."""
+    with caplog.at_level(logging.INFO, logger="pesdac.timing"):
+        # No auth override here → 401, but routing runs first so the
+        # template is what gets logged.
+        assert client.get("/api/v1/chats/abc123/messages").status_code == 401
+    line = _last_timing_line(caplog)
+    # route.path is router-relative (no /api/v1 mount prefix — see
+    # _log_label); the template, not the concrete code, is what matters.
+    assert "/chats/{code}/messages" in line
+    assert "abc123" not in line
+
+
+def test_log_line_logs_param_names_never_values(client, caplog):
+    """§17: query VALUES are user content (?q= search text) — the line
+    keeps param NAMES only."""
+    with caplog.at_level(logging.INFO, logger="pesdac.timing"):
+        client.get("/api/v1/chats", params={"q": "tcp-secret-text", "limit": 2})
+    line = _last_timing_line(caplog)
+    assert "tcp-secret-text" not in line
+    assert "?limit+q" in line

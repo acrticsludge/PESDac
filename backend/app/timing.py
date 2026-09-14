@@ -2,7 +2,10 @@
 
 One INFO line per request on the `pesdac.timing` logger::
 
-    GET /api/v1/chats 200 total_ms=312.4 db_ms=298.1 db_queries=3
+    GET /chats 200 total_ms=312.4 db_ms=298.1 db_queries=3 cache=MISS
+
+Labels are route templates with query-param NAMES only (see
+`_log_label`) — router-relative, no concrete ids, no query values.
 
 plus `X-Response-Time-Ms` / `X-Db-Time-Ms` / `X-Db-Queries` response
 headers (visible in browser devtools with no log access needed).
@@ -25,6 +28,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import time
+from urllib.parse import parse_qsl
 
 from fastapi import Request
 from fastapi.responses import Response
@@ -77,6 +81,31 @@ def note_cache_outcome(outcome: str) -> None:
     if stats is None:
         return
     stats["cache"] = outcome
+
+
+def _log_label(request: Request) -> str:
+    """Low-cardinality, value-free log label (audit §17).
+
+    Route template (`/api/v1/chats/{code}/messages`), never concrete
+    ids — keeps log aggregation working and random codes out of logs.
+    Query VALUES are user content (`?q=` search text) and never logged;
+    param NAMES are kept (`?limit+q`) since they explain paging/filter
+    behavior. Unrouted paths (404s) fall back to the raw path (still
+    value-free of query strings). No user id by privacy design — the
+    middleware has no cheap safe source for one; correlate via the
+    500 ref-ID when an error needs an owner.
+    """
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    if isinstance(template, str) and template:
+        # route.path is router-relative ("/chats/{code}/messages" — the
+        # "/api/v1" include prefix is not part of it); root_path carries
+        # any deploy-time mount prefix.
+        base = str(request.scope.get("root_path") or "") + template
+    else:
+        base = request.url.path
+    names = sorted({k for k, _ in parse_qsl(request.url.query, keep_blank_values=True)})
+    return base + ("?" + "+".join(names) if names else "")
 
 
 # Strong refs: prevents double-listening (double counting) if the same
@@ -136,8 +165,9 @@ async def timing_middleware(request: Request, call_next) -> Response:
     """Time the request and its DB statements; log one line + set headers."""
     stats = new_stats()
     token = _stats_var.set(stats)
-    query = request.url.query
-    label = request.url.path + ("?" + query if query else "")
+    # NOTE: the label is computed AFTER call_next (see below) — this
+    # middleware runs before routing, so scope["route"] only exists
+    # once handling has started.
     start = time.perf_counter()
     try:
         response = await call_next(request)
@@ -147,7 +177,7 @@ async def timing_middleware(request: Request, call_next) -> Response:
         logger.info(
             "%s %s ERR total_ms=%.1f db_ms=%.1f db_queries=%d",
             request.method,
-            label,
+            _log_label(request),
             elapsed_ms,
             stats["db_ms"],
             stats["queries"],
@@ -162,7 +192,7 @@ async def timing_middleware(request: Request, call_next) -> Response:
     logger.info(
         "%s %s %s total_ms=%.1f db_ms=%.1f db_queries=%d cache=%s",
         request.method,
-        label,
+        _log_label(request),
         response.status_code,
         elapsed_ms,
         stats["db_ms"],
