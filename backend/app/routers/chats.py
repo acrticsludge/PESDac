@@ -89,6 +89,13 @@ def purge_expired_chats(db: Session, now: datetime | None = None) -> dict[str, i
     off) never orphans rows — prod has the DB FK cascade as well.
     No scheduler is wired — there is no job infra in this repo (see
     final report); call this from the nightly runner when one lands.
+    Cache note (spec redis-read-through-cache §5): when that runner
+    lands, prefix-wipe each affected user's keys — TTLs are only the
+    backstop until then.
+    Lock note (distributed-locks skill): guard the runner with
+    `cache.acquire_lock(cache.lock_key("purge"), token, 60)` /
+    `cache.release_lock(...)` so two hosts never purge concurrently;
+    plain DEL release is safe here (seconds-long hold, 60 s TTL).
     Returns `{retention: deleted}` for the windows that had users.
     """
     moment = _as_aware(now) if now is not None else datetime.now(timezone.utc)

@@ -1,10 +1,12 @@
-"""In-memory sliding-window rate limiter for abuse-prone routes (arch §9).
+"""Sliding-window rate limiter for abuse-prone routes (arch §9).
 
 T19 hardening:
 - bounded bucket map: periodic sweep evicts expired entries to keep
   memory bounded under attack or after long idle.
-- explicit single-process constraint logged at startup; multi-worker
-  deployments must replace this with Redis/another shared store.
+- multi-worker: when Upstash Redis is configured the fixed-window
+  counter in Redis is authoritative (shared across processes); the
+  in-memory buckets remain as the fail-open fallback when Redis is
+  unset, down, or slow — same 429 envelope either way.
 - trusted-proxy gating: X-Forwarded-For is only honored when the
   request came through a configured proxy CIDR/host. Without that,
   raw forwarded headers are spoofable.
@@ -82,9 +84,71 @@ def _sweep(now: float, window_s: int) -> None:
 
 
 def check(key: str, request: Request, max_hits: int, window_s: int) -> JSONResponse | None:
+    ip = _client_ip(request)
+    redis_verdict = _check_redis(key, ip, request, max_hits, window_s)
+    if redis_verdict is not None:
+        # True → allowed by Redis; JSONResponse → throttled by Redis.
+        # None → Redis unavailable/disabled; fall through to memory.
+        return redis_verdict if isinstance(redis_verdict, JSONResponse) else None
+    return _check_memory(key, ip, request, max_hits, window_s)
+
+
+def _check_redis(
+    key: str, ip: str, request: Request, max_hits: int, window_s: int
+) -> JSONResponse | bool | None:
+    """Fixed-window counter in Redis (rate-limiting skill `simpleRateLimit`).
+
+    `INCR rl-key`; first hit sets `EXPIRE window`. Over-limit reads `TTL`
+    for Retry-After. Returns True (allowed), a 429 response (throttled),
+    or None (Redis off/broken → caller falls back to memory).
+
+    Why fixed-window, not sliding-window sorted sets: 2 RTTs vs 4 per
+    mutation, and boundary imprecision is harmless at 60/min and 10/5min
+    abuse-protection limits (algorithms skill). Fail-open: any exception
+    or unexpected shape degrades to the local buckets, one warn line.
+    """
+    try:
+        from app import cache as _cache
+    except Exception:
+        return None
+    try:
+        if not _cache.is_enabled():
+            return None
+        client = _cache._get_client()
+        rkey = _cache.rate_limit_key(key, ip)
+        count = client.incr(rkey)
+        if not isinstance(count, int):
+            raise RuntimeError("ratelimit_incr_shape")
+        if count == 1:
+            try:
+                client.expire(rkey, int(window_s))
+            except Exception as exc:
+                logger.warning("ratelimit_expire category=%s", type(exc).__name__)
+        if count > max_hits:
+            try:
+                ttl = client.ttl(rkey)
+            except Exception:
+                ttl = int(window_s)
+            retry_after = ttl if isinstance(ttl, int) and ttl >= 0 else int(window_s)
+            logger.warning("429 %s key=%s ip=%s via=redis", request.url.path, key, ip)
+            resp = JSONResponse(
+                status_code=429,
+                content=error_body("RATE_LIMITED", "Too many attempts. Try again later."),
+            )
+            resp.headers["Retry-After"] = str(max(1, retry_after))
+            return resp
+        return True
+    except Exception as exc:
+        logger.warning("ratelimit_redis_fallback category=%s", type(exc).__name__)
+        return None
+
+
+def _check_memory(
+    key: str, ip: str, request: Request, max_hits: int, window_s: int
+) -> JSONResponse | None:
     now = time.monotonic()
     _sweep(now, window_s)
-    bucket_key = (key, _client_ip(request))
+    bucket_key = (key, ip)
     bucket = _buckets.setdefault(bucket_key, deque())
     while bucket and bucket[0] <= now - window_s:
         bucket.popleft()
@@ -92,7 +156,7 @@ def check(key: str, request: Request, max_hits: int, window_s: int) -> JSONRespo
         retry_after = int(bucket[0] + window_s - now) + 1
         logger.warning(
             "429 %s key=%s ip=%s",
-            request.url.path, key, _client_ip(request)
+            request.url.path, key, ip
         )
         resp = JSONResponse(
             status_code=429,

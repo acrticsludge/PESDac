@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 
 from app import config
+from app import timing
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,10 @@ def get_engine():
         if not url:
             raise RuntimeError("DATABASE_URL is not set")
         _engine = create_engine(url, **engine_kwargs_for(url))
+        # Per-request DB timing (app/timing.py): cursor listeners only
+        # observe; outside a request they no-op. Installed here so every
+        # engine this factory builds is measured, prod and SQLite alike.
+        timing.install_engine_timing(_engine)
         if url.startswith("postgres"):
             event.listen(_engine, "connect", _set_statement_timeout)
         # Host only — the URL carries credentials, never log it whole.

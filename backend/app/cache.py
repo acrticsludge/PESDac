@@ -12,7 +12,9 @@ bodies, keys, or tokens in logs). SQLite tests run with no URL
 Client protocol (shared by the Null, Upstash REST, and test-fake
 clients — the tests' FakeRedis speaks exactly this):
 `get(key) -> str | None`, `setex(key, ttl_s, value) -> bool`,
-`delete(*keys) -> int`, `scan(cursor, match, count) -> (cursor, [keys])`.
+`delete(*keys) -> int`, `scan(cursor, match, count) -> (cursor, [keys])`,
+`incr(key) -> int | None` (None when disabled), `expire(key, ttl_s) -> bool`,
+`ttl(key) -> int` (-2 missing, -1 no expiry), `set_nx(key, value, ttl_s) -> bool`.
 """
 
 from __future__ import annotations
@@ -99,19 +101,35 @@ class _NullClient:
     def scan(self, cursor="0", match="*", count=100):
         return "0", []
 
+    def incr(self, key: str):
+        return None
+
+    def expire(self, key: str, ttl_s: int):
+        return False
+
+    def ttl(self, key: str):
+        return -2
+
+    def set_nx(self, key: str, value: str, ttl_s: int):
+        return False
+
 
 class _UpstashClient:
     """Upstash REST adapter behind the get/setex/delete/scan protocol.
 
-    Shapes per spec §8 (dev-probe acceptance still pending — T0 blocked
-    on unset vars; any drift fails closed to OFF by construction):
-    `GET {url}/get/{key}` → `{"result": str|null}`;
-    `POST {url}` `["SET", k, v, "EX", ttl]` → `{"result":"OK"}`;
+    Shapes per spec §8, live-verified against the dev database
+    (miss→None, SET→"OK", SCAN MATCH, DEL count, brace/colon keys
+    round-tripping percent-encoded). Anything unexpected still fails
+    closed to OFF by construction below.
     `GET {url}/get/{key}` → `{"result": str|null}`;
     `POST {url}` `["SET", k, v, "EX", ttl]` → `{"result":"OK"}`;
     `["SCAN", cursor, "MATCH", pat, "COUNT", n]` → `{"result":[cur,[ks]]}`;
     `["DEL", k…]` → `{"result":n}`. Bearer auth; 1 s timeouts; no retry.
 
+    Rate-limit/lock shapes (live-probed 2026-09-13 against the dev DB):
+    `["INCR", k]` → `{"result": int}`; `["EXPIRE", k, ttl]` → `{"result":1}`;
+    `["TTL", k]` → `{"result": seconds|-1|-2}`;
+    `["SET", k, v, "EX", ttl, "NX"]` → `{"result":"OK"|null}`.
     """
 
     def __init__(self, base_url: str, token: str | None):
@@ -169,6 +187,28 @@ class _UpstashClient:
         ):
             return str(result[0]), [k for k in result[1] if isinstance(k, str)]
         raise RuntimeError("upstash_scan_shape")
+
+    def incr(self, key: str):
+        # Fixed-window counter (rate-limiting skill `simpleRateLimit`).
+        result = self._pipeline(["INCR", key])
+        if isinstance(result, int):
+            return result
+        raise RuntimeError("upstash_incr_shape")
+
+    def expire(self, key: str, ttl_s: int):
+        result = self._pipeline(["EXPIRE", key, int(ttl_s)])
+        return result == 1
+
+    def ttl(self, key: str):
+        result = self._pipeline(["TTL", key])
+        return result if isinstance(result, int) else -2
+
+    def set_nx(self, key: str, value: str, ttl_s: int):
+        # Distributed-lock acquire (locks skill: SET NX EX). Returns True
+        # only on {"result":"OK"}; {"result":null} means held elsewhere.
+        result = self._pipeline(["SET", key, value, "EX", int(ttl_s), "NX"])
+        return result == "OK"
+
 
 _null = _NullClient()
 _upstash: _UpstashClient | None = None
@@ -299,6 +339,53 @@ def note_miss() -> None:
     so OFF would misreport health in hit-rate sampling.
     """
     timing.note_cache_outcome(MISS)
+
+
+def rate_limit_key(route_key: str, client_ip: str) -> str:
+    """Fixed-window counter key for the distributed rate limiter.
+
+    Scoped under the same `pesdac:v1` prefix so account wipe
+    (`DELETE /users/me` → whole-prefix invalidate) cannot leak buckets
+    across a recreated account, and so `v1` bumps invalidate them too.
+    IP octets/colons are safe in Redis keys; route keys are enum-like
+    (`chats-create`, …) so the keyspace stays bounded.
+    """
+    return f"{CACHE_PREFIX}:rl:{route_key}:{client_ip}"
+
+
+def lock_key(name: str) -> str:
+    """Distributed-lock key (locks skill: `lock:<name>` namespaced)."""
+    return f"{CACHE_PREFIX}:lock:{name}"
+
+
+def acquire_lock(key: str, token: str, ttl_s: int) -> bool:
+    """Try to acquire a lock (SET NX EX). Fail-closed to False on any
+    transport error or when disabled — callers treat False as "busy" and
+    skip the guarded work, never as permission to run it twice."""
+    if not key or not is_enabled():
+        return False
+    try:
+        return bool(_get_client().set_nx(key, token, int(ttl_s)))
+    except Exception as exc:
+        _warn(type(exc).__name__)
+        return False
+
+
+def release_lock(key: str) -> None:
+    """Release a lock (plain DEL). Fail-open: warn and move on.
+
+    Limitation (per the locks skill): without EVAL compare-and-delete, a
+    DEL after TTL expiry could remove a *new* holder's lock. Safe here
+    because the only wired user (nightly purge, when scheduled) holds the
+    lock for seconds under a 60 s TTL — single runner, no contention. Do
+    not reuse for high-contention paths without adding EVAL.
+    """
+    if not key or not is_enabled():
+        return
+    try:
+        _get_client().delete(key)
+    except Exception as exc:
+        _warn(type(exc).__name__)
 
 
 def read_through(key: str, ttl_s: int, build):
