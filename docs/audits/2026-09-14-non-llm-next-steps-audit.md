@@ -102,19 +102,21 @@ The auth boundary becomes a real trust boundary instead of a parsing step. All o
 
 ---
 
-## 6. Backend API consistency and OpenAPI contract
+## ~~6. Backend API consistency and OpenAPI contract — DONE (2026-09-14)~~
 
-### Current status
-Partial. `docs/api-design-audit.md` reports Contract-First PASS, Boundary-Validation PASS, Addition-over-Modification PASS, Naming PASS; fixes shipped in Slice 13. Residual items still listed as P1–P3: `routers/health.py:27` 503 bare `{ok:false}`; `deps.py:74` 401 shape; `schemas/chats.py:ChatListOut.pagination: dict` too loose; `DELETE /chats` `{deleted:N}` vs `data` envelope; `lib/auth.ts` 693-line god-module; upstream link-password trust; missing `docs/API.md`.
+> **Status: DONE — struck through, not removed (2026-09-14).** Orientation showed Slice 13 had already shipped the P1/P2 fixes with pinning tests (503 envelope, typed `Pagination`, clear-chats envelope, no backend link-password proxy), and §5 had settled the 401 question via the global handler — so this slice did the two genuinely open items: leaf-split `lib/api/errors.ts` (verbatim move + identity tests, zero consumer changes) and `docs/API.md` (route table verified claim-by-claim against router code, including two corrections mid-write: adopt replay is 200 not 409; 409s are allocation/append races). Verified: 360 frontend tests pass, `astro check` 0 errors / 0 warnings, `diff --check` + secret scan clean. No `git commit` executed (commits need your explicit request).
 
-### What to add
-1. P1 (1 line + 3 lines): envelope on `GET /ready` 503 (`UNHEALTHY`); envelope on all `deps.py` 401s.
-2. P2 (10 lines + 1 line + 1 test): typed `Pagination(limit,offset,total)` Pydantic model — keep current shape, do NOT migrate to page/pageSize; wrap `DELETE /chats` in `{data:{deleted:N}}`.
-3. P3: split `frontend/src/lib/auth.ts` into `lib/api/profile.ts` / `chats.ts` / `demo-state.ts` with shared `apiFetch` / `ApiError` / `toUserMessage` (60–80 moved lines, no behaviour change, thin re-export); add upstream-response type guard on link-password; write `docs/API.md` (~60 lines: envelope, pagination lock, per-route codes, idempotency keys, rate-limit headers).
-4. Verify: every 4xx has envelope; `GET /chats` pagination typed in OpenAPI; existing backend tests green; frontend parses without change.
+### ~~Current status~~
+Partial. `docs/api-design-audit.md` reports Contract-First PASS, Boundary-Validation PASS, Addition-over-Modification PASS, Naming PASS; fixes shipped in Slice 13. Residual items still listed as P1–P3: `routers/health.py:27` 503 bare `{ok:false}`; `deps.py:74` 401 shape; `schemas/chats.py:ChatListOut.pagination: dict` too loose; `DELETE /chats` `{deleted:N}` vs `data` envelope; `lib/auth.ts` 693-line god-module; upstream link-password trust; missing `docs/API.md`. — Resolution: P1/P2 verified done in code with pinning tests (`test_ready_503_uses_envelope`, `test_chats_list_pagination_typed`, clear-chats envelope test, `test_401_envelope` + invalid-token test from §5); the link-password proxy no longer exists (same-origin Astro route since slice-12b, so the upstream-guard item is moot); the god-module got its first leaf split (below), full domain split deferred with coupling rationale.
 
-### What it changes for future
-One error shape, one pagination shape, one API doc. Frontend stops guessing; new endpoints (messages, uploads, share — when specified) copy the envelope instead of inventing a third shape.
+### ~~What to add~~
+1. ~~P1 (1 line + 3 lines): envelope on `GET /ready` 503 (`UNHEALTHY`); envelope on all `deps.py` 401s.~~ — VERIFIED DONE (Slice 13 + `main.py` handler + §5 tests). No change.
+2. ~~P2 (10 lines + 1 line + 1 test): typed `Pagination(limit,offset,total)` Pydantic model — keep current shape, do NOT migrate to page/pageSize; wrap `DELETE /chats` in `{data:{deleted:N}}`.~~ — VERIFIED DONE (Slice 13 went further: `{data:{deleted},pagination}`; truncate-messages mirrors it). No change.
+3. ~~P3: split `frontend/src/lib/auth.ts` into `lib/api/profile.ts` / `chats.ts` / `demo-state.ts` with shared `apiFetch` / `ApiError` / `toUserMessage` (60–80 moved lines, no behaviour change, thin re-export); add upstream-response type guard on link-password; write `docs/API.md` (~60 lines: envelope, pagination lock, per-route codes, idempotency keys, rate-limit headers).~~ — DONE AS A LEAF SLICE: `lib/api/errors.ts` holds the error surface verbatim (`ApiError`, `AuthRequiredError`, `AuthServiceError`, `toUserMessage`, `ApiErrorBody`); `lib/auth.ts` imports + re-exports, all 7 consumers untouched. Full domain split deferred: the module's caches/epoch/listeners are mutually coupled (a verbatim move would need circular imports), so it waits for a seam with behavior value. Upstream guard moot (no proxy). `docs/API.md` written and code-verified.
+4. ~~Verify: every 4xx has envelope; `GET /chats` pagination typed in OpenAPI; existing backend tests green; frontend parses without change.~~ — DONE: envelope tests (§5 + `test_envelope_contract.py`), typed pagination test, 179 backend green (unchanged code), 360 frontend green (split is import-identical).
+
+### ~~What it changes for future~~
+One error shape, one pagination shape, one API doc. Frontend stops guessing; new endpoints (messages, uploads, share — when specified) copy the envelope instead of inventing a third shape. The next `lib/api/*` split copies the leaf pattern: move verbatim, re-export, pin identity, keep consumers untouched.
 
 ---
 
