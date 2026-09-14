@@ -193,6 +193,52 @@ New tab in `ProfileDialog` (`frontend/src/components/profile/ProfileDialog.tsx`)
 
 ---
 
+## Session & token semantics (2026-09-14, audit §4)
+
+Lifetimes and revocation guarantees, locked so future work stops
+re-deciding them. All references are to the tree as it exists.
+
+- **Session:** BetterAuth cookie session (`cookieCache maxAge 7d`, spec
+  table above). The cookie is httpOnly — JS never reads it. The only
+  SSR-visible subset is the id/email/name/2FA tuple the middleware
+  embeds for first paint (`InitialSession.astro`); everything else
+  loads lazily via `useProfile()` / `apiGetMe()`.
+- **SSR lookup:** `src/middleware/auth.ts` races `getSession` against an
+  800 ms timeout. Outcomes are tri-state: proved session, proved guest
+  (fast `null`), or unknown (timeout/throw). Unknown and absent hints
+  fail closed to `loading` — never guest, never a gate flash
+  (`useAuth`, `readInitialSessionTag` keyed by raw tag contents, epoch
+  latch at mount).
+- **Backend JWT:** minted on demand from the session cookie via the
+  same-origin token endpoint (`mintTokenOnce`, one bounded retry on
+  transient failures only), sent as `Authorization: Bearer`, verified
+  per request by the backend (`app/auth/betterauth.py`, `app/deps.py`).
+  The frontend never trusts its own claims; verified claims are the
+  sole identity source.
+- **Stale token after logout:** a copied Bearer JWT stays valid until
+  its embedded `exp` — the backend holds no revocation list, so
+  revocation takes effect as cookie invalidation (no fresh mints
+  without the cookie) plus 401-driven epoch kill on next use
+  (`authRequiredError`: drop caches, deduped `AUTH_REQUIRED_EVENT`,
+  shell navigates once). Design sensitive flows around short use, not
+  around recall.
+- **Logout:** `apiLogout()` always clears the full identity heap
+  (`clearIdentityHeap`: caches + chat store + epoch, profile seed,
+  sibling ping) and navigates to `/login` inside a bounded 15 s race —
+  even when revocation fails. Outcome is honest (`ok` /
+  `server-failed`); the UI toasts the failure but never blocks
+  navigation. Backend `POST /auth/logout` answers 204 and owns no
+  revocation (the SDK `signOut` does); full endpoint contract belongs
+  in `docs/API.md` (§6 work).
+- **Deletion:** backend-first, then identity, then heap-drop
+  (`apiDeleteAccount`); outcomes `complete` / `identity-pending` /
+  `backend-failed` each have UI copy and a retry path. Never the
+  reverse order (that orphaned PESDac rows — audit C3).
+- **Sensitive routes:** every protected mutation enforces ownership
+  server-side against verified claims; cross-user access answers 404.
+
+---
+
 ## Open Questions (Resolved)
 
 | Question | Decision |

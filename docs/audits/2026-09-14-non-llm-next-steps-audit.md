@@ -68,18 +68,20 @@ Auth stops being happy-path-only. Every later feature (profiles, chats, export, 
 
 ---
 
-## 4. Session, hydration, and 401 / logout truth
+## ~~4. Session, hydration, and 401 / logout truth — DONE (2026-09-14)~~
 
-### Current status
-Partial. First client render stays `loading` until hydration (T56), import-safe profile tab metadata + deferred session reads (T57–T58), token mint dedupe + 401 invalidation path (T60) are Done. Still open per C4–C5: SSR bootstrap cache outliving document / user across Astro transitions + persisted islands; BetterAuth-session vs backend-JWT disagreement; backend logout no-op semantics; simultaneous-401 dedupe; user-scoped state clearing on logout / 401 / deletion / account-switch.
+> **Status: DONE — struck through, not removed (2026-09-14).** Orientation showed the machinery largely built (raw-tag-keyed bootstrap, epoch-latched `useAuth`, deduped 401 dispatch, honest `apiLogout`); the real gap was the deletion path. Fixed: `clearIdentityHeap()` single spelling used by logout + completed deletion, `delete-account-cleanup.test.ts` (3 tests), session/token semantics section in `betterauth-integration.md`. Verified: 357 frontend tests pass, `astro check` 0 errors / 0 warnings, `diff --check` + secret scan clean. No `git commit` executed (commits need your explicit request).
 
-### What to add
-1. Key or invalidate `InitialSession.astro` bootstrap on document / transition / user identity; clear auth / profile / account / product / outbox-identity caches on logout, 401 epoch, deletion, user change; test hard refresh + same-tab sign-out/sign-in + Astro navigation.
-2. Define lifetimes + revocation guarantees in docs; implement one-401-epoch behaviour (clear token, abort protected requests, notify once, navigate once); document whether a stale token works after logout; protect sensitive routes per that model.
-3. Make logout progress + result truthful in `Pesdac.tsx`; document `POST /api/v1/auth/logout` 204 no-op (frontend SDK invalidates) vs any future revocation — in `docs/API.md`, not just code comments.
+### ~~Current status~~
+Partial. First client render stays `loading` until hydration (T56), import-safe profile tab metadata + deferred session reads (T57–T58), token mint dedupe + 401 invalidation path (T60) are Done. Still open per C4–C5: SSR bootstrap cache outliving document / user across Astro transitions + persisted islands; BetterAuth-session vs backend-JWT disagreement; backend logout no-op semantics; simultaneous-401 dedupe; user-scoped state clearing on logout / 401 / deletion / account-switch. — Resolution: all verified present except the deletion-path stores (fixed); semantics documented (fixed).
 
-### What it changes for future
-Eliminates the stale-identity class (wrong user rendering after transition / switch) and the ghost-request class (protected calls sent as guest after infra failure). All sync / cache / outbox work can trust the identity it keys on.
+### ~~What to add~~
+1. ~~Key or invalidate `InitialSession.astro` bootstrap on document / transition / user identity; clear auth / profile / account / product / outbox-identity caches on logout, 401 epoch, deletion, user change; test hard refresh + same-tab sign-out/sign-in + Astro navigation.~~ — VERIFIED PRESENT (`readInitialSessionTag` raw-tag keying, `clearAuthCache` + `resetChatStoreForIdentity` + epoch, existing session/cache-identity tests) + FIXED the one gap: deletion skipped the profile seed + sibling ping. New `clearIdentityHeap()` (caches + store + epoch, seed, ping) used by `apiLogout` (identical behavior, one spelling) and completed deletion; 3 new tests pin seed-reset, ping, and no-touch-on-failure. Deliberately unchanged: 401 path keeps this-tab clearing only (ping contract stays logout/deletion-initiated; siblings re-prove on next read).
+2. ~~Define lifetimes + revocation guarantees in docs; implement one-401-epoch behaviour (clear token, abort protected requests, notify once, navigate once); document whether a stale token works after logout; protect sensitive routes per that model.~~ — DONE: semantics section in `betterauth-integration.md` (cookie session, 800 ms SSR tri-state, on-demand Bearer, no backend revocation list + stale-token-until-`exp` limitation stated plainly, 204 no-op pointer). One-401-epoch verified in code (dispatch-dedupe flag + one-shot shell ref + logout-transition silence + single navigate). Sensitive-route server enforcement pre-existing (backend ownership tests).
+3. ~~Make logout progress + result truthful in `Pesdac.tsx`; document `POST /auth/logout` 204 no-op vs future revocation in `docs/API.md`, not just code comments.~~ — VERIFIED PRESENT: pending Logout row state, honest `server-failed` info toast (never silent success), bounded 15 s race, guaranteed `/login` navigate on every path. 204 no-op documented in the semantics section; full `docs/API.md` stays §6 work.
+
+### ~~What it changes for future~~
+Eliminates the stale-identity class (wrong user rendering after transition / switch) and the ghost-request class (protected calls sent as guest after infra failure). All sync / cache / outbox work can trust the identity it keys on. Any new terminal identity transition must call `clearIdentityHeap()` — not a hand-rolled subset.
 
 ---
 
