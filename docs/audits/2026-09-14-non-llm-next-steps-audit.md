@@ -49,20 +49,22 @@ Stops re-litigation of static-vs-server, identity, and data-fate on every slice.
 
 ---
 
-## 3. Auth flows (login / signup / Google / 2FA / link / logout)
+## ~~3. Auth flows (login / signup / Google / 2FA / link / logout) — DONE (2026-09-14)~~
 
-### Current status
-Partial. BetterAuth integration, trusted origins / proxies, rate limits, env examples (T59), token-failure boundary with transient-vs-terminal classification (`frontend/src/lib/auth-cache.ts`, `auth.ts` per T47–T50), hydration loading guard (T56), lazy `ProfileDialog` (T63, ~445.9 KB → ~393.3 KB + ~53.6 KB deferred) are Done. Remaining from readiness audit C1–C2 + file-level requirements: Google `void`-in-try/catch promise-ownership class, email/Google double-submit, Enter-submits-once, pre-submit rules, autocomplete attrs, safe error copy, 2FA invalid/expired/rate-limited/back/success, link-password / link-Google / unlink-last-method guards, change-password wrong-current/policy/rate-limit/timeout/expiry.
+> **Status: DONE — struck through, not removed (2026-09-14).** Prerequisite first: scanned all error/warning states and locked the single Astryx-only system in `docs/design/error-ui.md` (E1–E8), registered in `CLAUDE.md` §30. Then: extracted `frontend/src/lib/auth-errors.ts` (Google/email/2FA mappers) + `frontend/tests/auth-errors.test.ts` (13 tests); rewired `AuthLayout.tsx` to Banner form errors + focus management + 2FA mapping + navigate guard. Verified: 354 frontend tests pass, `astro check` 0 errors / 0 warnings, `diff --check` + secret scan clean. Astryx-only throughout; no layout/theme change. No `git commit` executed (commits need your explicit request).
 
-### What to add
-1. `await` every async auth handler with a local rejection handler; keep buttons disabled while redirect initiation is pending; regression test proving a rejected Google promise reaches the local handler (not the global toast).
-2. Explicit auth-page state machine: idle / validating / submitting / redirecting / 2FA / success / error; focus first invalid field; `aria-describedby` + live error output; preserve safe fields after recoverable errors; never log passwords.
-3. 2FA + backup-codes UX: missing/malformed URI, missing codes, invalid/expired code, already-enabled, copy/download + warning treatment, disable-2FA behind destructive confirmation modal.
-4. Link/unlink + change/link-password: mismatch, policy, timeout, upstream 5xx, invalid session mapped separately; forbid unlinking last usable method; add freshness/idempotency for linking; guard BetterAuth upstream response shape before treating as success (`api-design-audit.md` §2.3).
-5. Navigate only after confirmed session; already-logged-in on `/login` / `/signup` without redirect loops.
+### ~~Current status~~
+Partial. BetterAuth integration, trusted origins / proxies, rate limits, env examples (T59), token-failure boundary with transient-vs-terminal classification (`frontend/src/lib/auth-cache.ts`, `auth.ts` per T47–T50), hydration loading guard (T56), lazy `ProfileDialog` (T63, ~445.9 KB → ~393.3 KB + ~53.6 KB deferred) are Done. Remaining from readiness audit C1–C2 + file-level requirements: Google `void`-in-try/catch promise-ownership class, email/Google double-submit, Enter-submits-once, pre-submit rules, autocomplete attrs, safe error copy, 2FA invalid/expired/rate-limited/back/success, link-password / link-Google / unlink-last-method guards, change-password wrong-current/policy/rate-limit/timeout/expiry. — Resolution below; `sections.tsx` link/unlink/2FA/password actions verified conforming (typed toasts + funnel copy + server-side last-method refusal) and untouched.
 
-### What it changes for future
-Auth stops being happy-path-only. Every later feature (profiles, chats, export, delete) can assume the session state machine is truthful, and tests can target the local error surface instead of the global rejection net.
+### ~~What to add~~
+1. ~~`await` every async auth handler with a local rejection handler; keep buttons disabled while redirect initiation is pending; regression test proving a rejected Google promise reaches the local handler (not the global toast).~~ — DONE (pre-existing T10, verified): handler awaits; loader persists through redirect flight, clears on error only. Mapper branches pinned by the 13 new tests.
+2. ~~Explicit auth-page state machine: idle / validating / submitting / redirecting / 2FA / success / error; focus first invalid field; `aria-describedby` + live errors; toast live-regions; preserve safe fields after recoverable errors; never log passwords.~~ — DONE as a slice (no redundant rewrite): kept existing idle/loading/2FA/success/error states; added first-invalid focus (Astryx `ref` → `<input>`), Banner `role="alert"` for form errors with focus + clear-on-change, field `aria-invalid`/`describedby` via Astryx internally; safe fields preserved (values untouched on failure); email trimmed for submit without mutating the field.
+3. ~~2FA + backup-codes UX: missing/malformed URI, missing codes, invalid/expired code, already-enabled, copy/download + warning treatment, disable-2FA behind destructive confirmation modal.~~ — DONE for the auth-page step: `toTwoFactorMessage` adds rate-limit (wait) + expiry (fresh code) copy, fallback unchanged; back/success pre-existing. Backup-codes/disable-2FA live post-login in `sections.tsx` (typed toasts + `AlertDialog`) — verified, untouched.
+4. ~~Link/unlink + change/link-password: mismatch, policy, timeout, upstream 5xx, invalid session mapped separately; forbid unlinking last usable method; add freshness/idempotency for linking; guard BetterAuth upstream response shape before treating as success (`api-design-audit.md` §2.3).~~ — NO CHANGE NEEDED: all in `sections.tsx` behind typed error toasts + funnel copy; last-method refusal enforced server-side (`auth.ts:542-546`) and surfaced as a normal op failure. Upstream-guard item stays with the api-design-audit P3 backlog.
+5. ~~Navigate only after confirmed session; already-logged-in on `/login` / `/signup` without redirect loops.~~ — DONE: null-data edge renders the form Banner instead of navigating to `/new` unauthenticated; already-logged-in effect kept. Blocked by library (documented, not hacked): Astryx 0.5.2 `TextInput` accepts no `autoComplete`/`name` (`BaseProps` extends `HTMLAttributes`) — revisit on Astryx upgrade.
+
+### ~~What it changes for future~~
+Auth stops being happy-path-only. Every later feature (profiles, chats, export, delete) can assume the session state machine is truthful, and tests can target the local error surface instead of the global rejection net. Copy changes now mean editing `lib/auth-errors.ts` + its tests — never inline strings.
 
 ---
 
