@@ -398,17 +398,19 @@ Docs describe the system that exists. Future agents update one canonical documen
 
 ---
 
-## 22. Product honesty (planned boundaries that must remain)
+## ~~22. Product honesty (planned boundaries that must remain) — DONE (2026-09-14)~~
 
-### Current status
-Specified, partially proven. Arch D5–D7 + readiness "Planned features must remain" + UX contract (10 questions per action) + `AGENTS.md` design-truth rules are Done as policy. Demo threads (20/20: 4 × CN/OS/DLCD/DSA/Math per backend-readiness audit §0), deterministic responder simulations (`error / empty / limit / tool-error`), attachment staging (`Attachment{id,name,mime,size}`), static subject threads, local custom chats are Done as surface. Honest labelling (demo / local / planned) + mock loading/error/empty states per surface are Partial.
+> **Status: DONE — struck through, not removed (2026-09-14).** Closed the three concrete honesty gaps with proof-or-fix: @-tokens verified rendering as badges in user bubbles with raw text as the retry/find source of truth (`renderUserText`, pre-existing — cited, not rebuilt); the quiz checking overclaim FIXED ("Show me the answers" pill promised unshipped checking → retitled copy "try these, then ask for the walkthrough" + working "Walk me through it" pill, no test pinned the old copy); demo threads made visibly demo (new `Demo` token on all three demo row surfaces via an `endContent` pass-through — same pattern as the §11 `Soon` token; "Today/Yesterday" dividers stay as mock-date labels under the marker). Verified: 377 frontend green, `astro check` 0 errors. The remaining product question (guest gate vs guest machinery — §13 flag) is the only honesty item left, and it needs your decision, not code. Committed without a prompt per standing instruction.
 
-### What to add
-1. Per planned surface, retain UI + intended behaviour + honest boundary label + mock loading/error/empty states + future adapter signature; never claim an in-memory operation is persisted (responder, attachments, share-links stub, study-library stub, future uploads, future durable preferences).
-2. `@`-tokens: render inside user bubbles (gap-audit header note, still open) so the echo rule ("never interpolate raw user text into markdown") has a visible token shape; tone quiz copy to "try these, then ask for the walkthrough" until checking ships (backend-readiness §2.2).
-3. Demo timestamps stay labelled mock; real-date grouping arrives with server dates (contract in `error-states.md`); corrupt-overlay one-time warning (§10).
+### ~~Current status~~
+Specified, partially proven. Arch D5–D7 + readiness "Planned features must remain" + UX contract (10 questions per action) + `AGENTS.md` design-truth rules are Done as policy. Demo threads (20/20: 4 × CN/OS/DLCD/DSA/Math per backend-readiness audit §0), deterministic responder simulations (`error / empty / limit / tool-error`), attachment staging (`Attachment{id,name,mime,size}`), static subject threads, local custom chats are Done as surface. Honest labelling (demo / local / planned) + mock loading/error/empty states per surface are Partial. — Resolution: labelling now complete for demo surfaces (token), planned surfaces (Soon token §11, "Publishes at launch" badges pre-existing), simulations (comment-marked + copy-honest).
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Per planned surface, retain UI + intended behaviour + honest boundary label + mock loading/error/empty states + future adapter signature; never claim an in-memory operation is persisted (responder, attachments, share-links stub, study-library stub, future uploads, future durable preferences).~~ — DONE (all surfaces retain UI + labels; nothing claims persistence — responder copy fixed where it overreached).
+2. ~~`@`-tokens: render inside user bubbles (gap-audit header note, still open) so the echo rule ("never interpolate raw user text into markdown") has a visible token shape; tone quiz copy to "try these, then ask for the walkthrough" until checking ships (backend-readiness §2.2).~~ — DONE both halves (render verified §22, copy toned this slice).
+3. ~~Demo timestamps stay labelled mock; real-date grouping arrives with server dates (contract in `error-states.md`); corrupt-overlay one-time warning (§10).~~ — DONE (Demo tokens mark the threads whose dividers are mock dates; server-date grouping rides the messages phase; corrupt warning shipped in §10).
+
+### ~~What it changes for future~~
 The mockup remains a trustworthy prototype: users and future implementers can tell what is real, what is local, and what is planned — so backend / generation work replaces simulations seam-by-seam without rewriting UI.
 
 ---
