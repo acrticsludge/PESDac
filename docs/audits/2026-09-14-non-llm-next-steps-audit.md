@@ -139,19 +139,21 @@ Migrations become safe to run in deploy (not just on empty dev DBs). Deletion, r
 
 ---
 
-## 8. Profiles, settings, onboarding persistence
+## ~~8. Profiles, settings, onboarding persistence — DONE (2026-09-14)~~
 
-### Current status
-Partial. Settings wiring + locale timestamps + find shortcut + thread hardening Done (`3bc5bfe`); `shortcut_find` backend column Done (`63ed945`, `0009_shortcut_find.py`, `models/profiles.py`, `schemas/profiles.py`); `docs/audits/profile-settings-wiring.md` inventory Done (WIRED / STORED / PLACEHOLDER + Tier A/B/C + copy-paste contract). Server already accepts every preference field via `ProfilePatch` with frontend-mirrored enums. Follow-up-suggestions gate (Tier A, one gate in `ThreadView.tsx:834,1960`), Tier B persistence batch (difficulty, proactiveQuiz, verbosity, citations, examMonth, weeklyGoal, language, region, timezone), Tier C retention-preference sync are the documented remainders.
+> **Status: DONE — struck through, not removed (2026-09-14).** Tier A gate verified already shipped (`ThreadView.tsx:945,2150`); finished Tier B + Tier C-sync by wiring the last four memory-only controls (`proactiveQuiz`, `retention`, `depth`, all four shortcuts) through `savePreference`; fixed the stale-response hazard in the kernel (older flush can no longer roll back newer memory or fire a misleading toast; success reconciles canonical values only for untouched keys); extracted the login seed into `seedOnboardingFields` (key-set pinned: four onboarding keys, prefs never touched) shared by `Pesdac.tsx` hydration and `OnboardingDialog` save. Verified: 366 frontend tests pass (6 new), `astro check` 0 errors. Per-control pending/disabled UI deferred (kernel exposes `isSettingSaving`; wiring is a visual change needing a design pass). Committed without a prompt per standing instruction.
 
-### What to add
-1. Tier A: gate `followUps` display on `getProfile().followUps` — minutes, instant behaviour change.
-2. Tier B: one `saveIdentity`-style pass (optimistic `updateProfile` → `PATCH /profiles/me` → rollback + `toUserMessage` toast), guests memory-only, login seed never clobbers device prefs.
-3. Tier C: sync retention preference now; enforcement rides the scheduler (§14); resolve `session`-only semantics before wiring the worker.
-4. Per-action loading states disabling only conflicting controls; concurrent saves cannot apply stale responses; never show saved before server confirmation; map 401 / 422 / 429 / timeout / 5xx separately; commit/refresh failure rollback; canonical full-profile response.
-5. Correctly deferred stays deferred: legal docs need real content + publish decision; email editing stays BetterAuth-owned read-only.
+### ~~Current status~~
+Partial. Settings wiring + locale timestamps + find shortcut + thread hardening Done (`3bc5bfe`); `shortcut_find` backend column Done (`63ed945`, `0009_shortcut_find.py`, `models/profiles.py`, `schemas/profiles.py`); `docs/audits/profile-settings-wiring.md` inventory Done (WIRED / STORED / PLACEHOLDER + Tier A/B/C + copy-paste contract). Server already accepts every preference field via `ProfilePatch` with frontend-mirrored enums. Follow-up-suggestions gate (Tier A, one gate in `ThreadView.tsx:834,1960`), Tier B persistence batch (difficulty, proactiveQuiz, verbosity, citations, examMonth, weeklyGoal, language, region, timezone), Tier C retention-preference sync are the documented remainders. — Resolution: Tier A verified done; Tier B closed incl. `depth` + shortcuts (same one-line pattern, server accepts all); Tier C preference sync done (enforcement still rides the scheduler per §18); kernel ordering + canonical-reconcile fixed with tests; seed key-set pinned with tests.
 
-### What it changes for future
+### ~~What to add~~
+1. ~~Tier A: gate `followUps` display on `getProfile().followUps` — minutes, instant behaviour change.~~ — VERIFIED DONE in code, no change.
+2. ~~Tier B: one `saveIdentity`-style pass (optimistic `updateProfile` → `PATCH /profiles/me` → rollback + `toUserMessage` toast), guests memory-only, login seed never clobbers device prefs.~~ — DONE: `savePreference` now covers every persisted control; guests pass `server:false`; seed extracted + pinned (`profile-seed.test.ts`).
+3. ~~Tier C: sync retention preference now; enforcement rides the scheduler (§14); resolve `session`-only semantics before wiring the worker.~~ — DONE the sync half (`retention` persists like any pref); enforcement + `session` semantics stay with §18.
+4. ~~Per-action loading states disabling only conflicting controls; concurrent saves cannot apply stale responses; never show saved before server confirmation; map 401 / 422 / 429 / timeout / 5xx separately; commit/refresh failure rollback; canonical full-profile response.~~ — DONE the safety core (stale-response guard, canonical reconcile for untouched keys, rollback + `toUserMessage` mapping, no success toasts anywhere); per-control pending UI deferred (kernel `isSettingSaving` ready, visual change needs design).
+5. ~~Correctly deferred stays deferred: legal docs need real content + publish decision; email editing stays BetterAuth-owned read-only.~~ — Untouched, still deferred.
+
+### ~~What it changes for future~~
 Settings stop being write-only toggles. Cross-device roaming works through the existing PATCH contract with no migration, and the future quiz / verbosity / citation / streak / countdown / i18n work binds to already-persisted values.
 
 ---
