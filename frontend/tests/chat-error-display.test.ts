@@ -31,6 +31,7 @@ import {
 import {
   __resetChatBackingForTesting,
   createChatBacked,
+  createCustomChat,
   getChatHydrateFailed,
   getChatMessagesStatus,
   getChatSyncError,
@@ -450,7 +451,7 @@ test("create 401 stays silent: no toast, no signal", async () => {
 
 // ---- Scope guards ------------------------------------------------------------
 
-test("guest paths set no signal (zero fetches, memory-only)", async () => {
+test("null-auth paths set no signal (zero fetches, fail closed)", async () => {
   setup();
   const apiLog: ApiCall[] = [];
   const restore = __setFetchForTesting(
@@ -458,9 +459,10 @@ test("guest paths set no signal (zero fetches, memory-only)", async () => {
   );
   try {
     // Empty API queue: any fetch throws, so every assertion below also
-    // proves no fetch happened.
-    const chat = await createChatBacked("CN", "guest chat", null);
-    assert.ok(chat);
+    // proves no fetch happened. Login required: creation fails closed.
+    assert.equal(await createChatBacked("CN", "guest chat", null), null);
+    // Turn legs on a seeded local row still no-op without signals.
+    const chat = createCustomChat("CN", "local row");
     assert.equal(
       await persistAppendedBlock(chat.code, userBlock("hi"), null),
       true,

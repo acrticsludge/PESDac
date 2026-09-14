@@ -36,14 +36,14 @@ export type CustomChat = {
   title: string;
   createdAt: string;
   // Server-backed rows (Phase 2): present only on chats hydrated from or
-  // created through the server. Guest customs never carry these — their
-  // absence is the guest-originated marker (adopt + key-set fallback).
+  // created through the server. Local-only rows never carry these —
+  // their absence is the unadopted marker (adopt + key-set fallback).
   isPinned?: boolean;
   isArchived?: boolean;
   updatedAt?: string;
   // Adopt idempotency key (caching Phase 5, spec §10.2): one UUID per
-  // guest chat, sent as `clientAdoptKey` in the adopt `POST /chats`.
-  // Stored on the guest row so retries — same hydrate or a later login —
+  // local-only chat, sent as `clientAdoptKey` in the adopt `POST /chats`.
+  // Stored on the row so retries — same hydrate or a later login —
   // resend the identical key and the server answers conflict-200 instead
   // of duplicating. Server rows never carry it.
   clientAdoptKey?: string;
@@ -241,6 +241,12 @@ export function listCustomChats(): CustomChat[] {
   return readJSON<CustomChat[]>(CHATS_KEY, []);
 }
 
+/**
+ * Fabricate a local-only chat row. Production creation always goes
+ * through `createChatBacked` (authenticated, server-first) — login is
+ * required, so guests never reach creation. Tests use this to seed
+ * flagless rows for adopt/preserve-transition coverage.
+ */
 export function createCustomChat(subject: string, title: string): CustomChat {
   const existing = listCustomChats();
   const chat: CustomChat = {
@@ -1123,7 +1129,10 @@ export async function createChatBacked(
   auth: ChatAuth,
   opts?: { notify?: ChatNotify },
 ): Promise<CustomChat | null> {
-  if (auth == null) return createCustomChat(subject, title);
+  // Login required (spec §A gate owns guests): no guest memory chats.
+  // Fail closed — callers treat null as "not created" (composer keeps
+  // text, no navigation, zero fetches).
+  if (auth == null) return null;
   const clean = title.trim().slice(0, 34) || "New chat";
   try {
     const chat = fromServerChat(await apiCreateChat(subject, clean));
@@ -1568,12 +1577,16 @@ function dropMemoryChat(code: string) {
   );
 }
 
-// Guest→login adopt (best-effort, bounded): memory customs at first
-// authenticated hydrate are POSTed — container + overlay blocks in order —
-// then dropped from memory. Per-chat all-or-nothing: any failure keeps
-// that chat's memory copy untouched for the next login. Exact-once across
-// retries rides the idempotency contract (spec §10.2): the per-guest
-// `clientAdoptKey` is stored on the row, so the first attempt and every
+// Local-row adopt (best-effort, bounded): flagless memory customs at
+// first authenticated hydrate are POSTed — container + overlay blocks in
+// order — then dropped from memory. Login is required so guests never
+// create these; the rows this converges are post-logout/stale-tab
+// leftovers and failed-adopt retries, and the machinery doubles as the
+// cross-identity contamination guard (never adopt into a foreign
+// identity — see the hydrate ordering below). Per-chat all-or-nothing:
+// any failure keeps that chat's memory copy untouched for the next login.
+// Exact-once across retries rides the idempotency contract (spec §10.2):
+// the per-row `clientAdoptKey` is stored on the row, so the first attempt and every
 // retry send the identical key — a duplicate POST answers `200` with the
 // existing row (same shape as `201`) and the flow below drops memory
 // without duplicating. A partial server write (container created, later

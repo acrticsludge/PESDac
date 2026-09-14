@@ -52,7 +52,6 @@ import {
   useStorageHealth,
   useCorruptKeys,
   listCustomChats,
-  createCustomChat,
   deleteCustomChat,
   renameDemoChat,
   demoDisplayLabel,
@@ -1635,18 +1634,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
     // the sidebar title.
     const title = stripReferenceTokens(text) || text;
     if (chatAuth == null) {
-      // Guest path: memory-only, byte-identical to today's behavior.
-      const chat = createCustomChat(subject, title);
-      const staged = attachments;
-      setSelectedChat(null);
-      setAttachments([]);
-      // Send clears the composer via ChatComposer's own onChange.
-      revokeStaged(staged);
-      setDraftCode(chat.code);
-      setDraftAutoSend({ text, attachments: staged.map((s) => s.att) });
-      navigate(
-        buildChatPath(isSubject(subject) ? subject : "CN", chat.code),
-      );
+      // Login required (spec §A gate): guests never reach this composer.
+      // Fail closed — no memory chat, no navigation, composer keeps text.
       return;
     }
     // Authenticated path: the server row is created first (no temp code

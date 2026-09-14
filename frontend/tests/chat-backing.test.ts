@@ -508,27 +508,44 @@ test("failed truncate rolls back + one toast", async () => {
   }
 });
 
-// ---- Guest-untouched --------------------------------------------------------
+// ---- Null-auth fail-closed --------------------------------------------------
+// Login is required (spec §A gate): creation without an identity fails
+// closed — null, zero fetches, zero memory rows. The memory fallback
+// ops below still work on explicitly seeded local rows (defensive
+// depth for flagless leftovers, not a guest experience).
 
-test("guest mutations stay memory-only with zero fetches", async () => {
+test("null-auth create fails closed with zero fetches and zero rows", async () => {
   setup();
   const apiLog: ApiCall[] = [];
   const restore = __setFetchForTesting(
     makeRouter(tokens(10), [], apiLog),
   );
   try {
-    // Empty API queue: any fetch throws, so every assertion below also
-    // proves no fetch happened.
-    const chat = await createChatBacked("CN", "guest chat", null);
-    assert.ok(chat);
+    // Empty API queue: any fetch throws, so this also proves no fetch.
+    assert.equal(await createChatBacked("CN", "guest chat", null), null);
+    assert.deepEqual(listCustomChats(), []);
+    assert.deepEqual(apiLog, []);
+  } finally {
+    restore();
+  }
+});
+
+test("null-auth memory ops still work on seeded local rows", async () => {
+  setup();
+  const apiLog: ApiCall[] = [];
+  const restore = __setFetchForTesting(
+    makeRouter(tokens(10), [], apiLog),
+  );
+  try {
+    const chat = createCustomChat("CN", "local row");
     assert.equal(isServerChat(chat.code), false);
     assert.equal(
-      await renameChatBacked(chat.code, "renamed guest", null),
+      await renameChatBacked(chat.code, "renamed local", null),
       true,
     );
     assert.equal(
       listCustomChats().find((c) => c.code === chat.code)?.title,
-      "renamed guest",
+      "renamed local",
     );
     const ref = { kind: "custom" as const, id: chat.code };
     assert.equal(await setPinBacked(ref, true, null), true);

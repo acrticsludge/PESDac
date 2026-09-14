@@ -35,3 +35,15 @@ On first authenticated backend contact, per key:
 - The sync/outbox implementation (§10 of the non-LLM audit) inherits this table as its contract: which keys get adapters, which get deletion, which stay local forever.
 - `localStorage` still needs versioning, quota guards, and the corrupt-JSON one-time warning (gap-audit §4b.4/§4b.5) — this ADR decides fate, not robustness.
 - Any new client key added later must land in one of the three buckets (migrate / drop / transport) with a line in this ADR's inventory, or it defaults to drop.
+
+## Addendum — login required (2026-09-14)
+
+Product decision: guests never reach creation (the spec-§A gate owns
+all app routes), so the guest half of this ADR is retired — no guest
+heap is ever built, and the welcome-send / create guest branches fail
+closed. What stays and why: the adopt + preserve + key-set machinery
+now guards cross-identity transitions (logout → different login on one
+device, stale-tab heaps) rather than guest→login migration. The
+per-key fate table above is unchanged for authenticated identities;
+"guests stay memory-only" now reads "unauthenticated callers create
+nothing" (fail-closed, zero fetches, zero rows — pinned by test).
