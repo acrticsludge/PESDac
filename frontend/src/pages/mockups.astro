@@ -30,6 +30,504 @@ import ThreadLoaderMockups from "../components/chat/ThreadLoaderMockups";
         <a href="/new" style="color: #a3a3a3; text-decoration: none; font-size: 0.875rem;">← Back to /new</a>
       </div>
       <ThreadLoaderMockups client:load />
+      <div style="max-width: 720px; margin-inline: auto; width: 100%; display: flex; flex-direction: column; gap: 2rem; margin-top: 1rem;">
+        <div>
+          <h1 class="bd-h1">Composer backdrop mockups</h1>
+          <p class="bd-sub">Static mocks for the plain-grey zone behind the chat composer — layered white/grey SVG washes on the existing dark dock. Pick one and it gets wired into the real dock.</p>
+        </div>
+
+        <section>
+          <h2 class="bd-h2">Option A — Contour drift</h2>
+          <p class="bd-sub">Topographic contour lines + a soft glow, top-left. Studious, quiet; reads as "maps" without stealing focus.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <defs>
+                <radialGradient id="bdA-glow" cx="0.22" cy="0.18" r="0.55">
+                  <stop offset="0" stop-color="#ffffff" stop-opacity="0.12" />
+                  <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+                </radialGradient>
+              </defs>
+              <rect width="800" height="320" fill="url(#bdA-glow)" />
+              <g fill="none" stroke="#ffffff" stroke-width="1.5">
+                <path d="M-40,250 C120,210 180,260 320,225 S560,160 840,195" opacity="0.10" />
+                <path d="M-40,275 C130,235 200,285 340,250 S580,185 840,220" opacity="0.08" />
+                <path d="M-40,300 C140,260 220,310 360,275 S600,210 840,245" opacity="0.06" />
+                <path d="M-40,225 C110,185 170,235 310,200 S550,135 840,170" opacity="0.07" />
+                <path d="M-40,200 C100,160 160,210 300,175 S540,110 840,145" opacity="0.05" />
+                <path d="M560,320 C590,250 660,230 700,160 S760,60 840,40" opacity="0.06" />
+                <path d="M600,320 C625,260 685,245 720,180 S775,85 840,65" opacity="0.05" />
+              </g>
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option B — Aurora wash</h2>
+          <p class="bd-sub">Two blurred light bands settling behind the composer, like light spilling onto a desk. Warmest of the four.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <defs>
+                <filter id="bdB-blur" x="-60%" y="-60%" width="220%" height="220%">
+                  <feGaussianBlur stdDeviation="55" />
+                </filter>
+                <linearGradient id="bdB-fade" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#ffffff" stop-opacity="0.10" />
+                  <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+              <rect width="800" height="150" fill="url(#bdB-fade)" />
+              <g filter="url(#bdB-blur)">
+                <ellipse cx="250" cy="235" rx="220" ry="70" fill="#ffffff" opacity="0.13" />
+                <ellipse cx="580" cy="265" rx="260" ry="60" fill="#8f8f8f" opacity="0.16" />
+                <ellipse cx="430" cy="180" rx="150" ry="45" fill="#ffffff" opacity="0.06" />
+              </g>
+              <rect y="0" width="800" height="1.5" fill="#ffffff" opacity="0.10" />
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option C — Strata</h2>
+          <p class="bd-sub">Diagonal layered bands with hairline highlight edges. Most geometric — echoes packet layers / OSI stacks.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <g transform="rotate(-8 400 160)">
+                <rect x="-200" y="230" width="1200" height="130" fill="#ffffff" opacity="0.045" />
+                <rect x="-200" y="228.5" width="1200" height="1.5" fill="#ffffff" opacity="0.16" />
+                <rect x="-200" y="120" width="1200" height="70" fill="#ffffff" opacity="0.06" />
+                <rect x="-200" y="118.5" width="1200" height="1.5" fill="#ffffff" opacity="0.20" />
+                <rect x="-200" y="40" width="1200" height="34" fill="#ffffff" opacity="0.035" />
+                <rect x="-200" y="38.5" width="1200" height="1.5" fill="#ffffff" opacity="0.12" />
+                <rect x="-200" y="-60" width="1200" height="60" fill="#8f8f8f" opacity="0.05" />
+              </g>
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option D — Signal field</h2>
+          <p class="bd-sub">Fading dot grid with one sweeping signal curve. Nods to packets on a wire; busiest of the four, still monochrome.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <defs>
+                <pattern id="bdD-dots" width="18" height="18" patternUnits="userSpaceOnUse">
+                  <circle cx="2.5" cy="2.5" r="1.6" fill="#ffffff" />
+                </pattern>
+                <radialGradient id="bdD-mask" cx="0.5" cy="0.62" r="0.65">
+                  <stop offset="0" stop-color="#ffffff" stop-opacity="1" />
+                  <stop offset="1" stop-color="#000000" stop-opacity="1" />
+                </radialGradient>
+                <mask id="bdD-fade">
+                  <rect width="800" height="320" fill="url(#bdD-mask)" />
+                </mask>
+              </defs>
+              <rect width="800" height="320" fill="url(#bdD-dots)" opacity="0.13" mask="url(#bdD-fade)" />
+              <path d="M-40,270 C150,270 180,150 340,150 S520,240 680,190 S780,120 850,130" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.28" />
+              <path d="M-40,288 C160,288 200,175 350,175 S530,258 685,210 S785,145 850,155" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.10" />
+              <circle cx="680" cy="190" r="4" fill="#ffffff" opacity="0.5" />
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option E — Ridgelines</h2>
+          <p class="bd-sub">Stacked pulse lines, Joy-Division-style, fading toward the top. Signal-over-noise energy; flat where the composer sits.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <defs>
+                <path id="bdE-wave" d="M-20,0 C60,0 80,-6 120,-6 C150,-6 155,-36 185,-36 C215,-36 220,-6 250,-6 C300,-6 320,-24 360,-24 C400,-24 410,-4 450,-4 C520,-4 560,-14 620,-14 C680,-14 720,-2 820,-2" fill="none" stroke="#ffffff" stroke-width="1.5" />
+              </defs>
+              <g>
+                <use href="#bdE-wave" y="262" opacity="0.20" />
+                <use href="#bdE-wave" y="244" opacity="0.17" />
+                <use href="#bdE-wave" y="226" opacity="0.15" />
+                <use href="#bdE-wave" y="208" opacity="0.13" />
+                <use href="#bdE-wave" y="190" opacity="0.11" />
+                <use href="#bdE-wave" y="172" opacity="0.09" />
+                <use href="#bdE-wave" y="154" opacity="0.08" />
+                <use href="#bdE-wave" y="136" opacity="0.06" />
+                <use href="#bdE-wave" y="118" opacity="0.05" />
+                <use href="#bdE-wave" y="100" opacity="0.04" />
+                <use href="#bdE-wave" y="82" opacity="0.035" />
+                <use href="#bdE-wave" y="64" opacity="0.03" />
+              </g>
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option F — Iso cluster</h2>
+          <p class="bd-sub">Wireframe isometric cubes gathered in the corner, like stacked blocks of knowledge. Technical without being busy.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <defs>
+                <radialGradient id="bdF-glow" cx="0.82" cy="0.78" r="0.45">
+                  <stop offset="0" stop-color="#ffffff" stop-opacity="0.08" />
+                  <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+                </radialGradient>
+              </defs>
+              <rect width="800" height="320" fill="url(#bdF-glow)" />
+              <g fill="none" stroke="#ffffff" stroke-width="1.5">
+                <g opacity="0.18">
+                  <polygon points="640,143 702.4,179 702.4,251 640,287 577.6,251 577.6,179" />
+                  <path d="M640,215 L640,143 M640,215 L702.4,251 M640,215 L577.6,251" />
+                </g>
+                <g opacity="0.12">
+                  <polygon points="548,220 580.9,239 580.9,277 548,296 515.1,277 515.1,239" />
+                  <path d="M548,258 L548,220 M548,258 L580.9,277 M548,258 L515.1,277" />
+                </g>
+                <g opacity="0.10">
+                  <polygon points="724,236 746.5,249 746.5,275 724,288 701.5,275 701.5,249" />
+                  <path d="M724,262 L724,236 M724,262 L746.5,275 M724,262 L701.5,275" />
+                </g>
+                <g opacity="0.06">
+                  <polygon points="600,125 613,132.5 613,147.5 600,155 587,147.5 587,132.5" />
+                  <path d="M600,140 L600,125 M600,140 L613,147.5 M600,140 L587,147.5" />
+                </g>
+                <g opacity="0.05">
+                  <polygon points="470,120 483,127.5 483,142.5 470,150 457,142.5 457,127.5" />
+                  <path d="M470,135 L470,120 M470,135 L483,142.5 M470,135 L457,142.5" />
+                </g>
+              </g>
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option G — Flow lines</h2>
+          <p class="bd-sub">Smooth parallel currents converging right, flow-field style. Calm motion; pairs well with streaming answers.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <g fill="none" stroke="#ffffff" stroke-linecap="round">
+                <path d="M-20,60 C180,40 320,90 520,60 S720,40 830,55" stroke-width="1.5" opacity="0.05" />
+                <path d="M-20,95 C190,75 330,125 530,95 S725,72 830,90" stroke-width="1.5" opacity="0.07" />
+                <path d="M-20,130 C200,110 340,160 540,130 S730,105 830,125" stroke-width="2" opacity="0.09" />
+                <path d="M-20,165 C210,145 350,195 550,165 S735,138 830,160" stroke-width="2" opacity="0.12" />
+                <path d="M-20,200 C220,180 360,230 560,200 S740,172 830,195" stroke-width="2" opacity="0.14" />
+                <path d="M-20,235 C230,215 370,265 570,235 S745,205 830,230" stroke-width="1.5" opacity="0.10" />
+                <path d="M-20,270 C240,250 380,300 580,270 S750,238 830,265" stroke-width="1.5" opacity="0.07" />
+                <path d="M-20,305 C250,285 390,330 590,305 S755,272 830,300" stroke-width="1.5" opacity="0.05" />
+              </g>
+              <g fill="#ffffff">
+                <circle cx="350" cy="158" r="3" opacity="0.35" />
+                <circle cx="560" cy="200" r="2.5" opacity="0.28" />
+                <circle cx="210" cy="222" r="2" opacity="0.22" />
+              </g>
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option H — Orbit rings</h2>
+          <p class="bd-sub">Broken concentric rings with tick marks, tucked bottom-right. Orbital / atomic vibe; leaves the reading area clean.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <g fill="none" stroke="#ffffff">
+                <circle cx="700" cy="340" r="60" stroke-width="1.5" opacity="0.20" />
+                <circle cx="700" cy="340" r="100" stroke-width="1.5" opacity="0.14" stroke-dasharray="40 14 8 14" />
+                <circle cx="700" cy="340" r="140" stroke-width="1.5" opacity="0.10" />
+                <circle cx="700" cy="340" r="180" stroke-width="1.5" opacity="0.07" />
+                <circle cx="700" cy="340" r="220" stroke-width="1.5" opacity="0.05" />
+                <g stroke-width="2" opacity="0.25">
+                  <path d="M700,148 L700,160" />
+                  <path d="M508,340 L520,340" />
+                  <path d="M564,204 L572,212" />
+                </g>
+              </g>
+              <circle cx="700" cy="340" r="4" fill="#ffffff" opacity="0.5" />
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option I — Study hall</h2>
+          <p class="bd-sub">Ridgelines up top, and a study group gathered around the composer itself: iso table, stools, books, lamp and coffee. The dock becomes the desk.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <defs>
+                <path id="bdI-wave" d="M-20,0 C60,0 80,-6 120,-6 C150,-6 155,-36 185,-36 C215,-36 220,-6 250,-6 C300,-6 320,-24 360,-24 C400,-24 410,-4 450,-4 C520,-4 560,-14 620,-14 C680,-14 720,-2 820,-2" fill="none" stroke="#ffffff" stroke-width="1.5" />
+                <radialGradient id="bdI-lampglow" cx="0.5" cy="0.5" r="0.5">
+                  <stop offset="0" stop-color="#ffffff" stop-opacity="0.35" />
+                  <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+                </radialGradient>
+                <g id="bdI-book">
+                  <polygon points="0,0 86.6,50 31.2,82 -55.4,32" fill="#ffffff" opacity="0.07" />
+                  <polygon points="-55.4,32 31.2,82 31.2,100 -55.4,50" fill="#ffffff" opacity="0.04" />
+                  <polygon points="31.2,82 86.6,50 86.6,68 31.2,100" fill="#ffffff" opacity="0.10" />
+                  <g stroke="#ffffff" stroke-width="1.5" opacity="0.28" fill="none">
+                    <path d="M-55.4,32 L-55.4,50 L31.2,100 L86.6,68 L86.6,50 M31.2,82 L31.2,100" />
+                  </g>
+                  <g stroke="#ffffff" stroke-width="1" opacity="0.22">
+                    <path d="M-55.4,38 L31.2,88" />
+                    <path d="M-55.4,43 L31.2,93" />
+                  </g>
+                </g>
+              </defs>
+              <g>
+                <use href="#bdI-wave" y="258" opacity="0.14" />
+                <use href="#bdI-wave" y="240" opacity="0.12" />
+                <use href="#bdI-wave" y="222" opacity="0.10" />
+                <use href="#bdI-wave" y="204" opacity="0.08" />
+                <use href="#bdI-wave" y="186" opacity="0.06" />
+                <use href="#bdI-wave" y="168" opacity="0.05" />
+                <use href="#bdI-wave" y="150" opacity="0.04" />
+                <use href="#bdI-wave" y="132" opacity="0.03" />
+              </g>
+              <g fill="none" stroke="#ffffff" stroke-width="1.5">
+                <g opacity="0.07">
+                  <polygon points="600,48 610.4,54 610.4,66 600,72 589.6,66 589.6,54" />
+                  <path d="M600,60 L600,48 M600,60 L610.4,66 M600,60 L589.6,66" />
+                </g>
+                <g opacity="0.05">
+                  <polygon points="700,36 707.8,40.5 707.8,49.5 700,54 692.2,49.5 692.2,40.5" />
+                  <path d="M700,45 L700,36 M700,45 L707.8,49.5 M700,45 L692.2,49.5" />
+                </g>
+              </g>
+              <g>
+                <use href="#bdI-book" transform="translate(400,203)" />
+                <use href="#bdI-book" transform="translate(404,185) scale(0.92)" />
+                <use href="#bdI-book" transform="translate(402,170) scale(0.8) rotate(-5)" />
+              </g>
+              <g>
+                <polygon points="520,115 684.5,210 589.2,265 424.7,170" fill="#ffffff" opacity="0.05" />
+                <polygon points="424.7,170 589.2,265 589.2,275 424.7,180" fill="#ffffff" opacity="0.04" />
+                <g stroke="#ffffff" stroke-width="1.5" opacity="0.22" fill="none">
+                  <polygon points="520,115 684.5,210 589.2,265 424.7,170" />
+                  <path d="M520,115 L520,173 M684.5,210 L684.5,268 M589.2,265 L589.2,323 M424.7,170 L424.7,228" />
+                </g>
+                <g fill="none" stroke="#ffffff" stroke-width="1.5">
+                  <g opacity="0.14">
+                    <polygon points="478,217 495.3,227 495.3,257 478,267 460.7,257 460.7,227" />
+                    <path d="M478,237 L478,217 M478,237 L495.3,257 M478,237 L460.7,257" />
+                  </g>
+                  <g opacity="0.12">
+                    <polygon points="700,226 714.7,234.5 714.7,260.5 700,269 685.3,260.5 685.3,234.5" />
+                    <path d="M700,243 L700,226 M700,243 L714.7,260.5 M700,243 L685.3,260.5" />
+                  </g>
+                </g>
+                <g stroke="#ffffff" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.32">
+                  <circle cx="482" cy="161" r="10" fill="#ffffff" opacity="0.10" />
+                  <path d="M470,175 L474,209 L492,209 L494,175" opacity="0.55" />
+                  <path d="M490,181 L512,197" />
+                  <path d="M476,209 L472,227 M490,209 L496,225" opacity="0.7" />
+                </g>
+                <g stroke="#ffffff" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.32">
+                  <circle cx="696" cy="157" r="10" fill="#ffffff" opacity="0.10" />
+                  <path d="M684,171 L688,205 L706,205 L708,171" opacity="0.55" />
+                  <path d="M688,177 L666,193" />
+                  <path d="M690,205 L686,223 M704,205 L710,221" opacity="0.7" />
+                </g>
+                <g stroke="#ffffff" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.30">
+                  <circle cx="758" cy="93" r="9" fill="#ffffff" opacity="0.10" />
+                  <path d="M747,107 L750,161 L766,161 L768,107" opacity="0.55" />
+                  <path d="M752,161 L748,203 M764,161 L768,203" opacity="0.7" />
+                  <path d="M750,115 L748,131 M766,115 L762,131" />
+                </g>
+                <path d="M742,129 L752,134 L762,129 L762,135 L752,140 L742,135 Z" fill="#ffffff" opacity="0.12" stroke="#ffffff" stroke-width="1" />
+                <g stroke="#ffffff" fill="none">
+                  <path d="M560,175 L574,182 L588,175 L588,181 L574,188 L560,181 Z" opacity="0.10" fill="#ffffff" stroke-width="1" />
+                  <path d="M610,200 L624,207 L638,200 L638,206 L624,213 L610,206 Z" opacity="0.10" fill="#ffffff" stroke-width="1" />
+                </g>
+                <circle cx="648" cy="115" r="16" fill="url(#bdI-lampglow)" />
+                <g stroke="#ffffff" stroke-width="1.5" opacity="0.30" fill="none">
+                  <path d="M648,161 L648,123" />
+                  <polygon points="634,123 662,123 656,109 640,109" fill="#ffffff" opacity="0.12" />
+                </g>
+                <circle cx="648" cy="121" r="2.5" fill="#ffffff" opacity="0.6" stroke="none" />
+                <g stroke="#ffffff" stroke-width="1.5" opacity="0.28" fill="none">
+                  <polygon points="538,197 552,197 550,185 540,185" fill="#ffffff" opacity="0.08" />
+                  <path d="M552,188 c6,-1 6,7 0,7" />
+                  <path d="M544,179 c-2,-4 2,-6 0,-10 M549,179 c-2,-4 2,-6 0,-10" stroke-width="1" />
+                </g>
+              </g>
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 class="bd-h2">Option J — Library wall</h2>
+          <p class="bd-sub">A wall of book spines rising behind the dock, title bands and ribbon markers included. Maximum "study" signal, still monochrome.</p>
+          <div class="bd-scene">
+            <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <g fill="none" stroke="#ffffff" stroke-width="1.5">
+                <path d="M-20,60 C200,50 350,80 550,60 S750,45 830,60" opacity="0.06" />
+                <path d="M-20,95 C210,85 360,115 560,95 S755,80 830,95" opacity="0.045" />
+                <path d="M-20,130 C220,120 370,150 570,130 S760,115 830,130" opacity="0.03" />
+              </g>
+              <g fill="none" stroke="#ffffff" stroke-width="1.5">
+                <g opacity="0.08">
+                  <polygon points="120,44 133.9,52 133.9,68 120,76 106.1,68 106.1,52" />
+                  <path d="M120,60 L120,44 M120,60 L133.9,68 M120,60 L106.1,68" />
+                </g>
+                <g opacity="0.06">
+                  <polygon points="200,100 208.7,105 208.7,115 200,120 191.3,115 191.3,105" />
+                  <path d="M200,110 L200,100 M200,110 L208.7,115 M200,110 L191.3,115" />
+                </g>
+              </g>
+              <g stroke="#ffffff" stroke-width="1">
+                <rect x="40" y="140" width="24" height="200" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="64" y="160" width="18" height="180" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="82" y="125" width="28" height="215" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="110" y="150" width="20" height="190" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="130" y="135" width="24" height="205" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="154" y="165" width="16" height="175" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="170" y="130" width="26" height="210" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="196" y="155" width="22" height="185" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="218" y="120" width="28" height="220" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="246" y="162" width="18" height="178" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="264" y="142" width="24" height="198" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="288" y="132" width="20" height="208" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="308" y="158" width="26" height="182" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="334" y="128" width="22" height="212" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="356" y="152" width="18" height="188" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="374" y="138" width="28" height="202" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="402" y="168" width="24" height="172" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="426" y="140" width="20" height="200" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="446" y="148" width="26" height="192" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="472" y="122" width="22" height="218" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="494" y="156" width="18" height="184" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="512" y="144" width="24" height="196" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="536" y="136" width="26" height="204" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="562" y="162" width="20" height="178" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="582" y="146" width="28" height="194" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="610" y="128" width="24" height="212" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="634" y="158" width="18" height="182" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="652" y="142" width="22" height="198" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="674" y="128" width="28" height="212" rx="3" fill="#ffffff" opacity="0.08" />
+                <rect x="702" y="152" width="24" height="188" rx="3" fill="#ffffff" opacity="0.11" />
+                <rect x="726" y="136" width="20" height="204" rx="3" fill="#ffffff" opacity="0.05" />
+                <rect x="746" y="158" width="54" height="182" rx="3" fill="#ffffff" opacity="0.08" />
+              </g>
+              <g stroke="#ffffff" stroke-width="1.5" opacity="0.25">
+                <path d="M69,172 L77,172 M69,180 L77,180" />
+                <path d="M137,147 L149,147 M137,155 L149,155" />
+                <path d="M201,167 L213,167 M201,175 L213,175" />
+                <path d="M269,154 L283,154 M269,162 L283,162" />
+                <path d="M339,140 L351,140 M339,148 L351,148" />
+                <path d="M407,180 L421,180 M407,188 L421,188" />
+                <path d="M477,134 L489,134 M477,142 L489,142" />
+                <path d="M543,148 L557,148 M543,156 L557,156" />
+                <path d="M615,140 L629,140 M615,148 L629,148" />
+                <path d="M679,140 L697,140 M679,148 L697,148" />
+                <path d="M753,170 L793,170 M753,178 L793,178" />
+              </g>
+              <g fill="#ffffff" opacity="0.18">
+                <rect x="137" y="135" width="7" height="20" />
+                <rect x="543" y="136" width="7" height="20" />
+              </g>
+            </svg>
+            <div class="bd-thread">
+              <div class="bd-user">Walk me through it step by step</div>
+              <div class="bd-ai"><strong>Full walkthrough.</strong> Work it end to end, one step at a time, checking each step against those definitions.</div>
+            </div>
+            <div class="bd-composer">
+              <div class="bd-tools"><span>⌕</span><span>⎘</span><span>@</span><span>⋯</span></div>
+              <div class="bd-input">Ask anything about CN…</div>
+              <div class="bd-foot"><span class="bd-auto">Auto ▾</span><span class="bd-right"><span class="bd-mic">🎙</span><span class="bd-send">↑</span></span></div>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
+    <style>
+      .bd-h1 { font-size: 1.75rem; font-weight: 700; margin: 0 0 0.25rem; color: #fafafa; }
+      .bd-h2 { font-size: 1.1rem; font-weight: 700; margin: 0 0 0.25rem; color: #fafafa; }
+      .bd-sub { font-size: 0.875rem; color: #a3a3a3; margin: 0 0 0.75rem; line-height: 1.5; }
+      .bd-scene { position: relative; overflow: hidden; border-radius: 16px; border: 1px solid rgba(255,255,255,0.09); background: #242424; min-height: 340px; display: flex; flex-direction: column; justify-content: flex-end; padding: 1.25rem; gap: 0.9rem; }
+      .bd-scene > svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+      .bd-thread { position: relative; display: flex; flex-direction: column; gap: 0.9rem; }
+      .bd-user { align-self: flex-end; max-width: 75%; background: #3d3d3d; color: #fafafa; font-size: 0.875rem; padding: 0.55rem 0.9rem; border-radius: 18px; line-height: 1.45; }
+      .bd-ai { align-self: flex-start; max-width: 85%; color: #e8e8e8; font-size: 0.875rem; line-height: 1.6; }
+      .bd-ai strong { color: #fafafa; }
+      .bd-composer { position: relative; background: #2b2b2b; border: 1px solid rgba(255,255,255,0.10); border-radius: 18px; padding: 0.7rem 0.9rem 0.65rem; box-shadow: 0 8px 28px rgba(0,0,0,0.45); }
+      .bd-tools { display: flex; gap: 0.85rem; color: #b5b5b5; font-size: 0.85rem; margin-bottom: 0.55rem; }
+      .bd-input { color: #8f8f8f; font-size: 0.9rem; margin-bottom: 0.6rem; }
+      .bd-foot { display: flex; align-items: center; justify-content: space-between; }
+      .bd-auto { color: #e8e8e8; font-size: 0.85rem; font-weight: 600; }
+      .bd-right { display: flex; align-items: center; gap: 0.7rem; }
+      .bd-mic { color: #b5b5b5; font-size: 0.95rem; }
+      .bd-send { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 999px; background: #525252; color: #fafafa; font-size: 1rem; line-height: 1; }
+    </style>
   </body>
 </html>
