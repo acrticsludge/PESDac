@@ -1539,6 +1539,14 @@ Use the existing:
 
 as the canonical design reference when applicable.
 
+For error, warning, and success-confirmation display, the canonical
+reference is:
+
+`docs/design/error-ui.md`
+
+All user-facing failure display must use Astryx components through that
+document's mapping (E1–E8). Do not invent a new error surface.
+
 For user-facing implementation, keep design intent here and implementation
 details in the relevant feature/spec documentation.
 
