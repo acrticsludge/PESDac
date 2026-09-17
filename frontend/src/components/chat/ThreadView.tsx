@@ -70,6 +70,8 @@ import {
 
 import { ThreadHistoryLoader } from "./ThreadHistoryLoader";
 
+import { useToast } from "@astryxdesign/core/Toast";
+
 import type {
   Artifact,
   AssistantBlock,
@@ -99,6 +101,8 @@ import {
   useStorageHealth,
   useCorruptKeys,
   getProfile,
+  getComposerDepth,
+  setComposerDepth,
   getOverlay,
   setOverlay,
   appendBlocks,
@@ -818,6 +822,10 @@ export default function ThreadView({
   // voice; the toggle overrides per thread for the session. Seed
   // thread.mode now describes authored content only.
   const [composerMode, setComposerMode] = useState<ResponseMode>(() => {
+    // B13: a previously persisted toggle choice wins over the profile
+    // default — reload keeps the last choice instead of resetting.
+    const saved = getComposerDepth();
+    if (saved != null) return saved;
     const depth = getProfile().depth;
     return depth === "ask" || depth === "deep" || depth === "auto"
       ? depth
@@ -837,12 +845,26 @@ export default function ThreadView({
   const composerInputRef = useRef<ChatComposerInputHandle>(null);
   const dictation = useChatDictation({
     inputRef: composerInputRef,
+    // B18: the vendor surfaces recognition errors here — denial gets a
+    // signal instead of the old honest-but-silent no-op.
+    onError: (error) => {
+      const denied =
+        error.error === "not-allowed" || error.error === "service-not-allowed";
+      notify?.(
+        denied
+          ? "Microphone is blocked — allow access in your browser to use dictation."
+          : "Dictation failed — try again.",
+      );
+    },
   });
   // Staged uploads (metadata persists with the sent message; File handles
   // and preview URLs stay in memory until send/remove).
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
   // Copy-transcript menu feedback.
   const [transcriptCopied, setTranscriptCopied] = useState(false);
+  // B15: info toast confirms the copy (the menu closes on select, so
+  // the inline flip alone is invisible).
+  const toast = useToast();
 
   // Session overlay: blocks appended this session (persisted per code).
   // Read directly (see Pesdac.tsx note) so sent messages and renames show
@@ -1169,7 +1191,11 @@ export default function ThreadView({
   // user message; retry/regenerate re-enter here directly (no duplicate).
   const startTurn = (text: string, opts?: { forceOk?: boolean }) => {
     if (live) return;
-    const plan = planResponse(text, thread.subject, composerMode);
+    // B10: forced retries (rate-pill, error-bubble) plan the real answer
+    // for contentless simulations instead of replaying the empty outcome.
+    const plan = planResponse(text, thread.subject, composerMode, {
+      ignoreSimulation: opts?.forceOk,
+    });
     if (plan.error === "rate-limited" && !opts?.forceOk) {
       setSendError({
         text,
@@ -1454,6 +1480,9 @@ export default function ThreadView({
     void copyText(buildTranscript(thread, blocks)).then((ok) => {
       if (!ok) return;
       setTranscriptCopied(true);
+      // B15: the menu closes on select so the inline flip is invisible —
+      // an info toast is the actual confirmation.
+      toast({ body: "Transcript copied to clipboard.", type: "info" });
       later(1500, () => setTranscriptCopied(false));
     });
   };
@@ -2118,15 +2147,28 @@ export default function ThreadView({
                           items={[
                             {
                               label: "Ask",
-                              onClick: () => setComposerMode("ask"),
+                              // B13: the toggle persists the global default —
+                              // reload restores the last choice instead of
+                              // resetting to Auto. Per-thread override still
+                              // lives for the session in composerMode.
+                              onClick: () => {
+                                setComposerMode("ask");
+                                setComposerDepth("ask");
+                              },
                             },
                             {
                               label: "Auto",
-                              onClick: () => setComposerMode("auto"),
+                              onClick: () => {
+                                setComposerMode("auto");
+                                setComposerDepth("auto");
+                              },
                             },
                             {
                               label: "Deep Study",
-                              onClick: () => setComposerMode("deep"),
+                              onClick: () => {
+                                setComposerMode("deep");
+                                setComposerDepth("deep");
+                              },
                             },
                           ]}
                         />

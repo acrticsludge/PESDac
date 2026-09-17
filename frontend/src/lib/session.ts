@@ -85,13 +85,24 @@ export function subscribeSession(fn: () => void): () => void {
 // returns with the backend adapter.
 
 // Purge pre-migration keys once per page load, client only. Afterwards
-// the live store is memory and nothing reads browser storage again.
+// the live store is memory and nothing reads browser storage again —
+// EXCEPT the cells in PERSISTED_KEYS, which are intentionally
+// browser-persisted (feedback votes, composer depth) and survive reload.
+const PERSISTED_KEYS: ReadonlySet<string> = new Set([
+  "pesdac-feedback-v1",
+  "pesdac-composer-depth-v1",
+]);
 if (typeof window !== "undefined") {
   try {
     const doomed: string[] = [];
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
-      if (key != null && key.startsWith("pesdac-")) doomed.push(key);
+      if (
+        key != null &&
+        key.startsWith("pesdac-") &&
+        !PERSISTED_KEYS.has(key)
+      )
+        doomed.push(key);
     }
     for (const key of doomed) window.localStorage.removeItem(key);
   } catch {
@@ -534,16 +545,84 @@ export function feedbackKey(sessionKey: string, blockIndex: number): string {
   return `${sessionKey}:${blockIndex}`;
 }
 
+// B16: votes must survive reload, but the session store above is
+// memory-backed by design (no quota/private-mode failure). Feedback
+// therefore owns a tiny guarded localStorage cell: a corrupt or
+// unavailable cell degrades to "no vote", never a crash, and the
+// in-memory mirror keeps voting alive for the session regardless.
+const feedbackMem: Record<string, FeedbackVote> = {};
+
+function readLocalFeedback(): Record<string, FeedbackVote> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(FEEDBACK_KEY);
+    if (raw == null) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return {};
+    const out: Record<string, FeedbackVote> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (v === "up" || v === "down") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export function getFeedback(voteKey: string): FeedbackVote | null {
-  return readJSON<Record<string, FeedbackVote>>(FEEDBACK_KEY, {})[voteKey] ?? null;
+  return feedbackMem[voteKey] ?? readLocalFeedback()[voteKey] ?? null;
 }
 
 export function setFeedback(voteKey: string, vote: FeedbackVote | null) {
-  const all = readJSON<Record<string, FeedbackVote>>(FEEDBACK_KEY, {});
-  if (vote == null) delete all[voteKey];
-  else all[voteKey] = vote;
-  writeJSON(FEEDBACK_KEY, all);
+  if (vote == null) delete feedbackMem[voteKey];
+  else feedbackMem[voteKey] = vote;
+  if (typeof window !== "undefined") {
+    try {
+      const all = readLocalFeedback();
+      if (vote == null) delete all[voteKey];
+      else all[voteKey] = vote;
+      window.localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
+    } catch {
+      // Private mode / quota: the in-memory mirror above keeps this
+      // session's votes working; they just won't survive reload.
+    }
+  }
   emit();
+}
+
+// Composer depth default (B13): the thread toggle persists the GLOBAL
+// choice here — not in the memory-backed profile (mem dies on reload,
+// and the purge above only exempts the cells in PERSISTED_KEYS). The
+// toggle still overrides per thread for the session in component state.
+const DEPTH_KEY = "pesdac-composer-depth-v1";
+
+export type ComposerDepth = "ask" | "auto" | "deep";
+
+function isComposerDepth(value: unknown): value is ComposerDepth {
+  return value === "ask" || value === "auto" || value === "deep";
+}
+
+/** Last depth chosen in the thread toggle, or null when never chosen. */
+export function getComposerDepth(): ComposerDepth | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(DEPTH_KEY);
+    if (raw == null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isComposerDepth(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the thread toggle choice (best-effort: private mode stays session-only). */
+export function setComposerDepth(depth: ComposerDepth): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(DEPTH_KEY, JSON.stringify(depth));
+  } catch {
+    // Private mode / quota: the choice lives for this session only.
+  }
 }
 
 // Unsent composer drafts (thread sessionKey, welcome uses "welcome").

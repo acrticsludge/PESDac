@@ -1332,6 +1332,17 @@ const LOGOUT_TIMEOUT_MS = 15000;
 
   const dictation = useChatDictation({
     inputRef: composerInputRef,
+    // B18: the vendor surfaces recognition errors here — denial gets a
+    // signal instead of the old honest-but-silent no-op.
+    onError: (error) => {
+      const denied =
+        error.error === "not-allowed" || error.error === "service-not-allowed";
+      notifyChat(
+        denied
+          ? "Microphone is blocked — allow access in your browser to use dictation."
+          : "Dictation failed — try again.",
+      );
+    },
   });
 
   const activeMode =

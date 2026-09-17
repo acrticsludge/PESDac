@@ -219,12 +219,12 @@ Tip: `simulate error|empty|limit|tool error` (responder.ts triggers)
 force C4–C7 UI with zero mocking — prefer triggers, mock only the
 network half.
 
-### ~~C1 — Welcome send happy path `[staging]`~~ ✅ `section-b` C1
+### ~~C1 — Welcome send happy path `[staging]`~~ ✅ `section-b` C1 (B17 resolved: welcome creates carry subject+title; clientAdoptKey is adopt-path-only, appends carry clientMsgKey)
 
 1. On `/new`, pick subject chip (e.g. OS). 2. Type "explain paging".
 2. Send. 4. `waitForResponse POST /api/v1/chats` + `POST */messages`.
    Expect: navigates to `/subject/os/<code>`, message + answer stream
-   in, request bodies carry `subject`, `clientAdoptKey`, `clientMsgKey`.
+   in, create body carries `subject` (+title), appends carry `clientMsgKey`.
 
 ### ~~C2 — Guest welcome send blocked `[staging]`~~ ✅ `section-b` C2
 
@@ -239,32 +239,35 @@ unconfigured). 1. Send.
 Expect: key warning, nothing posted. Anti-regression for free-tier
 abuse and confused billing.
 
-### ~~C4 — `simulate error` → inline Retry `[staging]`~~ ✅ `section-b` C4 (pins actual: retry appends, failed turn stays)
+### ~~C4 — `simulate error` → inline Retry `[staging]`~~ ✅ `section-b` C4 (B9 resolved: retry appends below, failed turn stays — visible failure history)
 
 1. Send "simulate error". 2. Error bubble appears → click Retry.
-   Expect: rerun succeeds, exactly one user bubble, error bubble
-   replaced (not appended).
+   Expect: rerun succeeds, exactly one user bubble, fresh answer
+   appends below the failed turn (failed history stays, not replaced).
 
-### ~~C5 — `simulate empty` `[staging]`~~ ✅ `section-b` C5 (pins actual: retry replays empty)
+### ~~C5 — `simulate empty` `[staging]`~~ ✅ `section-b` C5 (B10 fixed: forceOk retry plans the real answer — escapes with a normal stream, no second empty)
 
-Expect: "PESDac returned an empty response." + Retry; retry sends.
+Expect: "PESDac returned an empty response." + Retry; retry streams the
+real answer below the empty block (failed history stays, not replaced).
 
-### ~~C6 — `simulate limit` `[staging]`~~ ✅ `section-b` C6 (pins actual: forceOk retry lands empty)
+### ~~C6 — `simulate limit` `[staging]`~~ ✅ `section-b` C6 (B10 fixed: forceOk retry streams a real answer — pill clears, normal turn)
 
-Expect: rate-limit pill; `forceOk` retry path works.
+Expect: rate-limit pill; `forceOk` retry clears the pill and streams a
+normal answer (exactly one user bubble, no empty block).
 
 ### ~~C7 — `simulate tool error` `[staging]`~~ ✅ `section-b` C7
 
 Expect: tool-call failure rendered honestly (no fake answer
 covering it), retry offered.
 
-### ~~C8 — Stop mid-stream `[staging]`~~ ✅ `section-b` C8 (pins actual: no "interrupted" marker)
+### ~~C8 — Stop mid-stream `[staging]`~~ ✅ `section-b` C8 (fixed B11: interrupted marker + Retry, persists across reload)
 
 1. Send a long prompt ("teach me TCP in detail"). 2. Click Stop
    ~1s in.
    Expect: stream halts, partial text persists with "interrupted"
-   state, Stop hides, no ghost continuation after 5s, reload keeps
-   partial (outbox-backed).
+   state ("This response was interrupted before it finished." + Retry),
+   Stop hides, no ghost continuation after 5s, reload keeps
+   partial with its marker (outbox-backed).
 
 ### ~~C9 — Edit + Esc `[staging]`~~ ✅ `section-b` C9
 
@@ -285,11 +288,11 @@ covering it), retry offered.
    clicks).
    Expect: exactly ONE `POST */messages` (idempotency-key dedupe).
 
-### ~~C12 — Reload mid-stream `[staging]`~~ ✅ `section-b` C12 (pins actual: Q only, no A resume)
+### ~~C12 — Reload mid-stream `[staging]`~~ ✅ `section-b` C12 (B12 noted: Q only, no A resume — in-flight turns persist at finalize; resume needs backend SSE)
 
 1. Send long prompt, reload at ~1s. 2. Reopen thread.
-   Expect: outbox replays, server dedupes via `clientMsgKey`, exactly
-   one copy of Q and A renders.
+   Expect: exactly one copy of Q renders, no A resumed, no duplication
+   (outbox replays settled records only; `clientMsgKey` dedupes).
 
 ### ~~C13 — 20-turn conversation `[staging]`~~ ✅ `section-b` C13 (structural half; semantic context unprovable with stateless responder)
 
@@ -303,12 +306,12 @@ covering it), retry offered.
    Expect: pill text sends as the next user message (profile-global
    visibility rule per `setting-followups.test.ts`).
 
-### ~~C15 — Mode menu switch `[staging]`~~ ✅ `section-b` C15 (pins actual: per-mount session state)
+### ~~C15 — Mode menu switch `[staging]`~~ ✅ `section-b` C15 (B13 fixed: toggle persists the global profile default — reload keeps the choice)
 
 1. Composer footer: Auto → Math. 2. Send. 3. Reload thread.
-   Expect: mode used for that turn; per-chat persistence per
-   `settings-scope` (document actual: global vs per-chat — test pins
-   whichever is true).
+   Expect: mode used for that turn; the toggle writes the profile
+   default too, so reload keeps Deep Study (per-thread override still
+   lives for the session).
 
 ### ~~C16 — `@` reference menu `[staging]`~~ ✅ `section-b` C16
 
@@ -316,28 +319,31 @@ covering it), retry offered.
    Expect: keyboard-operable, Esc restores caret, selection inserts
    reference chip.
 
-### ~~C17 — Dictation denied `[staging]`~~ ✅ `section-b` C17 (pins actual: honest no-op, no denial branch in repo)
+### ~~C17 — Dictation denied `[staging]`~~ ✅ `section-b` C17 (B18 fixed: vendor onError surfaces a denial toast — thread + welcome)
 
 1. Route/permissions: deny microphone. 2. Click dictation button.
-   Expect: honest denial message, composer unaffected, no exception.
+   Expect: denial toast ("Microphone is blocked…" or the generic
+   failure copy), composer unaffected, no exception.
 
-### ~~C18 — Thread Find `[staging]`~~ ✅ `section-b` C18 (pins actual: Esc drops focus)
+### ~~C18 — Thread Find `[staging]`~~ ✅ `section-b` C18 (fixed B14: Esc returns focus to composer)
 
 1. `Ctrl+F` (or Find btn) → type a word present → Enter through
    `n of m`. 2. Type gibberish → `No matches`. 3. Esc.
    Expect: counts correct, Esc closes and returns focus to composer.
 
-### ~~C19 — Copy transcript `[staging]`~~ ✅ `section-b` C19 (pins actual: inline "Copied!", no toast)
+### ~~C19 — Copy transcript `[staging]`~~ ✅ `section-b` C19 (B15 fixed: inline "Copied!" flip PLUS info toast — the menu closes on select so the flip alone is invisible)
 
 1. `…` menu → Copy transcript.
    Expect: clipboard holds full Q/A text (grant permissions in
-   context), toast confirms.
+   context), info toast confirms ("Transcript copied to clipboard."),
+   menu item confirms inline ("Copied!" flip, observable on reopen).
 
-### ~~C20 — Message feedback buttons `[staging]`~~ ✅ `section-b` C20 (pins actual: memory-only, reload clears)
+### ~~C20 — Message feedback buttons `[staging]`~~ ✅ `section-b` C20 (B16 fixed: votes persist in localStorage — reload keeps; backend will POST /turns/{id}/feedback)
 
 1. Click 👍/👎 on an assistant message (if rendered).
-   Expect: persisted (`pesdac-feedback-v1`), survives reload, no
-   network error for guests.
+   Expect: votes apply locally with zero fetches (`pesdac-feedback-v1`
+   localStorage map); reload keeps the active vote; toggle clears;
+   no network error for guests.
 
 ### ~~C21 — Onboarding save flows `[staging]`~~ ✅ `section-b` C21 (short-code values; alertdialog role)
 

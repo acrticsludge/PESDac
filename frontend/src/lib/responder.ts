@@ -25,6 +25,7 @@ export function planResponse(
   question: string,
   subject: string,
   mode: ResponseMode = "auto",
+  opts?: { ignoreSimulation?: boolean },
 ): PlannedTurn {
   // @ mentions scope retrieval: "@textbook ..." searches the textbook
   // first. Tokens are stripped so they never leak into echoes/titles.
@@ -36,11 +37,17 @@ export function planResponse(
   const primary =
     refs.length > 0 ? sourceTarget(refs[0], subject) : `${subject} course slides`;
 
-  if (/\bsimulate (a )?limit\b/i.test(question)) {
+  // B10: contentless simulations (limit/empty) carry no answer payload,
+  // so a forced retry replays the same outcome forever. Callers pass
+  // ignoreSimulation on retry to plan the REAL answer instead — the
+  // retry escapes instead of looping. Payload-bearing branches
+  // (stream-failed, tool error) are unaffected: forceOk already streams
+  // their full answer.
+  if (!opts?.ignoreSimulation && /\bsimulate (a )?limit\b/i.test(question)) {
     return { toolCalls: [], answer: "", followUps: [], error: "rate-limited" };
   }
 
-  if (/\bsimulate (an )?empty\b/i.test(question)) {
+  if (!opts?.ignoreSimulation && /\bsimulate (an )?empty\b/i.test(question)) {
     return {
       toolCalls: [
         {
