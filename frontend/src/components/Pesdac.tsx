@@ -1751,6 +1751,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
   }, []);
 
   // Files from picker, drop, or paste all land in the drawer.
+  // (No upload caps at mockup stage — limits arrive with real uploads.)
   const stageIntoDrawer = (files: File[]) => {
     if (files.length === 0) return;
     setAttachments((prev) => [...prev, ...stageFiles(files)]);
@@ -2152,9 +2153,21 @@ const LOGOUT_TIMEOUT_MS = 15000;
                        restore on ready. */}
                    {!isUserReady ? (
                      <ComposerSkeleton aria-busy="true" aria-label="Loading composer" />
-                   ) : (
-                     <ChatComposer
-                      value={welcomeText}
+                    ) : (
+                      <div
+                        style={{ display: "contents" }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const files = Array.from(e.dataTransfer?.files ?? []);
+                          if (files.length > 0) stageIntoDrawer(files);
+                        }}
+                      >
+                      {/* B20: vendor ChatComposerInput wires onPaste only —
+                      this layout-neutral wrapper (display:contents) adds
+                      the missing OS-drop path without touching layout. */}
+                      <ChatComposer
+                       value={welcomeText}
                       onChange={setWelcomeText}
                       onSubmit={handleWelcomeSend}
                       statusPosition={welcomeSyncError != null || showKeyDot ? "top" : undefined}
@@ -2178,13 +2191,25 @@ const LOGOUT_TIMEOUT_MS = 15000;
                                message:
                                  "History isn't saving in this browser — new chats will be lost on reload.",
                              }
-                           : corruptKeys.length > 0
-                             ? {
-                                 type: "warning",
-                                 message:
-                                   "Saved data looked damaged, so chats may be incomplete — new messages still save normally.",
-                               }
-                             : undefined
+                            : corruptKeys.length > 0
+                              ? {
+                                  type: "warning",
+                                  message:
+                                    "Saved data looked damaged, so chats may be incomplete — new messages still save normally.",
+                                }
+                              : // B21: attachment-only can't send (the vendor
+                                // composer trim-gates empty submits before our
+                                // onSubmit ever fires) — say so instead of
+                                // no-op silence. Lowest priority: any real
+                                // error/status wins over this hint.
+                                attachments.length > 0 &&
+                                welcomeText.trim() === ""
+                              ? {
+                                  type: "warning",
+                                  message:
+                                    "Add a message to send these files — attachments can't be sent on their own.",
+                                }
+                              : undefined
                      }
                     placeholder={
                       category
@@ -2295,9 +2320,10 @@ const LOGOUT_TIMEOUT_MS = 15000;
                         />
                       </>
                     }
-                    sendActions={<ChatDictationButton dictation={dictation} />}
-                  />
-                   )}
+                     sendActions={<ChatDictationButton dictation={dictation} />}
+                   />
+                      </div>
+                    )}
                    {/* Hydrate Retry: the kept-memory dead-end (empty sidebar +
                        banner, no action) gets one user-initiated refetch. */}
                    {hydrateRetryVisible && (

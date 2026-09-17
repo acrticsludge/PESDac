@@ -1030,7 +1030,12 @@ export default function ThreadView({
     setFindOpen(true);
   };
 
-  const closeFind = () => setFindOpen(false);
+  // B14: Esc restores focus to the composer so keyboard users keep
+  // their place (was: focus dropped to the page).
+  const closeFind = () => {
+    setFindOpen(false);
+    composerInputRef.current?.focus();
+  };
 
   // Live turn: simulated assistant response (streaming state, not persisted
   // until complete — backend will replace planResponse with SSE).
@@ -1411,7 +1416,13 @@ export default function ThreadView({
   const handleStop = () => {
     timers.current.forEach((t) => window.clearTimeout(t));
     timers.current = [];
-    if (live) finalizeTurn(live.tools, live.text, live.followUps);
+    // B11: a stopped partial persists as an INTERRUPTED turn (failed error
+    // block with Retry), never as a normal turn — reuses the existing
+    // simulate-error render path ("This response was interrupted before
+    // it finished."). Stopping before any words flowed persists nothing
+    // (R1: no turn to keep).
+    if (live && live.text.trim())
+      failTurn(live.tools, live.text, lastUserText(blocks));
     else setLive(null);
   };
 
@@ -1456,6 +1467,7 @@ export default function ThreadView({
   // Files from picker, drop, or paste all land in the drawer. Gated:
   // staging new files while user data loads is dropped (no state change;
   // the picker itself is native). Removing staged files stays live.
+  // (No upload caps at mockup stage — limits arrive with real uploads.)
   const stageIntoDrawer = (files: File[]) => {
     if (!isAppReady) return;
     if (files.length === 0) return;
@@ -1908,6 +1920,18 @@ export default function ThreadView({
                           />
                         </HStack>
                       )}
+                      {/* B20: vendor ChatComposerInput wires onPaste only — this
+                      layout-neutral wrapper (display:contents) adds the
+                      missing OS-drop path without touching Astryx layout. */}
+                      <div
+                        style={{ display: "contents" }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const files = Array.from(e.dataTransfer?.files ?? []);
+                          if (files.length > 0) stageIntoDrawer(files);
+                        }}
+                      >
                       <ChatComposer
                       value={composerText}
                       onChange={setComposerText}
@@ -1958,7 +1982,19 @@ export default function ThreadView({
                                           ? ` ${outboxSnapshot.failedFatal} failed and won't retry until reload.`
                                           : ""),
                                     }
-                                  : undefined
+                                  : // B21: attachment-only can't send (the vendor
+                                    // composer trim-gates empty submits before our
+                                    // onSubmit ever fires) — say so instead of
+                                    // no-op silence. Lowest priority: any real
+                                    // error/status wins over this hint.
+                                    attachments.length > 0 &&
+                                      composerText.trim() === ""
+                                    ? {
+                                        type: "warning",
+                                        message:
+                                          "Add a message to send these files — attachments can't be sent on their own.",
+                                      }
+                                    : undefined
                       }
                       placeholder={
                         composerMode === "deep"
@@ -2099,6 +2135,7 @@ export default function ThreadView({
                         <ChatDictationButton dictation={dictation} />
                       }
                       />
+                      </div>
                     </>
                   }
                 >
