@@ -1005,6 +1005,16 @@ const LOGOUT_TIMEOUT_MS = 15000;
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   useSessionVersion();
+  // Hydration gate for localStorage snapshot reads (B3): the server render
+  // cannot inspect localStorage, so it always renders zero skeleton rows.
+  // Keep the first browser render identical; only consult the snapshot
+  // after the hydration effect has committed — same doctrine as useAuth's
+  // hydrated latch. Without this, returning users hydrate with skeleton
+  // rows the SSR HTML never had (React #418 on every thread load).
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
   // Session reads run directly during render — NOT gated on mount. Gating
   // makes pinned/renamed chats visibly jump sections on first paint (and on
   // every chat switch/refresh). SSR renders empty and React patches on
@@ -1208,8 +1218,9 @@ const LOGOUT_TIMEOUT_MS = 15000;
   let lastKnownArchivedCount = 0;
   // 24 h age cap: a snapshot older than the cap (or with no timestamp,
   // e.g. pre-fix snapshots) is cleared + read as empty — never painted.
+  // Gated on hydrated (B3): SSR + first client paint render zero rows.
   let snapshotFresh = false;
-  if (showWorkspaceSkeleton && typeof window !== "undefined") {
+  if (showWorkspaceSkeleton && hydrated && typeof window !== "undefined") {
     try {
       const atRaw = window.localStorage.getItem(LAST_KNOWN_SNAPSHOT_AT_KEY);
       const at = atRaw == null ? Number.NaN : Number(atRaw);
@@ -1230,7 +1241,7 @@ const LOGOUT_TIMEOUT_MS = 15000;
       }
     }
   }
-  if (showWorkspaceSkeleton && snapshotFresh && typeof window !== "undefined") {
+  if (showWorkspaceSkeleton && snapshotFresh && hydrated && typeof window !== "undefined") {
     try {
       lastKnownBySubject =
         (JSON.parse(
@@ -1627,7 +1638,13 @@ const LOGOUT_TIMEOUT_MS = 15000;
     // LLM gate (spec llm-byok-settings §5.3): keyless authenticated sends
     // stop here — the composer status already says why. Text stays in the
     // input (controlled, never cleared on this path).
-    if (showKeyDot) return;
+    if (showKeyDot) {
+      // ChatComposer clears via onChange AFTER onSubmit returns, so a
+      // synchronous restore would lose (last-write-wins). Defer past the
+      // composer's own clear (failed creates do the same below).
+      queueMicrotask(() => setWelcomeText(text));
+      return;
+    }
     // Mockup default: unscoped chats file under CN until backend scopes them.
     const subject = category ?? (mode && mode !== "auto" ? mode : "CN");
     // @ tokens stay in the sent text (responder scopes on them) but out of

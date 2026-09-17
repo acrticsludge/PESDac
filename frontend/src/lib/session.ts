@@ -29,6 +29,7 @@ import {
 } from "./chat-sync.ts";
 import { enqueueAppend } from "./outbox.ts";
 import { classifyOutboxError, outboxQueue } from "./outbox-queue.ts";
+import { AuthServiceError } from "./api/errors.ts";
 
 export type CustomChat = {
   code: string;
@@ -969,13 +970,42 @@ function isAuthFailure(error: unknown): boolean {
   return false;
 }
 
+// Offline copy (mirrors api/errors.ts TypeError/AbortError branch): the
+// request never reached the server, so the leg's fixed 5xx copy would lie.
+const OFFLINE_COPY =
+  "Couldn't reach the server. Check your connection and try again.";
+
+function isTransportFailure(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  if (
+    typeof DOMException !== "undefined" &&
+    error instanceof DOMException &&
+    error.name === "AbortError"
+  )
+    return true;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  return false;
+}
+
+// Per-leg copy resolution (B4): auth-service outages surface their authored
+// message (same as the campus saveIdentity toUserMessage path) — everything
+// else keeps the leg's fixed copy (500s stay specific, never generic).
+// Transport branching (B2) lives in createChatBacked only: the welcome
+// create leg is the one the plan pins to the offline copy; hydrate/history
+// keep their "Showing what's on this device" context even when the
+// transport drops.
+function resolveFailureCopy(error: unknown, fixedBody: string): string {
+  if (error instanceof AuthServiceError) return error.message;
+  return fixedBody;
+}
+
 function notifyFailure(
   error: unknown,
   notify: ChatNotify | undefined,
   body: string,
 ): void {
   if (notify == null || isAuthFailure(error)) return;
-  notify(body);
+  notify(resolveFailureCopy(error, body));
 }
 
 function fromServerChat(row: ServerChat): CustomChat {
@@ -1143,9 +1173,18 @@ export async function createChatBacked(
     emit();
     return chat;
   } catch (error) {
-    notifyFailure(error, opts?.notify, "Couldn't create that chat. Try again.");
+    // B2: transport failures (abort/TypeError) surface the offline copy,
+    // not the fixed 5xx-identical create copy — the plan's E2 expects the
+    // offline copy. Auth-service outages surface their authored message
+    // (B4); everything else keeps the fixed create copy.
+    const createCopy = isTransportFailure(error)
+      ? OFFLINE_COPY
+      : resolveFailureCopy(error, "Couldn't create that chat. Try again.");
+    if (opts?.notify != null && !isAuthFailure(error)) {
+      opts.notify(createCopy);
+    }
     if (!isAuthFailure(error)) {
-      createSyncError = "Couldn't create that chat. Try again.";
+      createSyncError = createCopy;
       emit();
     }
     return null;
@@ -1391,7 +1430,10 @@ export async function persistAppendedBlock(
   } catch (error) {
     notifyFailure(error, opts?.notify, "Couldn't save that message. Try again.");
     if (!isAuthFailure(error)) {
-      chatSyncErrors.set(code, "Couldn't save that message. Try again.");
+      chatSyncErrors.set(
+        code,
+        resolveFailureCopy(error, "Couldn't save that message. Try again."),
+      );
       if (sendId != null && outboxQueue.get(sendId)?.status === "pending") {
         // Durable retry (outbox T5c): persist the same keyed send for the
         // paced flush worker. Pending-guarded — a flush that already
@@ -1433,7 +1475,10 @@ export async function persistTruncate(
   } catch (error) {
     notifyFailure(error, opts?.notify, "Couldn't update that chat. Try again.");
     if (!isAuthFailure(error)) {
-      chatSyncErrors.set(code, "Couldn't update that chat. Try again.");
+      chatSyncErrors.set(
+        code,
+        resolveFailureCopy(error, "Couldn't update that chat. Try again."),
+      );
       emit();
     }
     return false;
@@ -1542,7 +1587,10 @@ export async function loadChatMessages(
     if (!isAuthFailure(error)) {
       chatSyncErrors.set(
         code,
-        "Couldn't load this chat's history. Showing what's on this device.",
+        resolveFailureCopy(
+          error,
+          "Couldn't load this chat's history. Showing what's on this device.",
+        ),
       );
       emit();
     }
@@ -1772,7 +1820,10 @@ export async function hydrateChats(
       "Couldn't load your chats. Showing what's on this device.",
     );
     if (!isAuthFailure(error)) {
-      hydrateSyncError = "Couldn't load your chats. Showing what's on this device.";
+      hydrateSyncError = resolveFailureCopy(
+        error,
+        "Couldn't load your chats. Showing what's on this device.",
+      );
       emit();
     }
     setChatHydratePending(false, auth.identityKey);

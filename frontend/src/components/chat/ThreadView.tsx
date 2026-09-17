@@ -1209,7 +1209,12 @@ export default function ThreadView({
     // Gate: the composer is disabled while user data loads; this guard
     // covers any programmatic send path. Drafts are preserved (no clear).
     if (!isAppReady) return;
-    if (llmBlocked) return;
+    if (llmBlocked) {
+      // ChatComposer clears via onChange AFTER onSubmit returns — defer
+      // the restore past the composer's own clear.
+      queueMicrotask(() => setComposerText(value));
+      return;
+    }
     setSendError(null);
     // Edited resend: drop the edited user turn and everything after it;
     // the normal path below appends the replacement and streams again.
@@ -1497,19 +1502,38 @@ export default function ThreadView({
       window.removeEventListener(FOCUS_COMPOSER_EVENT, onFocus);
       window.removeEventListener(OPEN_FIND_EVENT, onOpenFind);
     };
-  });  useEffect(() => {
-    if (autoSendRef.current) {
-      const payload = autoSendRef.current;
-      autoSendRef.current = undefined;
-      const text = typeof payload === "string" ? payload : payload.text;
-      const staged: StagedFile[] =
-        typeof payload === "string"
-          ? []
-          : (payload.attachments ?? []).map((att) => ({ att }));
-      const t = window.setTimeout(() => handleSend(text, staged), 350);
-      return () => window.clearTimeout(t);
-    }
-  }, []);
+  });
+
+  // First message typed on welcome: run it once the thread mounts — gated
+  // on settled identity, not on mount. This component's useAuth() starts
+  // in its first-render "loading" window (per-instance hydration latch),
+  // so a mount-frozen timer would capture chatAuth=null and persist the
+  // whole turn memory-only, never POSTing it. Waiting for a settled
+  // (authenticated OR guest) state delivers with a fresh, backed closure
+  // and keeps the history skip above honest (the payload is still present
+  // when the load effect re-runs on backing).
+  const autoSendReady =
+    autoSendRef.current != null &&
+    authState.status !== "loading" &&
+    isAppReady;
+  useEffect(() => {
+    if (!autoSendReady) return;
+    const payload = autoSendRef.current;
+    autoSendRef.current = undefined;
+    if (payload == null) return;
+    const text = typeof payload === "string" ? payload : payload.text;
+    const staged: StagedFile[] =
+      typeof payload === "string"
+        ? []
+        : (payload.attachments ?? []).map((att) => ({ att }));
+    // Component-lifetime timer (the timers registry, cancelled only on
+    // unmount): a later readiness flip re-runs this effect with no payload
+    // and must NOT cancel the pending send.
+    later(350, () => handleSend(text, staged));
+    // Runs once per false→true transition; the frozen handleSend is the
+    // ready render's closure by construction, not the mount's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSendReady]);
 
   const artifactResize = useResizable({
     defaultSize: 520,
