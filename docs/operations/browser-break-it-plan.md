@@ -766,7 +766,7 @@ Expect: lands back on the deep link (or `/new` WITH stated policy
 `goto /subject/os/ZZZ9` (server: empty thread shape).
 Expect: skeleton thread, honest state, no crash.
 
-### ~~N2 — Dead custom code, live store~~ ✅ `section-g` N2 (server-list reconcile drops the dead row pre-fetch, then dead-link bounce fires — both variants → /new)
+### ~~N2 — Dead custom code, live store~~ ✅ `section-g` N2 (boot-purged store + dead-link bounce — URL seeds draftCode, empty live customs fire navigate("/new"); both variants → /new, D53-corrected)
 
 Seed store with code the server 404s → open it.
 Expect: bounce to `/new` (documented behavior — pin it).
@@ -795,7 +795,7 @@ casing bugs love routers).
 
 Covered by `smoke.spec.ts`. Keep, never delete.
 
-### ~~N8 — `/mockup*` in prod build~~ ✅ `section-g` N8 (pins actual D43: /mockup + /mockups 200 in prod — dev-only routes SHIP, filed B37)
+### ~~N8 — `/mockup*` in prod build~~ ✅ `section-g` N8 (fixed B37: DEV gate — 404 with no redirect in prod builds, live under astro dev)
 
 Build production (`test:e2e:build` path), `goto /mockups`.
 Expect: 404 (dev-only routes must not ship).
