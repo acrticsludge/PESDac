@@ -1044,7 +1044,21 @@ test("O5 — attempts exhausted go failed-fatal, reload revives", async ({
   expect(journal.get(code) ?? []).toEqual([]);
   // Kick flush rounds until the op settles fatal (6 failed rounds —
   // live-send isn't a round; attempts increment per flush only).
-  for (let i = 0; i < 8; i++) {
+  // Kick-until-count, not fixed 8×800ms: flushes coalesce under load
+  // (flushInFlight guard in outbox.ts) so fixed kicks under-attempt
+  // on slow full-run machines (count assert flaked). Then THREE
+  // extra rounds unconditionally: the fatal record paints on flush
+  // announcements, so stopping the instant the count hits 6 leaves
+  // the UI stale (no suffix — deterministic fail). The trailing
+  // rounds also give the in-flight 6th attempt's 500 + fatal settle
+  // room to land before postMode flips (flipping instantly can
+  // deliver it in "ok" mode — never fatal).
+  let i = 0;
+  for (; i < 16 && c.messagesPost < 6; i++) {
+    await page.evaluate(onlineKick);
+    await page.waitForTimeout(800);
+  }
+  for (let j = 0; j < 3; j++) {
     await page.evaluate(onlineKick);
     await page.waitForTimeout(800);
   }

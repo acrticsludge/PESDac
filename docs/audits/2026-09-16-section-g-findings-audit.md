@@ -144,7 +144,7 @@ doesn't transmit the restricted Cookie header that way. `curl.exe -H
 "Cookie: ..."` is the honest probe, and check `HTTP:%{http_code}`
 first (one of my probes ran against a dead port).
 
-### T76 — Sub-minute UNRESOLVED_ENTRY build failures are transient lock fallout (bitten)
+### T76 — Sub-minute UNRESOLVED_ENTRY build failures are transient lock fallout (SUPERSEDED — see H-audit T90)
 Right after killing preview servers and deleting `dist/` in one
 command, `astro build` failed in <1s with "Cannot resolve entry
 module astro/entrypoints/prerender" — three times, with and without
@@ -153,6 +153,13 @@ green. I burned 20 minutes "bisecting" the middleware for it (the
 middleware-off detour proved nothing). Rule: a build that fails
 faster than compilation should take, right after process kills,
 gets ONE clean retry before any theorizing.
+
+**Correction (H round): wrong diagnosis.** Every one of those
+failures ran with CWD=repo-root instead of `frontend/` (the log
+head shows `output: "static"` + `Missing pages directory`); the
+"transient" was my workdir flip-flopping between seed runs
+(root) and builds (frontend). T90 in the H audit replaces this
+rule: build CWD is ALWAYS `frontend/`, read the log HEAD.
 
 ## Resolution (fix round, this commit)
 

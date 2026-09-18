@@ -259,6 +259,14 @@ failure-leg test there doesn't re-bite.
   mints its own session first (`ensureSeed`) — the F campaign's real
   logouts murdered the shared seed row mid-week (8/10 red, zero code
   change; see F audit T69). Suite behavior unchanged, hermetic now.
+- Post-commit hardening 2 (rides the H commit): O5's kick loop is
+  now kick-until-count (≥6) plus 3 unconditional extra rounds. Two
+  mechanisms from `outbox.ts`, both bitten: flushes coalesce under
+  load (`flushInFlight` guard) so fixed 8×800ms under-attempts on
+  slow full-run machines (count flake), and the fatal record paints
+  on flush announcements (`announceFlush`) so stopping the instant
+  the count hits 6 leaves the UI stale (deterministic no-suffix
+  fail). No app change — test matches the worker's actual contract.
 - Verify: `tsc` clean (same 3 pre-existing errors elsewhere), unit
   378/378, section-e 10/10, section-d 19/19 (plus R8 ×5 stress:
   4/5 — the one red is B34's Astro race, gate-only noise),

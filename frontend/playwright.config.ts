@@ -21,6 +21,11 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
+    // B38 experiment (serve.mjs edge proxy) REVERTED: buffering static
+    // assets through the proxy non-deterministically breaks island
+    // hydration (zero errors, handlers never attach — see H audit
+    // T89). Back on `astro preview` until the edge preserves
+    // streaming delivery. Same port/origin contract as before.
     command: "npm.cmd run preview -- --port 4323 --host localhost",
     url: "http://localhost:4323/new",
     reuseExistingServer: false,

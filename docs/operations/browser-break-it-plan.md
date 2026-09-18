@@ -853,7 +853,7 @@ Expect: no jank cliff (drawer/token counter is the usual suspect).
 `npm run bundle:check` (`scripts/check-bundle.mjs`).
 Expect: passes — gate releases on it.
 
-### ~~P6 — Slow-3G gate usability `[cdp]`~~ ✅ `section-h` P6 (pins actual D47: ~26s vs <5s bar — transport physics, filed B38)
+### ~~P6 — Slow-3G gate usability `[cdp]`~~ ✅ `section-h` P6 (pins actual D47: ~26s vs <5s bar — transport physics, filed B38; compression-edge experiment reverted per T89)
 
 Cold load, Slow-3G: gate interactive <5s.
 
