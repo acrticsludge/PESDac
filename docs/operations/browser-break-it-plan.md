@@ -616,7 +616,7 @@ Authed → `setOffline(true)` → try refresh chats.
 Expect: `N unsynced` outbox pill appears (THE offline signal —
 no banner exists by design; verify pill, not banner).
 
-### ~~O2 — Offline ×3 sends → reconnect~~ ✅ `section-e` O2+O2b (FIFO, unique keys, zero dupes; seeded create+append drains create-first; stale sync error pinned)
+### ~~O2 — Offline ×3 sends → reconnect~~ ✅ `section-e` O2+O2b (FIFO, unique keys, zero dupes; seeded create+append drains create-first; fixed B26/B28: flush repaints AND clears the sync error, no reload — reload stays exactly-once)
 
 Expect: flush order creates-before-appends, all acked, zero dupes
 (server idempotency keys proof).
@@ -642,7 +642,7 @@ CDP Slow-3G → cold load `/new` and a thread.
 Expect: skeletons → content; gate usable <5s (generous timeouts —
 signal, not flake).
 
-### ~~O7 — Slow chats-list only~~ ✅ `section-e` O7 (pins actual: skeleton needs planted snapshot — first-timers get zero rows; composer live meanwhile)
+### ~~O7 — Slow chats-list only~~ ✅ `section-e` O7 (pins actual: skeleton needs planted snapshot — first-timers get zero rows BY DESIGN, B30 documented; composer live meanwhile)
 
 Delay `GET /api/v1/chats*` 1.5s, everything else live.
 Expect: sidebar skeleton observable, rest interactive (surgical

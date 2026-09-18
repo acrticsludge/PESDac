@@ -323,24 +323,28 @@ async function mockBackend(
     } catch {
       // Header read is best-effort; counts below carry the proof.
     }
+    // Fallback is a THUNK (lazy): IIFE fallbacks mutate meta/journal,
+    // so they must run ONLY when no leg overrides — otherwise failure
+    // legs would still apply the success side effects (bitten in
+    // section-e O5; ported here per O11).
     const run = async (
       leg: Leg | undefined,
-      fallback: Fulfill,
+      fallback: () => Fulfill,
       key: keyof Counters,
     ) => {
       c[key] += 1;
-      const out = leg ? await leg(c[key], req) : fallback;
+      const out = leg ? await leg(c[key], req) : fallback();
       if (out === "abort") await r.abort("connectionreset");
       else if (out.status === 204) await r.fulfill({ status: 204, body: "" });
       else await r.fulfill(json(out.body, out.status, out.headers));
     };
     const offlineAbort: Fulfill = "abort";
     if (p === "/api/v1/auth/me" && m === "GET")
-      return run(ov.me, ok(ME()), "me");
+      return run(ov.me, () => ok(ME()), "me");
     if (p === "/api/v1/profiles/me" && m === "GET")
-      return run(ov.profileGet, ok(profileRow), "profileGet");
+      return run(ov.profileGet, () => ok(profileRow), "profileGet");
     if (p === "/api/v1/profiles/me" && m === "PATCH") {
-      if (flags.offline) return run(ov.profilePatch, offlineAbort, "profilePatch");
+      if (flags.offline) return run(ov.profilePatch, () => offlineAbort, "profilePatch");
       try {
         const posted = req.postDataJSON() as Record<string, unknown>;
         opts.patchBodies?.push(posted);
@@ -348,25 +352,25 @@ async function mockBackend(
       } catch {
         opts.patchBodies?.push(null);
       }
-      return run(ov.profilePatch, ok(profileRow), "profilePatch");
+      return run(ov.profilePatch, () => ok(profileRow), "profilePatch");
     }
     if (p === "/api/v1/llm/status")
-      return run(ov.llm, ok(LLM_READY), "llm");
+      return run(ov.llm, () => ok(LLM_READY), "llm");
     if (p === "/api/v1/users/me/export" && m === "GET") {
-      if (flags.offline) return run(ov.exportGet, offlineAbort, "exportGet");
-      return run(ov.exportGet, ok({ exportedAt: iso(), chats: [] }), "exportGet");
+      if (flags.offline) return run(ov.exportGet, () => offlineAbort, "exportGet");
+      return run(ov.exportGet, () => ok({ exportedAt: iso(), chats: [] }), "exportGet");
     }
     if (p === "/api/v1/chats" && m === "GET") {
       const rows = [...meta.values()].filter((row) =>
         u.searchParams.get("archived") === "true" ? row.isArchived : !row.isArchived,
       );
-      return run(ov.chatsGet, ok({
+      return run(ov.chatsGet, () => ok({
         data: rows.map(metaRow),
         pagination: { limit: 50, offset: 0, total: rows.length },
       }), "chatsGet");
     }
     if (p === "/api/v1/chats" && m === "POST") {
-      const fb: Fulfill = (() => {
+      const fb = (): Fulfill => {
         chatSeq += 1;
         const posted = req.postDataJSON() as { subject: string; title: string };
         opts.chatBodies?.push(posted);
@@ -381,12 +385,12 @@ async function mockBackend(
           updatedAt: iso(),
         });
         return ok(metaRow(meta.get(code)!));
-      })();
+      };
       return run(ov.chatsPost, fb, "chatsPost");
     }
     if (p === "/api/v1/chats" && m === "DELETE") {
-      if (flags.offline) return run(ov.chatsDelete, offlineAbort, "chatsDelete");
-      const fb: Fulfill = (() => {
+      if (flags.offline) return run(ov.chatsDelete, () => offlineAbort, "chatsDelete");
+      const fb = (): Fulfill => {
         const n = meta.size;
         meta.clear();
         journal.clear();
@@ -394,38 +398,38 @@ async function mockBackend(
           data: { deleted: n },
           pagination: { limit: 50, offset: 0, total: 0 },
         });
-      })();
+      };
       return run(ov.chatsDelete, fb, "chatsDelete");
     }
     const chatMatch = p.match(/^\/api\/v1\/chats\/([^/]+)$/);
     if (chatMatch && m === "PATCH") {
-      if (flags.offline) return run(ov.chatPatch, offlineAbort, "chatPatch");
-      const fb: Fulfill = (() => {
+      if (flags.offline) return run(ov.chatPatch, () => offlineAbort, "chatPatch");
+      const fb = (): Fulfill => {
         const row = meta.get(chatMatch[1]);
         if (!row) return { status: 404, body: errBody("NOT_FOUND", "nope") };
         const posted = req.postDataJSON() as Partial<ChatMeta>;
         opts.chatPatchBodies?.push({ code: chatMatch[1], body: posted });
         Object.assign(row, posted, { updatedAt: iso() });
         return ok(metaRow(row));
-      })();
+      };
       return run(ov.chatPatch, fb, "chatPatch");
     }
     if (chatMatch && m === "DELETE") {
-      const fb: Fulfill = (() => {
+      const fb = (): Fulfill => {
         if (!meta.has(chatMatch[1]))
           return { status: 404, body: errBody("NOT_FOUND", "nope") };
         meta.delete(chatMatch[1]);
         journal.delete(chatMatch[1]);
         opts.chatDeletes?.push(chatMatch[1]);
         return { status: 204, body: {} };
-      })();
+      };
       return run(ov.chatDelete, fb, "chatDelete");
     }
     const msgMatch = p.match(/^\/api\/v1\/chats\/([^/]+)\/messages/);
     if (msgMatch && m === "GET") {
       const code = msgMatch[1];
       opts.msgGetQueries?.push(new URL(req.url()).search);
-      const fb: Fulfill = ok({
+      const fb = (): Fulfill => ok({
         data: journal.get(code) ?? [],
         pagination: {
           limit: 50,
@@ -436,8 +440,8 @@ async function mockBackend(
       return run(ov.messagesGet, fb, "messagesGet");
     }
     if (msgMatch && m === "POST") {
-      if (flags.offline) return run(ov.messagesPost, offlineAbort, "messagesPost");
-      const fb: Fulfill = (() => {
+      if (flags.offline) return run(ov.messagesPost, () => offlineAbort, "messagesPost");
+      const fb = (): Fulfill => {
         const code = msgMatch[1];
         // Faithful 404: clear-all/delete removed the container.
         if (!meta.has(code))
@@ -459,12 +463,12 @@ async function mockBackend(
         };
         journal.set(code, [...(journal.get(code) ?? []), row]);
         return ok(row);
-      })();
+      };
       return run(ov.messagesPost, fb, "messagesPost");
     }
     if (msgMatch && m === "DELETE") {
       const code = msgMatch[1];
-      const fb: Fulfill = (() => {
+      const fb = (): Fulfill => {
         const fromSeq = Number(new URL(req.url()).searchParams.get("from_seq") ?? "0");
         const kept = (journal.get(code) ?? []).filter((row) => row.seq < fromSeq);
         const deleted = (journal.get(code) ?? []).length - kept.length;
@@ -473,7 +477,7 @@ async function mockBackend(
           data: { deleted },
           pagination: { limit: 50, offset: 0, total: kept.length },
         });
-      })();
+      };
       return run(ov.messagesDelete, fb, "messagesDelete");
     }
     return r.continue();

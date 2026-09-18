@@ -881,7 +881,11 @@ export default function ThreadView({
   // B26: a reconnect flush that delivers while this thread shows a sync
   // error repaints it — force a messages reload so delivered turns
   // appear without a manual reload. Fires once per failure (the error
-  // gate): the successful load clears the error itself. No deps:
+  // gate): the successful load clears the error itself (B28), which
+  // also unsurfaces the pill suffixes (B29). Skipped while a live turn
+  // streams: the live path owns the paint then (its persist settles the
+  // error on success and re-arms it on failure), and a concurrent
+  // reload could clobber its optimistic blocks. No deps:
   // re-evaluated each render for fresh closures, like the shortcuts
   // effect below.
   const prevUnsyncedRef = useRef(outboxSnapshot.total);
@@ -890,6 +894,7 @@ export default function ThreadView({
     prevUnsyncedRef.current = outboxSnapshot.total;
     if (outboxSnapshot.total >= prev) return;
     if (chatAuth == null) return;
+    if (live != null) return;
     if (getChatSyncError(sessionKey) == null) return;
     invalidateChatMessages(sessionKey);
     void loadChatMessages(sessionKey, chatAuth, { notify });
