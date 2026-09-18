@@ -118,6 +118,7 @@ import {
   identitySeedKey,
   isServerChat,
   loadChatMessages,
+  invalidateChatMessages,
   getChatMessagesStatus,
   getChatSyncError,
   getHydrateSyncError,
@@ -877,6 +878,22 @@ export default function ThreadView({
   // the composer's "N unsynced" status — no new UI, existing status slot.
   useEffect(() => startOutboxSchedulers(), []);
   const outboxSnapshot = useOutboxUnsynced();
+  // B26: a reconnect flush that delivers while this thread shows a sync
+  // error repaints it — force a messages reload so delivered turns
+  // appear without a manual reload. Fires once per failure (the error
+  // gate): the successful load clears the error itself. No deps:
+  // re-evaluated each render for fresh closures, like the shortcuts
+  // effect below.
+  const prevUnsyncedRef = useRef(outboxSnapshot.total);
+  useEffect(() => {
+    const prev = prevUnsyncedRef.current;
+    prevUnsyncedRef.current = outboxSnapshot.total;
+    if (outboxSnapshot.total >= prev) return;
+    if (chatAuth == null) return;
+    if (getChatSyncError(sessionKey) == null) return;
+    invalidateChatMessages(sessionKey);
+    void loadChatMessages(sessionKey, chatAuth, { notify });
+  });
   const overlay = getOverlay(sessionKey);
   const blocks = [...thread.blocks, ...overlay];
 
@@ -1442,13 +1459,13 @@ export default function ThreadView({
   const handleStop = () => {
     timers.current.forEach((t) => window.clearTimeout(t));
     timers.current = [];
-    // B11: a stopped partial persists as an INTERRUPTED turn (failed error
-    // block with Retry), never as a normal turn — reuses the existing
-    // simulate-error render path ("This response was interrupted before
-    // it finished."). Stopping before any words flowed persists nothing
-    // (R1: no turn to keep).
-    if (live && live.text.trim())
-      failTurn(live.tools, live.text, lastUserText(blocks));
+    // B11/B24: ANY stop persists an INTERRUPTED turn (failed error block
+    // with Retry), never a normal turn and never nothing — reuses the
+    // existing simulate-error render path ("This response was interrupted
+    // before it finished."). Stopping before any words flowed persists
+    // the marker with zero bubbles, so the stranded Q keeps its Retry
+    // recovery instead of hanging answerless.
+    if (live) failTurn(live.tools, live.text, lastUserText(blocks));
     else setLive(null);
   };
 

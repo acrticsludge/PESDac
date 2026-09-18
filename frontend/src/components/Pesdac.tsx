@@ -1604,6 +1604,11 @@ const LOGOUT_TIMEOUT_MS = 15000;
   const collectRows = (refs: ChatRef[], includeArchived: boolean) =>
     refs
       .filter((ref) => includeArchived || !isArchivedHere(ref))
+      // B27: format-invalid custom codes never list — the route guard
+      // would bounce them to the welcome shell (dead-end link with the
+      // wrong content and no error). Only reachable with corrupt data
+      // (the server issues 6-char codes).
+      .filter((ref) => ref.kind !== "custom" || isChatCodeFormat(ref.id))
       .map((ref) => ({ ref, title: refTitle(ref) }))
       .filter(
         (r): r is { ref: ChatRef; title: string } =>
@@ -1966,6 +1971,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
                 const workspaceCustoms = customs.filter(
                   (c) =>
                     c.subject === workspace.name &&
+                    // B27: see collectRows — invalid codes never list.
+                    isChatCodeFormat(c.code) &&
                     !isArchivedHere({ kind: "custom", id: c.code }) &&
                     !isPinnedHere({ kind: "custom", id: c.code }) &&
                     matchesQuery(c.title),

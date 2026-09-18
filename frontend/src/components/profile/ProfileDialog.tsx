@@ -41,6 +41,8 @@ import {
   LegalSection,
 } from "./sections";
 import { TABS, type ProfileTab } from "./profile-tabs";
+import { useAuth, refreshProfile, apiGetProfile } from "../../lib/auth";
+import { seedOnboardingFields } from "../../lib/session";
 
 export type { ProfileTab };
 
@@ -149,6 +151,7 @@ export default function ProfileDialog({
   const [tab, setTab] = useState<ProfileTab>(initialTab);
   const [query, setQuery] = useState("");
   const isNarrow = useMediaQuery("(max-width: 640px)");
+  const auth = useAuth();
   // Fresh open (or new entry tab) resets navigation state.
   useEffect(() => {
     if (isOpen) {
@@ -156,6 +159,31 @@ export default function ProfileDialog({
       setQuery("");
     }
   }, [isOpen, initialTab]);
+  // B25: cross-tab profile writes converge on reopen — revalidate the
+  // server row when the dialog opens and reseed the local store, so a
+  // reopened dialog never shows another tab's stale write. Skipped for
+  // guests (no row to fetch); failures keep the last-known paint.
+  // (An already-open dialog does not live-update; reopen to converge.)
+  const authStatus = auth.status;
+  const authUserId = auth.status === "authenticated" ? auth.user.id : null;
+  useEffect(() => {
+    if (!isOpen || authStatus !== "authenticated" || authUserId == null) {
+      return;
+    }
+    refreshProfile();
+    let cancelled = false;
+    void apiGetProfile(authUserId).then(
+      (row) => {
+        if (!cancelled) seedOnboardingFields(row);
+      },
+      () => {
+        // Keep last-known paint — the dialog still opens.
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, authStatus, authUserId]);
   const matches = (label: string) =>
     label.toLowerCase().includes(query.trim().toLowerCase());
   const visibleGroups = NAV_GROUPS.map((g) => ({

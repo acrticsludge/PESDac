@@ -1677,6 +1677,19 @@ export async function loadChatMessages(
   }
 }
 
+// Force a messages reload for one chat (B26): loadChatMessages is a
+// no-op once status is ready, so a reconnect delivery that landed
+// server-side would never repaint. Resetting the state makes the next
+// load refetch; a successful load clears the chat sync error itself,
+// so the banner and the empty paint resolve together. Never clobbers
+// an in-flight load.
+export function invalidateChatMessages(code: string): void {
+  const current = messageStates.get(code);
+  if (current != null && current.status !== "loading") {
+    messageStates.delete(code);
+  }
+}
+
 // ---- Hydrate + adopt + pin/archive migration --------------------------------
 
 export type HydrateResult =

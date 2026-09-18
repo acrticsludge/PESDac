@@ -511,10 +511,11 @@ Expect: composer stays responsive, value complete, no dropped tail.
 
 ## D. Races & concurrency `[staging]`
 
-### ~~R1 — Stop then Send ≤300ms~~ ✅ `section-d` R1 (pins actual: measured gap; partial kept iff words flowed)
+### ~~R1 — Stop then Send ≤300ms~~ ✅ `section-d` R1 (measured gap; mid-stream partial kept) + R1b (fixed B24: pre-words Stop keeps an interrupted marker with Retry — never a stranded Q)
 
 Expect: old stream dead (no late append into new turn), new turn
-clean.
+clean; stopping before the first words still persists the
+interrupted marker, and its Retry replays into a real answer.
 
 ### ~~R2 — Retry while stream live~~ ✅ `section-d` R2 (single turn; mid-rerun Retry ignored by live guard)
 
@@ -560,7 +561,7 @@ Sidebar → delete current thread.
 Expect: navigates `/new` (or nearest chat), no zombie composer
 posting to a dead code.
 
-### ~~R10 — Rename + pin + archive burst~~ ✅ `section-d` R10 (pins actual: last-wins, archived-unpinned, reload-proof)
+### ~~R10 — Rename + pin + archive burst~~ ✅ `section-d` R10 (pins actual: last-wins, archived-unpinned, reload-proof) + R10b (fixed B27: format-invalid codes never list — no dead-end links)
 
 Fire all three <1s apart.
 Expect: final server state == UI state (refetch-proof after
@@ -577,15 +578,16 @@ Expect: queued OR honest error (pin reality) — never a fake
 Expect: honest failure now (can't fabricate server data), dialog
 open, retry works on reconnect.
 
-### ~~R13 — Two tabs edit one profile~~ ✅ `section-d` R13 (pins actual: server LWW, tabs stale until reload)
+### ~~R13 — Two tabs edit one profile~~ ✅ `section-d` R13 (fixed B25: server LWW, dialog revalidates on open — reopen converges, no reload needed)
 
 A sets campus=X, B sets campus=Y, both save.
-Expect: last-write-wins, both tabs converge on refetch, no crash.
+Expect: last-write-wins, reopened dialogs converge, no crash.
 
-### ~~R14 — Offline flapping x5 `[mock]`~~ ✅ `section-d` R14 (exactly-once; flush lands row, repaint on reload)
+### ~~R14 — Offline flapping x5 `[mock]`~~ ✅ `section-d` R14 (fixed B26: exactly-once delivery AND flush repaints — no reload needed; reload stays idempotent)
 
 Toggle `setOffline` true/false 5× in 10s with a queued send.
-Expect: exactly-once delivery, outbox doesn't duplicate or lose.
+Expect: exactly-once delivery, outbox doesn't duplicate or lose;
+the delivered turn repaints on flush.
 
 ### ~~R15 — Onboarding save offline `[mock]`~~ ✅ `section-d` R15 (blocked with copy, data kept, retry lands)
 
