@@ -685,7 +685,7 @@ Expect: full identity-heap wipe per `cache-identity-reset` (P0-1…5)
 Click Google → close popup without completing.
 Expect: stays put, calm copy, no half-session (no gate flicker).
 
-### ~~A5 — Google-only user links password~~ ✅ `section-f` A5 (pins actual: ENV-BLOCKED on :4323 — selfOrigin fixed :4321 → honest 403, stays Google-only; positive 200 proven on :4321)
+### ~~A5 — Google-only user links password~~ ✅ `section-f` A5 (fixed B32: selfOrigin now Host-derived; full link → logout → email-login-with-new-password flow green)
 
 Profile/security → set password → logout → login with password.
 Expect: same-origin `POST /api/link-password` works; cross-origin
@@ -704,7 +704,7 @@ Expect: backend wipe → auth delete → heap drop → guest gate;
 recreate with same email starts clean (rate buckets purged per
 ops doc).
 
-### ~~A8 — Taken-email signup~~ ✅ `section-f` A8 (form Banner per D37 + password kept; needs TRUSTED_ORIGINS or every signup 403s)
+### ~~A8 — Taken-email signup~~ ✅ `section-f` A8 (form Banner per D37 + password kept; fixed B31(env): TRUSTED_ORIGINS rides webServer.env for the :4323 preview)
 
 Signup with existing email → 422.
 Expect: field-level error on email only, password kept, no crash.
@@ -721,7 +721,7 @@ every time.
 Expect: `Couldn't tell the server you logged out.` BUT local
 session still cleared (fail-safe direction).
 
-### ~~A11 — 2FA enable → login with code → disable~~ ✅ `section-f` A11 (pins actual: password-user enroll FAILS "Invalid password" — no confirm step filed; passwordless cycle enroll/verify/disable green with in-spec TOTP)
+### ~~A11 — 2FA enable → login with code → disable~~ ✅ `section-f` A11 (fixed B33: credential users confirm password for enroll AND disable; wrong-pw reads authored copy; password-user full cycle + passwordless cycle green with in-spec TOTP)
 
 Setup: 2FA-capable seed user.
 Expect: TOTP enroll (QR renders), login challenges code, wrong
@@ -751,7 +751,7 @@ exists); logout A doesn't kill B unless designed to.
 Expect: UI surfaces cooldown, no infinite spinner, no credential
 leak in messages.
 
-### ~~A16 — Post-login return-to-target~~ ✅ `section-f` A16 (pins actual: gate → login → hardcoded /new, deep target silently dropped)
+### ~~A16 — Post-login return-to-target~~ ✅ `section-f` A16 (fixed B36: gate carries ?returnTo, layout honors it incl. authed-bounce, guest deep-link bounce deferred; login lands back on the thread)
 
 Guest deep-links `/subject/os/<code>` → gate → Log in → auth.
 Expect: lands back on the deep link (or `/new` WITH stated policy

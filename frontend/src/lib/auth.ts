@@ -490,15 +490,21 @@ export async function unlinkAccount(accountId: string): Promise<void> {
   refreshAccounts();
 }
 
-/** Start TOTP setup: returns the authenticator key + one-time backup codes. */
-export async function enableTwoFactor(): Promise<{
+/**
+ * Start TOTP setup: returns the authenticator key + one-time backup codes.
+ * Credential users must confirm their password (B33: the server rejects
+ * passwordless enables with "Invalid password" when a credential
+ * exists); passwordless users omit it (allowPasswordless).
+ */
+export async function enableTwoFactor(password?: string): Promise<{
   totpURI: string;
   backupCodes: string[];
 }> {
-  const res = await authClient.twoFactor.enable({
-    method: "totp",
-    issuer: "PESDac",
-  });
+  const res = await authClient.twoFactor.enable(
+    password == null
+      ? { method: "totp", issuer: "PESDac" }
+      : { method: "totp", issuer: "PESDac", password },
+  );
   if (res.error || !res.data || !("totpURI" in res.data)) {
     throw new Error(
       res.error?.message ?? "Couldn't start 2FA setup. Try again.",
@@ -679,9 +685,14 @@ function errorEnvelopeBody(v: unknown): ApiErrorBody | null {
   return { code, message };
 }
 
-/** Turn TOTP off (no password prompt for Google-only users). */
-export async function disableTwoFactor(): Promise<void> {
-  const res = await authClient.twoFactor.disable({});
+/**
+ * Turn TOTP off. Credential users confirm with their password (B33:
+ * disable demands it too); passwordless users omit it.
+ */
+export async function disableTwoFactor(password?: string): Promise<void> {
+  const res = await authClient.twoFactor.disable(
+    password == null ? {} : { password },
+  );
   if (res.error) {
     throw new Error(res.error.message ?? "Couldn't turn off 2FA. Try again.");
   }

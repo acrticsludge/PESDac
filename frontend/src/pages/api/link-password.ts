@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { auth } from "../../../../lib/auth";
-import { handleLinkPassword } from "../../lib/link-password-server";
+import { handleLinkPassword, selfOriginFromRequest } from "../../lib/link-password-server";
 
 export const prerender = false;
 
@@ -19,7 +19,9 @@ export const POST: APIRoute = async ({ request, clientAddress, url }) => {
   }
   const result = await handleLinkPassword(
     {
-      selfOrigin: url.origin,
+      // B32: self from the request Host, never Astro's url.origin
+      // (preview reports the baseURL port there, not the Host).
+      selfOrigin: selfOriginFromRequest(request.headers, url.origin),
       origin: request.headers.get("origin"),
       referer: request.headers.get("referer"),
       // Per-IP rate-limit key. clientAddress is the direct peer: behind a

@@ -80,8 +80,7 @@ export function toEmailAuthMessage(error: unknown, isSignup: boolean): string {
  * expiry get their own copy (the fix differs: wait vs fetch a fresh
  * code); everything else rides the shared funnel with the same
  * fallback the form used before.
- */
-export function toTwoFactorMessage(error: unknown): string {
+ */export function toTwoFactorMessage(error: unknown): string {
   const fallback = "That code didn't work. Try again.";
   let haystack = "";
   if (typeof error === "object" && error !== null) {
@@ -101,6 +100,47 @@ export function toTwoFactorMessage(error: unknown): string {
   }
   if (haystack.includes("expired")) {
     return "That code expired. Enter a fresh code from your app.";
+  }
+  return toUserMessage(error, fallback);
+}
+
+/**
+ * 2FA enroll-start failure → typed message. Credential users confirm
+ * their password first (B33); a wrong one must read as authored copy,
+ * never the raw server "Invalid password".
+ */
+export function toTwoFactorEnrollMessage(error: unknown): string {
+  const fallback = "Couldn't start 2FA setup. Try again.";
+  let haystack = "";
+  if (typeof error === "object" && error !== null) {
+    const e = error as { code?: unknown; message?: unknown };
+    haystack =
+      `${String(e.code ?? "")} ${String(e.message ?? "")}`.toLowerCase();
+  } else if (error instanceof Error) {
+    haystack = error.message.toLowerCase();
+  }
+  if (haystack.includes("invalid") && haystack.includes("password")) {
+    return "That password didn't match. Try again.";
+  }
+  return toUserMessage(error, fallback);
+}
+
+/**
+ * 2FA disable failure → typed message. Same password-confirm shape
+ * as enroll (B33 covers both halves); only the fallback differs.
+ */
+export function toTwoFactorDisableMessage(error: unknown): string {
+  const fallback = "Couldn't turn off 2FA. Try again.";
+  let haystack = "";
+  if (typeof error === "object" && error !== null) {
+    const e = error as { code?: unknown; message?: unknown };
+    haystack =
+      `${String(e.code ?? "")} ${String(e.message ?? "")}`.toLowerCase();
+  } else if (error instanceof Error) {
+    haystack = error.message.toLowerCase();
+  }
+  if (haystack.includes("invalid") && haystack.includes("password")) {
+    return "That password didn't match. Try again.";
   }
   return toUserMessage(error, fallback);
 }

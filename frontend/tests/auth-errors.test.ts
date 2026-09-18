@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 import {
   toEmailAuthMessage,
   toGoogleSignInMessage,
+  toTwoFactorDisableMessage,
+  toTwoFactorEnrollMessage,
   toTwoFactorMessage,
 } from "../src/lib/auth-errors.ts";
 
@@ -111,5 +113,40 @@ test("2fa: anything else keeps the long-standing fallback", () => {
   assert.equal(
     toTwoFactorMessage({ code: "NOPE" }),
     "That code didn't work. Try again.",
+  );
+});
+
+// ---- Two-factor enroll mapper (B33) ----
+
+test("2fa-enroll: raw Invalid password maps to authored copy, never raw", () => {
+  const msg = toTwoFactorEnrollMessage(new Error("Invalid password"));
+  assert.equal(msg, "That password didn't match. Try again.");
+  assert.doesNotMatch(msg, /Invalid password/);
+});
+
+test("2fa-enroll: coded INVALID_PASSWORD maps the same way", () => {
+  assert.equal(
+    toTwoFactorEnrollMessage({ code: "INVALID_PASSWORD", message: "nope" }),
+    "That password didn't match. Try again.",
+  );
+});
+
+test("2fa-enroll: anything else keeps the enroll fallback", () => {
+  assert.equal(
+    toTwoFactorEnrollMessage({ code: "NOPE" }),
+    "Couldn't start 2FA setup. Try again.",
+  );
+});
+
+test("2fa-disable: raw Invalid password maps to authored copy, never raw", () => {
+  const msg = toTwoFactorDisableMessage(new Error("Invalid password"));
+  assert.equal(msg, "That password didn't match. Try again.");
+  assert.doesNotMatch(msg, /Invalid password/);
+});
+
+test("2fa-disable: anything else keeps the disable fallback", () => {
+  assert.equal(
+    toTwoFactorDisableMessage({ code: "NOPE" }),
+    "Couldn't turn off 2FA. Try again.",
   );
 });

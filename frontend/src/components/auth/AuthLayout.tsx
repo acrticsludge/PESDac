@@ -157,6 +157,30 @@ type FieldError = {
   message: string;
 };
 
+// B36: post-auth landing. The gate carries ?returnTo=<deep target>;
+// honor it instead of the old hardcoded /new. Tight by design: same-
+// origin app paths only (open-redirect guard — absolute URLs, protocol
+// tricks, and the auth pages themselves all fall back to /new), so a
+// hand-crafted returnTo can never bounce a fresh login elsewhere.
+const AUTH_PATHS = new Set(["/login", "/signup"]);
+function resolveReturnTo(raw: string | null): string {
+  if (raw == null || raw === "") return "/new";
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/new";
+  const path = raw.split(/[?#]/)[0];
+  if (AUTH_PATHS.has(path)) return "/new";
+  if (path === "/" || path === "/new") return path;
+  if (path.startsWith("/subject/") || path.startsWith("/profile")) return raw;
+  return "/new";
+}
+
+/** Live-location landing target (read at event time — never stale). */
+function targetAfterAuth(): string {
+  if (typeof window === "undefined") return "/new";
+  return resolveReturnTo(
+    new URLSearchParams(window.location.search).get("returnTo"),
+  );
+}
+
 import {
   toEmailAuthMessage,
   toGoogleSignInMessage,
@@ -179,6 +203,17 @@ export default function AuthLayout(props: AuthLayoutProps) {
   // twoFactorRedirect instead of a session, and this code finishes it.
   const [needsTwoFactor, setNeedsTwoFactor] = useState(false);
   const [totpCode, setTotpCode] = useState("");
+  // B36: keep returnTo across the login↔signup swap link. Effect-set
+  // (not render-read) so SSR and hydration render the identical plain
+  // href — the suffix lands post-mount with no mismatch.
+  const [swapSuffix, setSwapSuffix] = useState("");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const target = targetAfterAuth();
+    setSwapSuffix(
+      target === "/new" ? "" : `?returnTo=${encodeURIComponent(target)}`,
+    );
+  }, []);
 
   const auth = useAuth();
 
@@ -195,9 +230,19 @@ export default function AuthLayout(props: AuthLayoutProps) {
     if (error?.field === "form") formErrorRef.current?.focus();
   }, [error]);
 
-  // Logged-in users don't need this page.
+  // Logged-in users don't need this page — bounce to the landing
+  // target (B36: the deep link when one was carried, else /new).
+  // Auth-path guard: the form handlers below navigate explicitly on
+  // success, and the status flip can render after their navigation
+  // already left /login — bouncing then would yank the fresh login
+  // back to /new and undo the return (A16). Only bounce while still
+  // ON an auth page.
   useEffect(() => {
-    if (auth.status === "authenticated") navigate("/new");
+    if (auth.status !== "authenticated") return;
+    if (typeof window === "undefined") return;
+    const path = window.location.pathname;
+    if (path !== "/login" && path !== "/signup") return;
+    navigate(targetAfterAuth());
   }, [auth.status]);
 
   // Field-level failures paint the field itself (Astryx renders the
@@ -303,7 +348,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
         });
         return;
       }
-      navigate("/new");
+      navigate(targetAfterAuth());
     } catch (e: unknown) {
       setError({
         field: "form",
@@ -328,7 +373,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
     setError(null);
     try {
       await verifySignInTwoFactor(totpCode);
-      navigate("/new");
+      navigate(targetAfterAuth());
     } catch (e: unknown) {
       // Rate-limit and expiry get their own copy (wait vs fresh code);
       // everything else keeps the long-standing fallback.
@@ -524,7 +569,7 @@ export default function AuthLayout(props: AuthLayoutProps) {
 
                   <Text type="supporting" color="secondary">
                     {props.swapLabel}{" "}
-                    <Link href={props.swapHref} type="supporting">
+                    <Link href={`${props.swapHref}${swapSuffix}`} type="supporting">
                       {props.swapHref === "/login" ? "Log in" : "Sign up"}
                     </Link>
                   </Text>

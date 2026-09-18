@@ -69,6 +69,7 @@ import {
   useSessionVersion,
 } from "../../lib/session";
 import { savePreference } from "../../lib/settings-scope";
+import { toTwoFactorDisableMessage, toTwoFactorEnrollMessage } from "../../lib/auth-errors";
 import { resolveExamMonth } from "../../lib/setting-study";
 import { resolveQuizConfig } from "../../lib/setting-quiz";
 import { useAuth, useProfile, useAccounts, linkGoogle, unlinkAccount, enableTwoFactor, verifyTwoFactorSetup, disableTwoFactor, changePassword, linkPassword, refreshAccounts, apiDeleteAccount, apiFetch, apiUpdateProfile, updateDisplayName, toUserMessage, AuthRequiredError, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH, MAX_DISPLAY_NAME_LENGTH } from "../../lib/auth";
@@ -1641,7 +1642,14 @@ export function AuthenticationSection() {
   const [isStarting2FA, setIsStarting2FA] = useState(false);
   const [code, setCode] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
-  const [isDisabling2FA, setIsDisabling2FA] = useState(false);
+  // 2FA password-confirm step (B33, credential accounts only): the
+  // server demands the password when a credential exists, so the
+  // enroll AND disable cards ask for it before calling. Passwordless
+  // users never see this — enable/disable go direct.
+  const [show2FAConfirm, setShow2FAConfirm] = useState(false);
+  const [twoFAConfirmMode, setTwoFAConfirmMode] = useState<"enable" | "disable">("enable");
+  const [twoFAConfirmPassword, setTwoFAConfirmPassword] = useState("");
+  const [twoFAConfirmError, setTwoFAConfirmError] = useState<string | null>(null);  const [isDisabling2FA, setIsDisabling2FA] = useState(false);
   // Change-password form (credential accounts only): current + new.
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -1735,20 +1743,41 @@ export function AuthenticationSection() {
     }
   }
 
-  async function handleStart2FA() {
+  async function handleStart2FA(password?: string) {
     setIsStarting2FA(true);
     try {
-      const { totpURI, backupCodes } = await enableTwoFactor();
+      const { totpURI, backupCodes } = await enableTwoFactor(password);
       const secret = parseTotpSecret(totpURI);
       setCode("");
       setSetup({ secret, backupCodes });
+      setShow2FAConfirm(false);
+      setTwoFAConfirmPassword("");
+      setTwoFAConfirmError(null);
     } catch (e) {
-      toast({
-        body: toUserMessage(e, "Couldn't start 2FA setup. Try again."),
-        type: "error",
-      });
+      // Wrong-password lands on the confirm field (authored copy, B33);
+      // anything else keeps the existing toast path.
+      if (show2FAConfirm) {
+        setTwoFAConfirmError(toTwoFactorEnrollMessage(e));
+      } else {
+        toast({
+          body: toTwoFactorEnrollMessage(e),
+          type: "error",
+        });
+      }
     } finally {
       setIsStarting2FA(false);
+    }
+  }
+
+  async function handleConfirm2FAContinue() {
+    if (!twoFAConfirmPassword) {
+      setTwoFAConfirmError("Enter your current password.");
+      return;
+    }
+    if (twoFAConfirmMode === "disable") {
+      await handleDisable2FA(twoFAConfirmPassword);
+    } else {
+      await handleStart2FA(twoFAConfirmPassword);
     }
   }
 
@@ -1775,16 +1804,25 @@ export function AuthenticationSection() {
     }
   }
 
-  async function handleDisable2FA() {
+  async function handleDisable2FA(password?: string) {
     setIsDisabling2FA(true);
     try {
-      await disableTwoFactor();
+      await disableTwoFactor(password);
       setTwoFactorOn(false);
+      setShow2FAConfirm(false);
+      setTwoFAConfirmPassword("");
+      setTwoFAConfirmError(null);
     } catch (e) {
-      toast({
-        body: toUserMessage(e, "Couldn't turn off 2FA. Try again."),
-        type: "error",
-      });
+      // Same split as enroll: wrong-password lands on the confirm
+      // field (authored copy); anything else keeps the toast path.
+      if (show2FAConfirm) {
+        setTwoFAConfirmError(toTwoFactorDisableMessage(e));
+      } else {
+        toast({
+          body: toTwoFactorDisableMessage(e),
+          type: "error",
+        });
+      }
     } finally {
       setIsDisabling2FA(false);
     }
@@ -1957,7 +1995,17 @@ control={
                   size="sm"
                   isLoading={isDisabling2FA}
                   isDisabled={anyPending}
-                  onClick={() => void handleDisable2FA()}
+                  onClick={() => {
+                    // B33: same confirm step as enable — the server
+                    // demands the password for credential users.
+                    if (hasCredential) {
+                      setTwoFAConfirmMode("disable");
+                      setTwoFAConfirmError(null);
+                      setShow2FAConfirm(true);
+                    } else {
+                      void handleDisable2FA();
+                    }
+                  }}
                 />
               ) : (
                 <Button
@@ -1966,7 +2014,18 @@ control={
                   size="sm"
                   isLoading={isStarting2FA}
                   isDisabled={anyPending}
-                  onClick={() => void handleStart2FA()}
+                  onClick={() => {
+                    // B33: credential users confirm their password
+                    // first (the server demands it); passwordless
+                    // users go direct.
+                    if (hasCredential) {
+                      setTwoFAConfirmMode("enable");
+                      setTwoFAConfirmError(null);
+                      setShow2FAConfirm(true);
+                    } else {
+                      void handleStart2FA();
+                    }
+                  }}
                 />
               )
             }
@@ -2014,6 +2073,56 @@ control={
           )}
         </CardRows>
       </SettingsCard>
+      {hasCredential &&
+        show2FAConfirm &&
+        ((twoFAConfirmMode === "enable" && setup == null && !enabled2FA) ||
+          (twoFAConfirmMode === "disable" && enabled2FA)) && (
+        <SettingsCard title="Confirm your password">
+          <VStack padding={4} gap={3}>
+            <Text type="body" color="secondary">
+              {twoFAConfirmMode === "disable"
+                ? "Entering your current password lets us turn off two-factor."
+                : "Entering your current password lets us start two-factor setup."}
+            </Text>
+            <TextInput
+              label="Current password"
+              type="password"
+              placeholder="Your current password"
+              value={twoFAConfirmPassword}
+              onChange={setTwoFAConfirmPassword}
+              status={
+                twoFAConfirmError != null
+                  ? { type: "error", message: twoFAConfirmError }
+                  : undefined
+              }
+              onEnter={() => {
+                void handleConfirm2FAContinue();
+              }}
+            />
+            <HStack gap={2}>
+              <Button
+                label="Continue"
+                variant="primary"
+                size="sm"
+                isLoading={isStarting2FA || isDisabling2FA}
+                isDisabled={isStarting2FA || isDisabling2FA}
+                clickAction={() => void handleConfirm2FAContinue()}
+              />
+              <Button
+                label="Cancel"
+                variant="secondary"
+                size="sm"
+                isDisabled={isStarting2FA || isDisabling2FA}
+                onClick={() => {
+                  setShow2FAConfirm(false);
+                  setTwoFAConfirmPassword("");
+                  setTwoFAConfirmError(null);
+                }}
+              />
+            </HStack>
+          </VStack>
+        </SettingsCard>
+      )}
       {hasCredential && showPasswordForm && (
         <SettingsCard title="Change your password">
           <VStack padding={4} gap={3}>

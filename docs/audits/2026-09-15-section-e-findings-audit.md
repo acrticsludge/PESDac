@@ -255,6 +255,10 @@ failure-leg test there doesn't re-bite.
 - **B34 filed** (see above) — Astro-internal, no code change.
 - **O11 closed:** section-d mock ported to lazy-thunk fallbacks;
   section-d re-verified green on the ported mock.
+- Post-commit hardening (rides the F commit): every cookie test now
+  mints its own session first (`ensureSeed`) — the F campaign's real
+  logouts murdered the shared seed row mid-week (8/10 red, zero code
+  change; see F audit T69). Suite behavior unchanged, hermetic now.
 - Verify: `tsc` clean (same 3 pre-existing errors elsewhere), unit
   378/378, section-e 10/10, section-d 19/19 (plus R8 ×5 stress:
   4/5 — the one red is B34's Astro race, gate-only noise),

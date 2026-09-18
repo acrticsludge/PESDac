@@ -79,6 +79,55 @@ function originOf(value: string): string {
   }
 }
 
+/**
+ * Our own origin for the allowlist-of-one, derived from the request's
+ * Host header — NOT from Astro's `url.origin` (B32). Probed: under
+ * `astro preview`, `url.origin` reports the baseURL port (:4321) even
+ * when the request Host is :4323, so every same-origin browser call
+ * 403'd. The Host header is what the client actually addressed.
+ *
+ * Spoofing analysis (why Host-derived self stays sound): the check
+ * compares the browser-set Origin against self. A CSRF page cannot
+ * spoof Host (the browser sets it from the target URL) nor Origin,
+ * so evil.com → real-server still 403s. A curl attacker CAN set both
+ * Host and Origin to evil — but then still needs the victim's session
+ * cookie, which is the real authentication (this check is CSRF
+ * defense-in-depth, same as the backend's check_mutation_origin).
+ * Scheme: X-Forwarded-Proto first (TLS-terminating proxies), else the
+ * request URL's scheme. A spoofed proto can only fail the check
+ * closed (self ≠ browser Origin → 403), never open it.
+ */
+export function selfOriginFromRequest(
+  headers: Headers,
+  fallbackOrigin: string,
+): string {
+  const host = headers.get("host")?.trim().toLowerCase();
+  if (host) {
+    const forwarded = headers
+      .get("x-forwarded-proto")
+      ?.split(",")[0]
+      ?.trim()
+      .toLowerCase();
+    const scheme =
+      forwarded === "http" || forwarded === "https"
+        ? forwarded
+        : (() => {
+            try {
+              const protocol = new URL(fallbackOrigin).protocol
+                .replace(/:$/, "")
+                .toLowerCase();
+              return protocol === "http" || protocol === "https"
+                ? protocol
+                : "http";
+            } catch {
+              return "http";
+            }
+          })();
+    return `${scheme}://${host}`;
+  }
+  return fallbackOrigin.toLowerCase();
+}
+
 /** Unknown-safe extraction of better-call's APIError ({statusCode, body:{code,message}}). */
 function apiErrorParts(e: unknown): {
   status: number;

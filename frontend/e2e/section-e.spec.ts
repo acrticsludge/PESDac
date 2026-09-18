@@ -1,5 +1,8 @@
 // Section E — offline & slow network [mock] + [cdp] with a real
 // BetterAuth session (seed users in Neon) + mocked FastAPI.
+// Hermetic sessions: every cookie test mints its own session FIRST
+// (ensureSeed, ~4s) — the shared seed row dies whenever any suite
+// really logs out (T54/O15 doctrine; F's campaign murdered it once).
 // Same base harness as section-d (one router per test after
 // `unrouteAll`, counters asserted after, server journal + meta,
 // mutable offline flag with abort-shaped legs — the same TypeError
@@ -57,10 +60,26 @@
 
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import * as fs from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
+const execFileAsync = promisify(execFile);
 const TEMP = "C:\\Users\\anubh\\AppData\\Local\\Temp\\opencode";
+const ROOT = "C:\\Anubhav\\Web Dev Projects\\PESDac";
 const PASS_COOKIES = `${TEMP}\\seed-cookies.json`;
 const O9_HAR = "e2e/hars/o9.har";
+
+// Hermetic sessions: the shared seed row dies whenever any suite
+// really logs out (F's A10/A14 murdered it mid-campaign — 8/10 red
+// with zero code change). Mint fresh per cookie test (~4s), same
+// T54/O15 doctrine as section-f.
+async function ensureSeed() {
+  await execFileAsync("npx.cmd", ["tsx", "seed-e2e.local.mts"], {
+    cwd: ROOT,
+    timeout: 60000,
+    shell: true,
+  });
+}
 
 type NamedCookie = { name: string; value: string };
 
@@ -652,6 +671,7 @@ test("O1 — offline send surfaces the unsynced pill, no banner, stays usable", 
   context,
 }) => {
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const flags = { offline: false };
@@ -706,6 +726,7 @@ test("O2 — offline x3 sends reconnect in order, acked once each", async ({
 }) => {
   test.setTimeout(90000);
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const flags = { offline: false };
@@ -797,6 +818,7 @@ test("O2b — seeded create + append drain create-first", async ({
   context,
 }) => {
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const code = "o2cc33";
@@ -845,6 +867,7 @@ test("O3 — offline reload keeps 2 queued ops, reconnect replays FIFO", async (
 }) => {
   test.setTimeout(90000);
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const flags = { offline: false };
@@ -912,6 +935,7 @@ test("O4 — 201st op evicts oldest, pill says so, newest 200 kept", async ({
 }) => {
   test.setTimeout(120000);
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const flags = { offline: true };
@@ -979,6 +1003,7 @@ test("O5 — attempts exhausted go failed-fatal, reload revives", async ({
 }) => {
   test.setTimeout(120000);
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const code = "o5ee55";
@@ -1092,6 +1117,7 @@ test("O6 — slow-3G cold load shows skeletons then content", async ({
 }) => {
   test.setTimeout(120000);
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const cdp = await context.newCDPSession(page);
@@ -1181,6 +1207,7 @@ test("O7 — slow chats list shows sidebar skeleton, rest interactive", async ({
 }) => {
   test.setTimeout(120000);
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const code = "o7gg77";
@@ -1261,6 +1288,7 @@ test("O8 — 30s scheduler auto-flushes the queued op, reconnect delivers", asyn
 }) => {
   test.setTimeout(150000);
   const errors = await collectErrors(page);
+  await ensureSeed();
   await addSession(context, PASS_COOKIES);
   const c = newCounters();
   const flags = { offline: false };
@@ -1318,6 +1346,7 @@ test("O9 — recorded HAR replays the app truly offline", async ({
     recordHar: { path: O9_HAR, update: true },
   });
   try {
+    await ensureSeed();
     await addSession(rec, PASS_COOKIES);
     const c = newCounters();
     const code = "o9ii99";
@@ -1405,6 +1434,7 @@ test("O9 — recorded HAR replays the app truly offline", async ({
   // Replay: nothing but the archive (aborts prove it) + no network.
   const rep = await browser.newContext();
   try {
+    await ensureSeed();
     await addSession(rep, PASS_COOKIES);
     const p = await rep.newPage();
     const errors = await collectErrors(p);

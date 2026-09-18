@@ -1309,12 +1309,16 @@ const LOGOUT_TIMEOUT_MS = 15000;
   // have (deleted or unknown code). Bounce to /new instead of stranding
   // the welcome composer on a chat URL. Runs only when the store is live,
   // so in-app opens (chat written before draftCode is set) never trip it.
+  // B36: guests skip the bounce — a guest store never holds customs, so
+  // bouncing pre-login would shred the deep target returnTo exists to
+  // preserve. The authed store bounces later if the code is truly dead.
   useEffect(() => {
     if (!chatRowsLive) return;
     if (draftCode == null) return;
+    if (authState.status !== "authenticated") return;
     if (customs.some((c) => c.code === draftCode)) return;
     navigate("/new");
-  }, [chatRowsLive, customs, draftCode]);
+  }, [chatRowsLive, customs, draftCode, authState.status]);
 
   const [attachments, setAttachments] = useState<StagedFile[]>([]);
 

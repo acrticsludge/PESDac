@@ -9,6 +9,7 @@ import {
   handleLinkPassword,
   LINK_PASSWORD_MAX_LENGTH,
   LINK_PASSWORD_MIN_LENGTH,
+  selfOriginFromRequest,
   __clearLinkPasswordAttemptsForTesting,
   type LinkPasswordRequest,
   type SetPasswordFn,
@@ -189,4 +190,58 @@ test("setPassword 5xx and foreign throws become generic 500s (no leak)", async (
   assert.deepEqual(foreign.body, {
     error: { code: "AUTH_ERROR", message: "Couldn't link password. Try again." },
   });
+});
+
+// B32: self derives from the request Host, never Astro's url.origin
+// (preview reports the baseURL port there, not the Host).
+test("selfOriginFromRequest prefers Host, then X-Forwarded-Proto, then fallback", () => {
+  const host = (h: Record<string, string>, fallback = "http://localhost:4321") =>
+    selfOriginFromRequest(new Headers(h), fallback);
+  // Preview shape: Host :4323, poisoned fallback :4321 → Host wins.
+  assert.equal(
+    host({ host: "localhost:4323" }, "http://localhost:4321"),
+    "http://localhost:4323",
+  );
+  // TLS proxy shape: scheme from X-Forwarded-Proto.
+  assert.equal(
+    host(
+      { host: "app.example.com", "x-forwarded-proto": "https" },
+      "http://localhost:4321",
+    ),
+    "https://app.example.com",
+  );
+  // Spoofed proto can only fail closed (invalid values ignored).
+  assert.equal(
+    host(
+      { host: "localhost:4323", "x-forwarded-proto": "gopher" },
+      "http://localhost:4321",
+    ),
+    "http://localhost:4323",
+  );
+  // No Host at all → fallback (old behavior, unchanged).
+  assert.equal(host({}, "http://localhost:4321"), "http://localhost:4321");
+});
+
+test("Host-derived self lets the preview browser shape through end to end", async () => {
+  __clearLinkPasswordAttemptsForTesting();
+  const calls: Array<{ password: string; headers: Headers }> = [];
+  const headers = new Headers({
+    cookie: "better-auth.session_token=abc",
+    host: "localhost:4323",
+    origin: "http://localhost:4323",
+    referer: "http://localhost:4323/new",
+  });
+  const res = await handleLinkPassword(
+    {
+      selfOrigin: selfOriginFromRequest(headers, "http://localhost:4321"),
+      origin: "http://localhost:4323",
+      referer: "http://localhost:4323/new",
+      clientIp: "10.0.0.9",
+      body: { newPassword: "passwordpassword" },
+      headers,
+    },
+    { setPassword: okSetPassword(calls) },
+  );
+  assert.equal(res.status, 200);
+  assert.equal(calls.length, 1);
 });

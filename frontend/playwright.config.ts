@@ -25,5 +25,12 @@ export default defineConfig({
     url: "http://localhost:4323/new",
     reuseExistingServer: false,
     timeout: 120_000,
+    // B31(env): the preview serves :4323 while BetterAuth's baseURL is
+    // :4321, so every browser sign-up/sign-in POST 403s INVALID_ORIGIN
+    // unless :4323 is a trusted origin. Scoped to the server under
+    // test — dev (:4321) needs nothing, deployments set their own.
+    env: {
+      BETTER_AUTH_TRUSTED_ORIGINS: "http://localhost:4323",
+    },
   },
 });

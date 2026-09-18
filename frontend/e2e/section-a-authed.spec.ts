@@ -36,10 +36,27 @@
 
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import * as fs from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
+const execFileAsync = promisify(execFile);
 const TEMP = "C:\\Users\\anubh\\AppData\\Local\\Temp\\opencode";
+const ROOT = "C:\\Anubhav\\Web Dev Projects\\PESDac";
 const PASS_COOKIES = `${TEMP}\\seed-cookies.json`;
 const GOOGLE_COOKIES = `${TEMP}\\seed-google-cookies.json`;
+
+// Hermetic Google session: E18 is the only test on the Google seed,
+// and section-f's A5-logout / A11-disable both revoke it as a side
+// effect (T54 class — a static cookie file cannot survive a campaign
+// that really logs out). Reset first (~4s); also drops any linked
+// credential so the Add path exists deterministically.
+async function ensureGoogleSeed() {
+  await execFileAsync("npx.cmd", ["tsx", `${TEMP}\\seed-googleonly.mts`], {
+    cwd: ROOT,
+    timeout: 60000,
+    shell: true,
+  });
+}
 
 type NamedCookie = { name: string; value: string };
 
@@ -1140,6 +1157,7 @@ test("E18 — link-password 429 honors cooldown, no resubmit bypass", async ({
   context,
 }) => {
   const errors = await collectErrors(page);
+  await ensureGoogleSeed();
   await addSession(context, GOOGLE_COOKIES);
   const c = newCounters();
   await mockBackend(page, c, {

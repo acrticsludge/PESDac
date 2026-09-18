@@ -33,6 +33,15 @@ import {
 // bounce); the gate never renders there.
 const AUTH_PATHS = new Set(["/login", "/signup"]);
 
+// B36: carry the deep target through login/signup so post-auth can
+// return here instead of dropping to /new. The gate only renders on
+// app routes, so the current path is always a meaningful target.
+function authTarget(path: "/login" | "/signup"): string {
+  if (typeof window === "undefined") return path;
+  const here = window.location.pathname + window.location.search;
+  return `${path}?returnTo=${encodeURIComponent(here)}`;
+}
+
 export default function AuthGate() {
   const auth = useAuth();
   // Logout flight (logout/relogin fix): the session is transiently guest
@@ -86,12 +95,12 @@ export default function AuthGate() {
                 <Button
                   label="Create account"
                   variant="primary"
-                  onClick={() => navigate("/signup")}
+                  onClick={() => navigate(authTarget("/signup"))}
                 />
                 <Button
                   label="Log in"
                   variant="secondary"
-                  onClick={() => navigate("/login")}
+                  onClick={() => navigate(authTarget("/login"))}
                 />
               </VStack>
             </VStack>
