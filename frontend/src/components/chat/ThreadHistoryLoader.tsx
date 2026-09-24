@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { VStack } from "@astryxdesign/core/Layout";
 import { ChatMessage } from "@astryxdesign/core/Chat";
 import { Avatar } from "@astryxdesign/core/Avatar";
@@ -27,6 +29,12 @@ export function ThreadHistoryLoader({ isModalOpen }: { isModalOpen?: boolean }) 
             calls={[
               { name: "history", target: "Chat history", status: "running" },
             ]}
+            // B46: same disabled→secondary promotion as the thread rows.
+            style={
+              {
+                "--color-text-disabled": "var(--color-text-secondary)",
+              } as CSSProperties
+            }
           />
         </ChatMessageBubble>
       </ChatMessage>

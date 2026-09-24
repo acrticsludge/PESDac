@@ -707,6 +707,21 @@ export default function ShellSideNav({
     setProfileTab(tab);
     setIsProfileOpen(true);
   };
+  // B41: the profile dialog unmounts on close (conditional render), so
+  // the vendor's trigger-restore never runs and focus falls to BODY.
+  // Return it to the invoking My Profile link on the open→closed edge.
+  const wasProfileOpen = useRef(false);
+  useEffect(() => {
+    if (wasProfileOpen.current && !isProfileOpen) {
+      const invoker = [...document.querySelectorAll("a")].find(
+        (a) =>
+          a.getAttribute("aria-label") === "My Profile" ||
+          a.textContent?.trim() === "My Profile",
+      ) as HTMLElement | undefined;
+      invoker?.focus();
+    }
+    wasProfileOpen.current = isProfileOpen;
+  }, [isProfileOpen]);
   // Standalone Settings dialog (spec llm-byok-settings §5.1): the
   // sidebar Settings row lands here, not in Profile.
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -1333,6 +1348,14 @@ const LOGOUT_TIMEOUT_MS = 15000;
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
 
   const composerInputRef = useRef<ChatComposerInputHandle>(null);
+  // B45: same vendor aria-multiline strip as the thread composer
+  // (ThreadView) — document-scoped here; the welcome composer has no
+  // container ref of its own. Idempotent with the thread effect.
+  useEffect(() => {
+    document
+      .querySelector('[role="combobox"][aria-multiline]')
+      ?.removeAttribute("aria-multiline");
+  });
 
   const dictation = useChatDictation({
     inputRef: composerInputRef,

@@ -1,3 +1,31 @@
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
 @import "../theme/PESDacMockup.css";
+
+/* Section I a11y overrides (B40/B44). Narrow, stable selectors only —
+   no broad resets, no theme-token changes. `!important` beats the
+   vendor's boosted resets (StyleX `:not(#\#)` specificity) for these
+   two properties and nothing else. */
+/* B40: the composer editable is the only Tab stop without a ring —
+   draw the standard Astryx keyboard ring (same tokens as every other
+   control) on keyboard focus only. */
+[contenteditable="true"][role="combobox"]:focus-visible,
+[contenteditable="true"][role="textbox"]:focus-visible {
+  outline-width: var(--focus-outline-width, 2px) !important;
+  outline-style: var(--focus-outline-style, solid) !important;
+  outline-color: var(--focus-outline-color, var(--color-accent)) !important;
+  outline-offset: var(--focus-outline-offset, 3px) !important;
+}
+/* B44: vendor button sizes top out at 36px (lg) — explicit 44px boxes
+   on the Send + Dictation composer controls (Attach is sized via its
+   own style prop in AttachButton.tsx). */
+.astryx-chat-send-button {
+  width: 44px !important;
+  height: 44px !important;
+  flex-shrink: 0 !important;
+}
+.astryx-chat-dictation-button .astryx-button {
+  width: 44px !important;
+  height: 44px !important;
+  flex-shrink: 0 !important;
+}

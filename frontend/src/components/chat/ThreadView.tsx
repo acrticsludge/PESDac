@@ -21,7 +21,6 @@ import { Markdown } from "@astryxdesign/core/Markdown";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Button } from "@astryxdesign/core/Button";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { Avatar } from "@astryxdesign/core/Avatar";
@@ -844,6 +843,15 @@ export default function ThreadView({
   } | null>(null);
   const rootRef = useRef<HTMLElement>(null);
   const composerInputRef = useRef<ChatComposerInputHandle>(null);
+  // B45: the vendor ChatComposerInput hardcodes aria-multiline="true" on
+  // the editable while our trigger menu promotes it to role=combobox —
+  // aria-multiline is textbox-only (axe-critical). Vendor-owned markup,
+  // so strip the attribute at the boundary; per-render covers remounts.
+  useEffect(() => {
+    rootRef.current
+      ?.querySelector('[role="combobox"][aria-multiline]')
+      ?.removeAttribute("aria-multiline");
+  });
   const dictation = useChatDictation({
     inputRef: composerInputRef,
     // B18: the vendor surfaces recognition errors here — denial gets a
@@ -1232,8 +1240,25 @@ export default function ThreadView({
     const failAt = plan.error === "stream-failed" && !opts?.forceOk;
     const running = plan.toolCalls.map((t) => ({ ...t, status: "running" as const, duration: "" }));
     setLive({ tools: running, text: "", full: plan.answer, followUps: plan.followUps });
+    const words = plan.answer.split(/(\s+)/);
+    // B43: reduced-motion calming — one settled paint instead of the
+    // word-chunk loop (content identical; K7 pins parity + timing). The
+    // vendor chevron already self-calms via its own reduce query.
+    if (
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      const partial = words
+        .slice(0, Math.max(2, Math.floor(words.length / 2)))
+        .join("");
+      later(150, () => {
+        if (failAt) failTurn(plan.toolCalls, partial, text);
+        else finalizeTurn(plan.toolCalls, plan.answer, plan.followUps, text);
+      });
+      return;
+    }
     later(700, () => {
-      const words = plan.answer.split(/(\s+)/);
       let i = 0;
       const step = () => {
         i += 2;
@@ -1472,6 +1497,9 @@ export default function ThreadView({
     // recovery instead of hanging answerless.
     if (live) failTurn(live.tools, live.text, lastUserText(blocks));
     else setLive(null);
+    // B41: the Stop button unmounts on settle — without this the landing
+    // is BODY. Composer keeps parity with edit-cancel/find-close.
+    composerInputRef.current?.focus();
   };
 
   // Reference menu → composer (same token shape as welcome).
@@ -1785,6 +1813,15 @@ export default function ThreadView({
           key="tools"
           defaultIsExpanded={block.toolCallsExpanded}
           calls={block.toolCalls}
+          // B46: target + duration spans paint in --color-text-disabled,
+          // which fails 4.5:1 — promote to secondary (the unflagged name
+          // span's tone on the same row) scoped to this subtree via the
+          // component's own style prop. No theme-token change.
+          style={
+            {
+              "--color-text-disabled": "var(--color-text-secondary)",
+            } as CSSProperties
+          }
         />
       ) : null;
     return (
@@ -2273,7 +2310,17 @@ export default function ThreadView({
                           {live.text + "▍"}
                         </Markdown>
                       </ChatMessageBubble>
-                      <ChatToolCalls calls={live.tools} />
+                      <ChatToolCalls
+                        calls={live.tools}
+                        // B46: same disabled→secondary promotion as the
+                        // history instance above (live row, same failure).
+                        style={
+                          {
+                            "--color-text-disabled":
+                              "var(--color-text-secondary)",
+                          } as CSSProperties
+                        }
+                      />
                       </ChatMessage>
                     )}
                     {/* Follow-ups anchor to the end of the message flow — never

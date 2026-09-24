@@ -26,6 +26,9 @@ export default function AttachButton({
         size="sm"
         isIconOnly
         icon={<Icon icon={PaperClipIcon} size="sm" />}
+        // B44: vendor sizes top out at 36px (lg) — the 44px plan bar
+        // needs an explicit box on this app-owned button.
+        style={{ width: 44, height: 44, flexShrink: 0 }}
         onClick={() => inputRef.current?.click()}
       />
       <input

@@ -902,13 +902,13 @@ Expect: contained scroll WITHIN message, `scrollWidth <= innerWidth` at 360px an
 Unplug-mouse run: `/` → type → Enter → `Ctrl+K`.
 Expect: complete chat cycle, zero pointer.
 
-### ~~K2 — Esc hierarchy `[staging]`~~ ✅ `section-i` K2+K2gate (stop→BODY, edit→composer, find→BODY per D15, gate yields; landings pinned)
+### ~~K2 — Esc hierarchy `[staging]`~~ ✅ `section-i` K2+K2gate (stop/edit/find all land in composer - B41 fixed, D15 superseded; gate yields; landings asserted)
 
 Streaming → Esc (stops) → edit → Esc (cancels) → find → Esc
 (closes) → gate open → Esc (yields, never trapped).
 Expect: exact order, focus lands sanely each step.
 
-### ~~K3 — Dialog focus traps~~ ✅ `section-i` K3 (profile/onboarding hold ≤1 BODY-hole stop — B39 family; keyboard Close works, focus→BODY not invoker — B41; onboarding ignores Esc by design)
+### ~~K3 — Dialog focus traps~~ ✅ `section-i` K3 (profile/onboarding wrap transient only, B39 closed as non-bug; keyboard Close restores invoker, B41 fixed; onboarding ignores Esc by design)
 
 Gate, ProfileDialog, onboarding: Tab cycles INSIDE, Esc/close
 returns focus to invoker. (Gate entry already pinned by a11y
@@ -920,7 +920,7 @@ Stream start/finish, error pill, `N unsynced`.
 Expect: screen-reader announcements fire (assert `aria-live`
 regions update; manual NVDA pass quarterly).
 
-### ~~K5 — Axe on live thread~~ ✅ `section-i` K5 (tripwire: exactly aria-allowed-attr + color-contrast — filed B45+B46 with node IDs)
+### ~~K5 — Axe on live thread~~ ✅ `section-i` K5 (tripwire now pins zero blocking - B45+B46 fixed)
 
 Axe run on thread with messages + error bubble + find open.
 Expect: serious/critical zero (same bar as existing suite).
@@ -930,18 +930,18 @@ Expect: serious/critical zero (same bar as existing suite).
 Repeat a11y zoom check on a loaded thread + open drawer.
 Expect: no horizontal overflow, composer reachable.
 
-### ~~K7 — Reduced motion~~ ✅ `section-i` K7 (completes identically under `reduce`; no calming branch exists — B43, D61)
+### ~~K7 — Reduced motion~~ ✅ `section-i` K7 (single-settle calming + identical content - B43 fixed; closer timing asserted)
 
 `prefers-reduced-motion: reduce` context → send.
 Expect: word-chunk/caret animation calms to instant-or-fade,
 content identical.
 
-### ~~K8 — Dictation without mic~~ ✅ `section-i` K8 (labelled "Start dictation"; denial silent honest no-op, announces nothing — B42)
+### ~~K8 — Dictation without mic~~ ✅ `section-i` K8 (labelled "Start dictation"; denial toasts via B18 onError - B42 closed; headless silence stands)
 
 Covered C17 — pointer; accessibility half: button labelled,
 denial announced.
 
-### ~~K9 — Touch targets, 360px~~ ✅ `section-i` K9 (28–32px pinned as <44 tripwire — B44; AA-24 floor holds; row menu via nav drawer)
+### ~~K9 — Touch targets, 360px~~ ✅ `section-i` K9 (44x44 composer controls - B44 fixed; AA-24 floor holds; row menu via nav drawer)
 
 Spot-measure Send / Attach / menu buttons.
 Expect: ≥44px (or documents intentional exceptions).
@@ -962,7 +962,7 @@ NVDA + Chrome: login → send → stop → retry → profile save.
 Expect: task-complete unassisted; log gaps as issues, promote
 stable ones into K4 automation.
 
-### ~~K13 — Visible focus, full tab tour~~ ✅ `section-i` K13+K13g (26-stop shell tours fully ringed; composer ringless — B40; gated 3-cycle BODY hole — B39; wrap-BODY allowance — D59)
+### ~~K13 — Visible focus, full tab tour~~ ✅ `section-i` K13+K13g (26-stop shell tours fully ringed incl composer - B40 fixed; gated cycle BODY is wrap at dialog scale - B39 closed; wrap allowance D59)
 
 Tab from URL bar through every control on `/new` + thread.
 Expect: every stop shows a visible indicator; zero focus-loss

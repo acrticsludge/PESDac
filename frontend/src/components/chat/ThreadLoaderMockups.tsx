@@ -1,5 +1,7 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { Theme } from "@astryxdesign/core/theme";
 import { PESDacMockupTheme } from "../../theme/PESDacMockup";
 import { VStack, HStack } from "@astryxdesign/core/Layout";
@@ -74,6 +76,12 @@ function OptionBToolcallChip() {
         calls={[
           { name: "history", target: "Chat history", status: "running" },
         ]}
+        // B46: same disabled→secondary promotion as the thread rows.
+        style={
+          {
+            "--color-text-disabled": "var(--color-text-secondary)",
+          } as CSSProperties
+        }
       />
     </ChatMessage>
   );
