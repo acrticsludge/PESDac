@@ -230,7 +230,7 @@ function pagedChatsRouter(apiLog: ApiCall[], opts?: { failSecondPage?: boolean }
     if ((init?.method ?? "GET") !== "GET") {
       // Migration PATCH echo: apply the patch onto a placeholder row.
       const code = url.split("/").pop()?.split("?")[0] ?? "unknown";
-      return apiJson({ ...serverChat(code), ...((body as Record<string, unknown>) ?? {}) });
+      return apiJson({ ...serverChat(code), ...(body as Record<string, unknown>) });
     }
     const u = new URL(url);
     const archived = u.searchParams.get("archived") === "true";

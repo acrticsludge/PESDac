@@ -448,21 +448,6 @@ async function realLogin(page: Page, email: string, password: string) {
   await page.waitForURL(/\/new/, { timeout: 25000 });
 }
 
-// Real signup through the UI (real BetterAuth + Neon).
-async function realSignup(
-  page: Page,
-  name: string,
-  email: string,
-  password: string,
-) {
-  await page.goto("/signup");
-  await page.getByPlaceholder("Your name").fill(name);
-  await page.getByPlaceholder("name@college.com").fill(email);
-  await page.getByPlaceholder("Choose your password").fill(password);
-  await page.getByRole("button", { name: "Create account", exact: true }).click();
-  await page.waitForURL(/\/new/, { timeout: 25000 });
-}
-
 async function openProfileDialog(page: Page) {
   await sidebar(page).getByRole("link", { name: "My Profile" }).click();
   await expect(page.getByRole("dialog").first()).toBeVisible({ timeout: 15000 });
@@ -760,7 +745,7 @@ test("A3 — logout then form-login as B shows only B state", async ({
 
 test("A4 — Google redirect abandoned leaves no half-session", async ({
   page,
-  context,
+  _context,
 }) => {
   test.setTimeout(120000);
   const errors = await collectErrors(page);
@@ -905,7 +890,7 @@ test("A6 — authed /login bounces to /new with gate closed", async ({
 
 test("A7 — delete with backend down fails honestly, touches nothing", async ({
   page,
-  context,
+  _context,
 }) => {
   test.setTimeout(180000);
   const errors = await collectErrors(page);
@@ -956,7 +941,7 @@ test("A7 — delete with backend down fails honestly, touches nothing", async ({
 
 test("A8 — taken-email signup explains, keeps password", async ({
   page,
-  context,
+  _context,
 }) => {
   const errors = await collectErrors(page);
   const c = newCounters();
@@ -1263,7 +1248,7 @@ test("A11 — 2FA enroll asks password users to confirm, full cycle works", asyn
 
 test("A12 — wrong password x5 never locks out, right one works", async ({
   page,
-  context,
+  _context,
 }) => {
   test.setTimeout(180000);
   const errors = await collectErrors(page);
@@ -1293,7 +1278,7 @@ test("A12 — wrong password x5 never locks out, right one works", async ({
 
 test("A13 — no password-reset flow exists to break", async ({
   page,
-  context,
+  _context,
 }) => {
   const errors = await collectErrors(page);
   const c = newCounters();
@@ -1376,7 +1361,7 @@ test("A14 — logout in one session leaves the other alive", async ({
 
 test("A15 — sign-in 429 surfaces calmly, no spinner leak", async ({
   page,
-  context,
+  _context,
 }) => {
   const errors = await collectErrors(page);
   const c = newCounters();
@@ -1417,7 +1402,7 @@ test("A15 — sign-in 429 surfaces calmly, no spinner leak", async ({
 
 test("A16 — guest deep link logs in back onto the thread", async ({
   page,
-  context,
+  _context,
 }) => {
   test.setTimeout(120000);
   const errors = await collectErrors(page);

@@ -910,7 +910,7 @@ test("P6 — Slow-3G cold load eventually reaches an interactive gate", async ({
 // Heap delta <50MB, zero console errors, responsive at the end.
 
 test("P7 — 10-minute idle soak: no leak, no errors, still responsive", async ({
-  context,
+  _context,
 }) => {
   test.setTimeout(750000);
   let headed;

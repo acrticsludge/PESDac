@@ -1115,7 +1115,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   }
   const headers: Record<string, string> = {
     Accept: "application/json",
-    ...(init.headers ?? {}),
+    ...init.headers,
   };
   // The FastAPI backend verifies a BetterAuth JWT (see app/deps.py), not
   // the session cookie — attach it when a session exists. Guests send no

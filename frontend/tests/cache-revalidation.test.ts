@@ -337,10 +337,10 @@ test("sibling-tab ping runs the Phase-1 reset with no navigation", async () => {
     });
     assert.equal(storageListeners.length, 1, "receiver subscribes exactly once");
     // Noise on other keys is ignored.
-    for (const fn of [...storageListeners]) fn({ key: "pesdac:other" });
+    for (const fn of storageListeners) fn({ key: "pesdac:other" });
     assert.equal(resets, 0, "unrelated storage keys never reset");
     // The logout ping drops the sibling cache immediately.
-    for (const fn of [...storageListeners]) fn({ key: LOGOUT_PING_KEY });
+    for (const fn of storageListeners) fn({ key: LOGOUT_PING_KEY });
     assert.equal(resets, 1, "ping triggers exactly one reset");
     assert.equal(listCustomChats().length, 0, "sibling rows dropped");
     assert.equal(getChatHydratedKey(), null, "hydrate marker dropped");

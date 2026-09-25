@@ -437,7 +437,6 @@ test("C1 — welcome send navigates, posts, streams; bodies carry subject + clie
   // Exactly one user turn + one assistant turn (article-scoped — immune
   // to title/echo text collisions).
   const userArticle = page.getByRole("article", { name: "Message from user" });
-  const asstArticle = page.getByRole("article", { name: "Message from assistant" });
   await expect(userArticle).toHaveCount(1, { timeout: 25000 });
   await expect(page.getByText("explain paging", { exact: true }).first()).toBeVisible({
     timeout: 25000,

@@ -6,6 +6,6 @@
  * Core: @astryxdesign/core@0.5.2
  */
 
-/// <reference path="./PESDacMockup.variants.d.ts" />
 import type { DefinedTheme } from '@astryxdesign/core/theme';
+import "./PESDacMockup.variants.d.ts";
 export declare const PESDacMockupTheme: DefinedTheme;
