@@ -4,8 +4,7 @@
 > `frontend/e2e/section-*.spec.ts`, findings in `docs/audits/`).
 > Residual schedule: K12 quarterly screen-reader pass, M2 weekly
 > drift run, M3 monthly sampling, O25 K12 quarterly axe tripwire.
-> Open code items (no stop-ship): B48, B47, B45/B46, B39–B41/B44,
-> B31, B33, B36–B38 — see the close-out §N. Do not add new items
+> Open code items (no stop-ship): B38 (Slow-3G gate), B37 (/mockup* in prod) — B48/B47/B45/B46/B39–B41/B43/B44/B31/B33/B36 closed in the F–K fix rounds; see the close-out §N. Do not add new items
 > here; M3 intake goes to `section-m.spec.ts` as M1/T21+.
 
 Date: 2026-09-14. App: Astro SSR + React 19 + Astryx 0.5.2, single
@@ -1194,10 +1193,8 @@ per test). Axe serious/critical: only the K5 tripwire pair open
 (B45/B46). Bundle check green (P5).
 
 Open items (all polish/process, no stop-ship):
-- Code: B48 (outbox compaction), B47 (send toast path), B45/B46
-  (axe), B39–B41/B44 (focus-ring/touch), B31 (origins env), B33
-  (2FA confirm), B36 (return-to-target), B38 (Slow-3G gate), B37
-  (`/mockup*` in prod).
+- Code: B38 (Slow-3G gate), B37 (`/mockup*` in prod) — B48/B47/
+  B45/B46/B39–B41/B43/B44/B31/B33/B36 closed in the F–K fix rounds.
 - Schedule: K12 + O25 quarterly passes, M2 weekly, M3 monthly.
 - Intake: sampled failures → `section-m` M1/T21+ (M3).
 
