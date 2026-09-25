@@ -18,8 +18,8 @@
 // (no history mirror), delete-on-ack, a hard cap with oldest-first
 // eviction (see outbox.ts), and strict shape validation on load —
 // durable storage is treated as untrusted input (XSS review: malformed
-// rows are dropped, never rendered; payloads are only ever POSTed back
-// to the server, never innerHTML'd).
+// rows are dropped and compacted from disk (B48), never rendered;
+// payloads are only ever POSTed back to the server, never innerHTML'd).
 //
 // Memory fallback: when IndexedDB is unavailable (SSR, node tests, very
 // old browsers) the same API runs on a Map — session-scoped instead of
@@ -186,7 +186,8 @@ export class OutboxStore {
 
   /**
    * All ops, oldest first (FIFO). Malformed rows are dropped, never
-   * surfaced. Memory entries missing from the IDB rows are unioned in:
+   * surfaced — and compacted from disk when they carry an id (B48).
+   * Memory entries missing from the IDB rows are unioned in:
    * a `put` that fell back to memory after a transient IDB failure must
    * still drain — otherwise the op would sit invisible to the flush
    * worker (never sent, never evicted). IDB rows win on id collisions
@@ -208,6 +209,17 @@ export class OutboxStore {
       return memory.sort(byCreated);
     }
     const valid = rows.filter(isValidOutboxOp);
+    // B48: compact the corruption — delete rejected rows that carry an
+    // id instead of leaving them on disk forever (filtering alone kept
+    // ["evil-row"] across reloads; D12 pins the empty store). remove()
+    // is replay-safe and a no-op for absent memory keys; rows without
+    // an id cannot exist (keyPath store rejects them on write).
+    for (const row of rows) {
+      if (!isValidOutboxOp(row)) {
+        const id = (row as { id?: unknown }).id;
+        if (typeof id === "string" && id !== "") await this.remove(id);
+      }
+    }
     const seen = new Set(valid.map((op) => op.id));
     for (const op of memory) {
       if (!seen.has(op.id)) valid.push(op);

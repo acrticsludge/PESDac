@@ -1096,7 +1096,7 @@ coalesce per `cache-revalidation.test.ts` — don't assert instant).
 Set subject override on one chat → reload → verify routing +
 resolver order per-chat > subject > global (`settings-scope`).
 
-### ~~D12 — Corrupt IndexedDB outbox row~~ ✅ `section-k` D12 (evil row filtered from reads — valid op flushes exactly once, boot clean; row persists on disk — filed B48)
+### ~~D12 — Corrupt IndexedDB outbox row~~ ✅ `section-k` D12 (evil row filtered + compacted — valid op flushes exactly once, boot clean, store ends empty — B48 fixed)
 
 Write an untrusted-shape row into `pesdac-outbox` (test hook or
 DevTools setup step), reload.
