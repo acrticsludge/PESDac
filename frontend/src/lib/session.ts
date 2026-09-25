@@ -29,7 +29,10 @@ import {
 } from "./chat-sync.ts";
 import { enqueueAppend } from "./outbox.ts";
 import { classifyOutboxError, outboxQueue } from "./outbox-queue.ts";
-import { AuthServiceError } from "./api/errors.ts";
+// B47: the leaf import is cycle-safe (api/errors.ts imports only a
+// type) — the send leg resolves copy through toUserMessage instead of
+// the leg-fixed fallback.
+import { AuthServiceError, toUserMessage } from "./api/errors.ts";
 
 export type CustomChat = {
   code: string;
@@ -1069,6 +1072,8 @@ function isTransportFailure(error: unknown): boolean {
 // Per-leg copy resolution (B4): auth-service outages surface their authored
 // message (same as the campus saveIdentity toUserMessage path) — everything
 // else keeps the leg's fixed copy (500s stay specific, never generic).
+// Exception (B47): the send leg passes a toUserMessage-resolved body in,
+// so 5xx/transport/known-4xx read like every other surface there.
 // Transport branching (B2) lives in createChatBacked only: the welcome
 // create leg is the one the plan pins to the offline copy; hydrate/history
 // keep their "Showing what's on this device" context even when the
@@ -1507,11 +1512,23 @@ export async function persistAppendedBlock(
     if (sendId != null) outboxQueue.markSent(sendId);
     return true;
   } catch (error) {
-    notifyFailure(error, opts?.notify, "Couldn't save that message. Try again.");
+    // B47: the send leg resolves through toUserMessage (same as every
+    // other surface) — 5xx reads "our end", transport reads connection,
+    // known 4xx pass the server message through. The fixed string below
+    // is only the fallback for unshaped failures. Other legs keep their
+    // fixed copy per B4.
+    notifyFailure(
+      error,
+      opts?.notify,
+      toUserMessage(error, "Couldn't save that message. Try again."),
+    );
     if (!isAuthFailure(error)) {
       chatSyncErrors.set(
         code,
-        resolveFailureCopy(error, "Couldn't save that message. Try again."),
+        resolveFailureCopy(
+          error,
+          toUserMessage(error, "Couldn't save that message. Try again."),
+        ),
       );
       if (sendId != null && outboxQueue.get(sendId)?.status === "pending") {
         // Durable retry (outbox T5c): persist the same keyed send for the

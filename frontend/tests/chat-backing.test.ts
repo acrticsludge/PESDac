@@ -474,7 +474,11 @@ test("failed user-block persist rolls back the optimistic paint + one toast", as
       { notify: (body) => notifies.push(body) },
     );
     assert.equal(ok, false);
-    assert.deepEqual(notifies, ["Couldn't save that message. Try again."]);
+    // B47: the send leg resolves through toUserMessage — 500s read the
+    // 5xx copy, not the old leg-fixed fallback.
+    assert.deepEqual(notifies, [
+      "That didn't work on our end. Please try again later.",
+    ]);
     assert.deepEqual(
       apiLog.map((c) => `${c.method} ${c.url}`).at(-1),
       "POST https://api.test/api/v1/chats/c-back-t/messages",

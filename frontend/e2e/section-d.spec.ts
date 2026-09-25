@@ -1362,9 +1362,11 @@ test("R14 — offline flap x5: exactly-once delivery, no dupe or loss", async ({
   const { journal } = await openSeededThread(page, c, {}, { flags });
   flags.offline = true;
   await threadSend(page, "queued while offline");
-  // Honest failure: paint rolls back, toast fires, assistant never starts.
+  // Honest failure: paint rolls back, toast fires (B47 — the send leg
+  // resolves through toUserMessage, so transport reads connection),
+  // assistant never starts.
   await expect(
-    page.getByText("Couldn't save that message", { exact: false }).first(),
+    page.getByText("Couldn't reach the server", { exact: false }).first(),
   ).toBeVisible({ timeout: 15000 });
   await expect(userArticle(page)).toHaveCount(0, { timeout: 15000 });
   // Flap the network 5x inside 10s: nothing may duplicate or drop.

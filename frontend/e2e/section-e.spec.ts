@@ -22,13 +22,14 @@
 // - Pill copy (ThreadView.tsx): "N unsynced — will send
 //   automatically when online." + " M oldest dropped (outbox full)."
 //   + " K failed and won't retry until reload." No banner exists.
-// - Live-send failure rolls back the paint, toasts "Couldn't save
-//   that message", queues the op durably (R14 shape).
+// - Live-send failure rolls back the paint, toasts the toUserMessage
+//   copy for the failure kind (B47 — offline legs read the connection
+//   copy, 500s read the 5xx copy), queues the op durably (R14 shape).
 // - Reconnected flush repaints when a sync error is showing (B26):
 //   the drain forces a messages reload, so delivered turns paint and
-//   the successful load clears the error itself (B28 — no stale
-//   "Couldn't save that message", and the pill suffixes surface
-//   instead of hiding beneath it, B29). O2 is the proof. Flushes
+//   the successful load clears the error itself (B28 — no stale sync
+//   error, and the pill suffixes surface instead of hiding beneath
+//   it, B29). O2 is the proof. Flushes
 //   with no error showing (O3's reload-offline shape) still need a
 //   reload to repaint — documented residual, not a false signal.
 // - failed-fatal ops skip every worker flush until reload rebuilds
@@ -141,9 +142,7 @@ async function expectCleanEnv(errors: string[], allowHydraMismatch = false, extr
   expect(app, `expected zero app errors, got:\n${app.join("\n")}`).toEqual([]);
 }
 
-const OFFLINE_COPY =
-  "Couldn't reach the server. Check your connection and try again.";
-const SAVE_FAIL_COPY = "Couldn't save that message";
+const OFFLINE_SEND_COPY = "Couldn't reach the server";
 const unsyncedCopy = (n: number) =>
   `${n} unsynced — will send automatically when online.`;
 const EVICT_COPY = "1 oldest dropped (outbox full).";
@@ -521,27 +520,6 @@ async function openSeededThread(
   return { journal, meta };
 }
 
-async function openWelcome(
-  page: Page,
-  c: Counters,
-  ov: BackendOv = {},
-  extra: MockOpts = {},
-) {
-  const { journal, meta } = await mockBackend(page, c, ov, extra);
-  await page.goto("/new");
-  await page
-    .getByText("Ask anything", { exact: false })
-    .first()
-    .waitFor({ timeout: 25000 });
-  await expect
-    .poll(
-      async () => composerBox(page).getAttribute("contenteditable"),
-      { timeout: 25000 },
-    )
-    .toBe("true");
-  return { journal, meta };
-}
-
 const composerBox = (page: Page) =>
   page.getByRole("combobox", { name: "Message input" });
 const sendBtn = (page: Page) =>
@@ -680,13 +658,13 @@ test("O1 — offline send surfaces the unsynced pill, no banner, stays usable", 
   flags.offline = true;
   await threadSend(page, "o1 hello while offline");
   await expect(
-    page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+    page.getByText(OFFLINE_SEND_COPY, { exact: false }).first(),
   ).toBeVisible({ timeout: 15000 });
   await expect(userArticle(page)).toHaveCount(0, { timeout: 15000 });
   // Honest failure inline (sync-error status outranks the pill while
   // set — ThreadView status ternary), never a banner.
   await expect(
-    page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+    page.getByText(OFFLINE_SEND_COPY, { exact: false }).first(),
   ).toBeVisible({ timeout: 15000 });
   await expect(page.locator("[role='banner']")).toHaveCount(0);
   expect(c.messagesPost).toBeGreaterThanOrEqual(1);
@@ -744,14 +722,14 @@ test("O2 — offline x3 sends reconnect in order, acked once each", async ({
   for (const t of texts) {
     await threadSend(page, t);
     await expect(
-      page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+      page.getByText(OFFLINE_SEND_COPY, { exact: false }).first(),
     ).toBeVisible({ timeout: 15000 });
     await expect(userArticle(page)).toHaveCount(0, { timeout: 15000 });
   }
   // While offline the sync-error status outranks the pill (status
   // ternary) — the honest inline copy is what's visible.
   await expect(
-    page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+    page.getByText(OFFLINE_SEND_COPY, { exact: false }).first(),
   ).toBeVisible({ timeout: 15000 });
   expect(c.messagesPost).toBeGreaterThanOrEqual(3);
   expect(journal.get(code) ?? []).toEqual([]);
@@ -777,8 +755,8 @@ test("O2 — offline x3 sends reconnect in order, acked once each", async ({
   expect(keys.every((k) => typeof k === "string" && k.length > 0)).toBe(true);
   // B26+B28 (fixed): the drain repaints AND clears the sync error —
   // no reload. Proof is behavioral, not textual: the vendor toasts
-  // share the "Couldn't save that message" copy and outlive the
-  // flush, so bare-text absence is unassertable. But three painted
+  // share the failure copy and outlive the flush, so bare-text absence
+  // is unassertable. But three painted
   // articles with no reload in between are only reachable through
   // the drain-triggered reload, whose success exits both delete the
   // sync error (session.ts) — the repaint IS the clearing proof.
@@ -877,7 +855,7 @@ test("O3 — offline reload keeps 2 queued ops, reconnect replays FIFO", async (
   for (const t of ["o3 one", "o3 two"]) {
     await threadSend(page, t);
     await expect(
-      page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+      page.getByText(OFFLINE_SEND_COPY, { exact: false }).first(),
     ).toBeVisible({ timeout: 15000 });
     await expect(userArticle(page)).toHaveCount(0, { timeout: 15000 });
   }
@@ -958,7 +936,7 @@ test("O4 — 201st op evicts oldest, pill says so, newest 200 kept", async ({
   // The 201st op (live offline send) triggers enforceCap on enqueue.
   await threadSend(page, "o4 live message");
   await expect(
-    page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+    page.getByText(OFFLINE_SEND_COPY, { exact: false }).first(),
   ).toBeVisible({ timeout: 15000 });
   // Drain-gate: send#1's kick flushes 200 ops with an IDB write each
   // and runs seconds. Flipping online mid-flush would let the tail
@@ -1311,7 +1289,7 @@ test("O8 — 30s scheduler auto-flushes the queued op, reconnect delivers", asyn
   flags.offline = true;
   await threadSend(page, "o8 scheduled");
   await expect(
-    page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+    page.getByText(OFFLINE_SEND_COPY, { exact: false }).first(),
   ).toBeVisible({ timeout: 15000 });
   await expect(userArticle(page)).toHaveCount(0, { timeout: 15000 });
   const afterSend = c.messagesPost;
@@ -1325,7 +1303,7 @@ test("O8 — 30s scheduler auto-flushes the queued op, reconnect delivers", asyn
   // While offline the sync-error status outranks the pill — the
   // honest inline copy is what's visible (O1 shape).
   await expect(
-    page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+    page.getByText(OFFLINE_SEND_COPY, { exact: false }).first(),
   ).toBeVisible({ timeout: 15000 });
   // Reconnect: online event delivers, no manual retry of the op.
   flags.offline = false;

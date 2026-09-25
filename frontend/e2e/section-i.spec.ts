@@ -527,8 +527,6 @@ async function tabStop(page: Page): Promise<TourStop> {
   });
 }
 
-const SAVE_FAIL_COPY = "Couldn't save that message";
-
 // ---- K1 ---------------------------------------------------------------------
 // Keyboard-only full send (headless per D55): `/` focuses the composer
 // from body, typed text + Enter sends (chat created, turn streams to
@@ -782,13 +780,14 @@ test("K4 — stream, error, and unsynced pill all reach live regions", async ({
   const errText = await logText();
   expect(errText.length, "error text mirrored into role=log").toBeGreaterThan(settled.length);
   console.log("[K4] stream + error announced via role=log");
-  // Offline leg (O1 recipe): abort → inline failure → reload → pill.
+  // Offline leg (O1 recipe): abort → inline failure (B47 — the send
+  // leg reads the connection copy) → reload → pill.
   flags.offline = true;
   await composerBox(page).click();
   await page.keyboard.type("o1 hello while offline", { delay: 5 });
   await sendBtn(page).click();
   await expect(
-    page.getByText(SAVE_FAIL_COPY, { exact: false }).first(),
+    page.getByText("Couldn't reach the server", { exact: false }).first(),
   ).toBeVisible({ timeout: 15000 });
   await page.reload();
   await page

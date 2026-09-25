@@ -59,7 +59,10 @@ const HYDRATE_MSG = "Couldn't load your chats. Showing what's on this device.";
 const HISTORY_MSG =
   "Couldn't load this chat's history. Showing what's on this device.";
 const CREATE_MSG = "Couldn't create that chat. Try again.";
-const APPEND_MSG = "Couldn't save that message. Try again.";
+// B47: the append leg resolves through toUserMessage — 500s read the
+// 5xx copy (offline legs read the connection copy; truncate keeps its
+// fixed copy — asserted below).
+const APPEND_MSG = "That didn't work on our end. Please try again later.";
 const TRUNCATE_MSG = "Couldn't update that chat. Try again.";
 
 function tokenOk(token: string): Response {
