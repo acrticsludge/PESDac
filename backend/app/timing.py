@@ -162,9 +162,16 @@ def _on_db_error(context) -> None:
 
 
 async def timing_middleware(request: Request, call_next) -> Response:
-    """Time the request and its DB statements; log one line + set headers."""
+    """Time the request and its DB statements; log one line + set headers.
+
+    Also sets `X-Request-ID` (UUID per request, spec retrieval-phase1
+    §5 shared contracts) for log correlation across the API.
+    """
+    import uuid as _uuid
+
     stats = new_stats()
     token = _stats_var.set(stats)
+    request_id = str(_uuid.uuid4())
     # NOTE: the label is computed AFTER call_next (see below) — this
     # middleware runs before routing, so scope["route"] only exists
     # once handling has started.
@@ -175,12 +182,13 @@ async def timing_middleware(request: Request, call_next) -> Response:
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         _stats_var.reset(token)
         logger.info(
-            "%s %s ERR total_ms=%.1f db_ms=%.1f db_queries=%d",
+            "%s %s ERR total_ms=%.1f db_ms=%.1f db_queries=%d rid=%s",
             request.method,
             _log_label(request),
             elapsed_ms,
             stats["db_ms"],
             stats["queries"],
+            request_id,
         )
         raise
     elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -189,8 +197,9 @@ async def timing_middleware(request: Request, call_next) -> Response:
     response.headers["X-Db-Time-Ms"] = f"{stats['db_ms']:.1f}"
     response.headers["X-Db-Queries"] = str(stats["queries"])
     response.headers["X-Cache"] = str(stats.get("cache", "OFF"))
+    response.headers["X-Request-ID"] = request_id
     logger.info(
-        "%s %s %s total_ms=%.1f db_ms=%.1f db_queries=%d cache=%s",
+        "%s %s %s total_ms=%.1f db_ms=%.1f db_queries=%d cache=%s rid=%s",
         request.method,
         _log_label(request),
         response.status_code,
@@ -198,5 +207,6 @@ async def timing_middleware(request: Request, call_next) -> Response:
         stats["db_ms"],
         stats["queries"],
         stats.get("cache", "OFF"),
+        request_id,
     )
     return response
