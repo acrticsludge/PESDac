@@ -20,7 +20,7 @@ SUBJECT_SEEDS: tuple[tuple[str, str], ...] = (
     ("OS", "Operating Systems"),
     ("DLCD", "Digital Logic"),
     ("DSA", "Data Structures"),
-    ("Math", "Mathematics"),
+    ("MFADS", "Maths for AI and Data Science"),
 )
 
 SUBJECT_CODES = frozenset(code for code, _ in SUBJECT_SEEDS)

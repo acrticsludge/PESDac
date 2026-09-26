@@ -236,7 +236,7 @@ const WORKSPACES: Workspace[] = [
   },
 
   {
-    name: "Math",
+    name: "MFADS",
     icon: CalculatorIcon,
     chats: [],
   },
@@ -363,7 +363,7 @@ const CATEGORY_SUGGESTIONS: Record<
     },
   ],
 
-  Math: [
+  MFADS: [
     {
       heading: "Explain a concept",
       body: "Break down a difficult mathematical concept",
@@ -380,9 +380,9 @@ const CATEGORY_SUGGESTIONS: Record<
       prompt: "Teach me probability with examples",
     },
     {
-      heading: "Quiz me on Math",
+      heading: "Quiz me on MFADS",
       body: "Test your understanding with practice questions",
-      prompt: "Quiz me on Mathematics",
+      prompt: "Quiz me on Maths for AI and Data Science",
     },
   ],
 };
@@ -423,8 +423,8 @@ const MODE_OPTIONS = [
   },
 
   {
-    key: "Math",
-    label: "Math",
+    key: "MFADS",
+    label: "MFADS",
     icon: CalculatorIcon,
   },
 ] as const;
@@ -2432,8 +2432,8 @@ const LOGOUT_TIMEOUT_MS = 15000;
                       />
 
                       <ToggleButton
-                        value="Math"
-                        label="Math"
+                        value="MFADS"
+                        label="MFADS"
                         icon={<Icon icon={CalculatorIcon} size="sm" />}
                       />
                     </ToggleButtonGroup>

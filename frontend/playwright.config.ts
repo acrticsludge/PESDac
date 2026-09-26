@@ -34,8 +34,13 @@ export default defineConfig({
     // :4321, so every browser sign-up/sign-in POST 403s INVALID_ORIGIN
     // unless :4323 is a trusted origin. Scoped to the server under
     // test — dev (:4321) needs nothing, deployments set their own.
+    // S5/S6(live): the FastAPI backend verifies the preview-minted
+    // JWTs (iss + JWKS) against BETTER_AUTH_URL, so the server under
+    // test must mint with iss=:4323 too — otherwise every live leg
+    // 401s (ConnectError on :4321 first, issuer mismatch after).
     env: {
       BETTER_AUTH_TRUSTED_ORIGINS: "http://localhost:4323",
+      BETTER_AUTH_URL: "http://localhost:4323",
     },
   },
 });

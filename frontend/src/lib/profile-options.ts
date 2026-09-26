@@ -49,13 +49,13 @@ export function isCampus(v: string | undefined): v is CampusValue {
 
 // F6: 5 subject codes + "Select all" item lives in the dialog, not
 // here — "Select all" is a UI affordance, not a stored value.
-export type SubjectValue = "CN" | "OS" | "DLCD" | "DSA" | "Math";
+export type SubjectValue = "CN" | "OS" | "DLCD" | "DSA" | "MFADS";
 export const SUBJECTS: { value: SubjectValue; label: string }[] = [
   { value: "CN", label: "Computer Networks" },
   { value: "OS", label: "Operating Systems" },
   { value: "DLCD", label: "Digital Logic" },
   { value: "DSA", label: "Data Structures" },
-  { value: "Math", label: "Mathematics" },
+  { value: "MFADS", label: "Maths for AI and Data Science" },
 ];
 
 export function isSubject(v: string | undefined): v is SubjectValue {

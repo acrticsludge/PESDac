@@ -3,7 +3,7 @@
 // UI-neutral: no Astryx imports, no styling. Backend will eventually issue
 // these codes; until then they are stable constants (NOT random per load).
 
-export const SUBJECTS = ["CN", "OS", "DLCD", "DSA", "Math"] as const;
+export const SUBJECTS = ["CN", "OS", "DLCD", "DSA", "MFADS"] as const;
 export type Subject = (typeof SUBJECTS)[number];
 
 export function isSubject(value: string | undefined): value is Subject {
@@ -16,7 +16,7 @@ export const SUBJECT_NAMES: Record<Subject, string> = {
   OS: "Operating Systems",
   DLCD: "Digital Logic",
   DSA: "Data Structures",
-  Math: "Mathematics",
+  MFADS: "Maths for AI and Data Science",
 };
 
 /** Display name for a subject code (unknown codes pass through). */
@@ -74,10 +74,10 @@ export const CHAT_SUBJECTS: Record<string, Subject> = {
   "Graph Algorithms": "DSA",
   "Sorting Algorithms": "DSA",
   "Dynamic Programming": "DSA",
-  Matrices: "Math",
-  "Differential Equations": "Math",
-  Probability: "Math",
-  "Fourier Series": "Math",
+  Matrices: "MFADS",
+  "Differential Equations": "MFADS",
+  Probability: "MFADS",
+  "Fourier Series": "MFADS",
 };
 
 export type ChatRef = { subject: Subject; label: string; code: string };

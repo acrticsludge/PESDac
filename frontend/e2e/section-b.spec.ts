@@ -962,7 +962,7 @@ test("C14 — follow-up pill click sends as the next user message", async ({
 
 // ---- C15 -------------------------------------------------------------------
 
-test("C15 — welcome Math routes the subject; thread depth choice persists across reload (B13)", async ({
+test("C15 — welcome MFADS routes the subject; thread depth choice persists across reload (B13)", async ({
   page,
   context,
 }) => {
@@ -973,15 +973,15 @@ test("C15 — welcome Math routes the subject; thread depth choice persists acro
   await mockBackend(page, c, {}, { chatBodies });
   await page.goto("/new");
   await welcomeReady(page);
-  // Welcome half: mode menu Auto → Math scopes the create to Math.
+  // Welcome half: mode menu Auto → MFADS scopes the create to MFADS.
   await page
     .locator("#astryx-app-shell-main")
     .getByRole("button", { name: "Auto", exact: true })
     .click();
-  await page.getByRole("menuitem", { name: "Math" }).click();
+  await page.getByRole("menuitem", { name: "MFADS" }).click();
   await welcomeSend(page, "explain integrals");
-  await expect(page).toHaveURL(/\/subject\/Math\/[a-z0-9]{6}/, { timeout: 15000 });
-  expect((chatBodies[0] as { subject: string }).subject).toBe("Math");
+  await expect(page).toHaveURL(/\/subject\/MFADS\/[a-z0-9]{6}/, { timeout: 15000 });
+  expect((chatBodies[0] as { subject: string }).subject).toBe("MFADS");
   // Thread half: depth menu Auto → Deep Study applies to this turn.
   const modeBtn = page.getByRole("button", { name: "Auto", exact: true });
   await expect(modeBtn).toBeVisible({ timeout: 25000 });
@@ -999,7 +999,7 @@ test("C15 — welcome Math routes the subject; thread depth choice persists acro
   // Deep Study instead of resetting to Auto.
   await page.reload();
   await page
-    .getByText("Ask anything about Math...", { exact: false })
+    .getByText("Ask anything about Maths for AI and Data Science...", { exact: false })
     .first()
     .waitFor({ timeout: 25000 });
   await expect(page.getByRole("button", { name: "Deep Study", exact: true })).toBeVisible({

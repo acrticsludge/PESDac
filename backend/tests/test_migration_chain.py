@@ -3,7 +3,7 @@
 No database needed: parses `revision` / `down_revision` assignments and
 `upgrade` / `downgrade` definitions with `ast`, then asserts the chain
 is linear with a single root and a single head. This pins the
-0001→…→0010 ordering (including the two date-named perf/idempotency
+0001→…→0011 ordering (including the two date-named perf/idempotency
 migrations interleaved before 0009) and guarantees every migration is
 reversible on paper.
 
@@ -48,7 +48,7 @@ def test_chain_is_linear_single_root_single_head():
     roots = [rev for rev, info in chain.items() if info["down"] is None]
     assert roots == ["0001_foundation"], roots
     heads = [rev for rev in chain if rev not in downs]
-    assert heads == ["0010_llm_credentials"], heads
+    assert heads == ["0011_rename_math_mfads"], heads
     # Linearity: every non-root revision's parent exists, and every
     # non-head revision is exactly one child's parent.
     for rev, info in chain.items():

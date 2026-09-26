@@ -7,33 +7,33 @@ import type { Thread } from "./types";
 
 const matrices: Thread = {
   label: "Matrices",
-  subject: "Math",
+  subject: "MFADS",
   mode: "ask",
-  placeholder: "Ask anything about Mathematics...",
+  placeholder: "Ask anything about Maths for AI and Data Science...",
   composerReferenceItems: [
     { label: "Course Slides", description: "PESDac course material" },
     { label: "Textbook", description: "PESDac knowledge source" },
   ],
-  divider: "Today · Mathematics",
+  divider: "Today · Maths for AI and Data Science",
   blocks: [
-    { from: "system", text: "Today · Mathematics", variant: "divider" },
+    { from: "system", text: "Today · Maths for AI and Data Science", variant: "divider" },
   ],
 };
 
 const diffEq: Thread = {
   label: "Differential Equations",
-  subject: "Math",
+  subject: "MFADS",
   mode: "deep",
   placeholder: "Ask for a deep, step-by-step explanation...",
   composerReferenceItems: [
     { label: "Course Slides", description: "PESDac course material" },
     { label: "Textbook", description: "PESDac knowledge source" },
   ],
-  divider: "Yesterday · Mathematics",
+  divider: "Yesterday · Maths for AI and Data Science",
   blocks: [
     {
       from: "system",
-      text: "Yesterday · Mathematics",
+      text: "Yesterday · Maths for AI and Data Science",
       variant: "divider",
     },
   ],
@@ -41,18 +41,18 @@ const diffEq: Thread = {
 
 const probability: Thread = {
   label: "Probability",
-  subject: "Math",
+  subject: "MFADS",
   mode: "ask",
-  placeholder: "Ask anything about Mathematics...",
+  placeholder: "Ask anything about Maths for AI and Data Science...",
   composerReferenceItems: [
     { label: "Course Slides", description: "PESDac course material" },
     { label: "Lecture Recordings", description: "PESDac knowledge source" },
   ],
-  divider: "Monday · Mathematics",
+  divider: "Monday · Maths for AI and Data Science",
   blocks: [
     {
       from: "system",
-      text: "Monday · Mathematics",
+      text: "Monday · Maths for AI and Data Science",
       variant: "divider",
     },
   ],
@@ -60,17 +60,17 @@ const probability: Thread = {
 
 const fourier: Thread = {
   label: "Fourier Series",
-  subject: "Math",
+  subject: "MFADS",
   mode: "deep",
   placeholder: "Ask for a deep, step-by-step explanation...",
   composerReferenceItems: [
     { label: "Textbook", description: "PESDac knowledge source" },
   ],
-  divider: "Last week · Mathematics",
+  divider: "Last week · Maths for AI and Data Science",
   blocks: [
     {
       from: "system",
-      text: "Last week · Mathematics",
+      text: "Last week · Maths for AI and Data Science",
       variant: "divider",
     },
   ],
