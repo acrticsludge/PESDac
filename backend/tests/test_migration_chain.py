@@ -48,7 +48,7 @@ def test_chain_is_linear_single_root_single_head():
     roots = [rev for rev, info in chain.items() if info["down"] is None]
     assert roots == ["0001_foundation"], roots
     heads = [rev for rev in chain if rev not in downs]
-    assert heads == ["0011_rename_math_mfads"], heads
+    assert heads == ["0012_retrieval"], heads
     # Linearity: every non-root revision's parent exists, and every
     # non-head revision is exactly one child's parent.
     for rev, info in chain.items():

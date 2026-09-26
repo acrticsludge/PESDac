@@ -5,3 +5,4 @@ from app.models.catalog import Subject  # noqa: F401
 from app.models.profiles import Profile  # noqa: F401
 from app.models.chats import Chat, DemoState, Message  # noqa: F401
 from app.models.llm import LlmCredential  # noqa: F401
+from app.models.retrieval import IngestEvent, RetrievalChunk, RetrievalSource  # noqa: F401
