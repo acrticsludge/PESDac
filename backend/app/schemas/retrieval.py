@@ -6,7 +6,9 @@ user-image bytes) are rejected, never stored.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from app.models.catalog import SUBJECT_CODES
 
 
 class SourceIn(BaseModel):
@@ -48,3 +50,47 @@ class ManifestIn(BaseModel):
     source: SourceIn
     chunks: list[ChunkIn]
     clientIngestKey: str | None = None
+
+
+SEARCH_SCOPES = frozenset({"slides", "textbook", "lectures"})
+
+
+class SearchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    subject: str
+    scope: list[str] | None = None
+    topK: int = 10
+
+    @field_validator("query")
+    @classmethod
+    def _query(cls, v: str) -> str:
+        clean = " ".join((v or "").split())
+        if not (1 <= len(clean) <= 2000):
+            raise ValueError("Query must be 1–2000 characters.")
+        return v
+
+    @field_validator("subject")
+    @classmethod
+    def _subject(cls, v: str) -> str:
+        if v not in SUBJECT_CODES:
+            raise ValueError("Unknown subject.")
+        return v
+
+    @field_validator("scope")
+    @classmethod
+    def _scope(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        for entry in v:
+            if entry not in SEARCH_SCOPES:
+                raise ValueError("Unknown scope.")
+        return v
+
+    @field_validator("topK")
+    @classmethod
+    def _topk(cls, v: int) -> int:
+        if not (1 <= v <= 20):
+            raise ValueError("topK must be 1–20.")
+        return v

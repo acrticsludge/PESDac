@@ -19,6 +19,7 @@ from app import config
 from app import timing
 from app.routers import auth, chats, demo_state, health, llm, profiles, users
 from app.routers import ingest as ingest_router
+from app.routers import retrieval as retrieval_router
 from app.schemas.common import error_body
 
 # Map HTTP status → error code used in the standard envelope. Covers
@@ -238,6 +239,7 @@ def create_app(validate: bool = True) -> FastAPI:
     app.include_router(users.router, prefix="/api/v1")
     app.include_router(llm.router, prefix="/api/v1")
     app.include_router(ingest_router.router, prefix="/api/v1")
+    app.include_router(retrieval_router.router, prefix="/api/v1")
     logger.info(
         "PESDac API ready (env=%s, routes=%d)",
         config.ENV,
