@@ -237,3 +237,35 @@ def post_manifest(
         status_code=201,
         content={"source_id": str(source.id), "chunk_count": len(stamped)},
     )
+
+
+@router.post("/validate")
+def post_validate(
+    body: ManifestIn,
+    request: Request,
+    result: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Curator dry-run (spec §6.1b): identical validators, zero writes."""
+    if denied := check_mutation_origin(request):
+        return denied
+    if limited := rate_limit.check("ingest-manifest", request, 10, 300):
+        return limited
+    if not _is_curator(result):
+        return JSONResponse(
+            status_code=403,
+            content=error_body(
+                "CURATOR_ONLY", "Only curators can add course material."
+            ),
+        )
+    try:
+        parsed = parse_manifest(body.model_dump(), _r2_base())
+    except ManifestError as exc:
+        return JSONResponse(
+            status_code=422, content=error_body("VALIDATION_ERROR", str(exc))
+        )
+    return {
+        "ok": True,
+        "chunk_count": parsed["chunk_count"],
+        "warnings": parsed["warnings"],
+    }
