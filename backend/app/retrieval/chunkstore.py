@@ -1,11 +1,12 @@
-"""C2 ChunkStore (spec §6.2 step 5, §4.2 sync invariant).
+"""C2 ChunkStore (spec §6.2 steps 4-5, §4.2 sync invariant).
 
-`store_chunks` / `ann_search` / `fts_search` / `provider_slice`.
-SQLite/tests: brute-force cosine over `embedding` JSON + LIKE filter.
-Postgres: ANN leg `ORDER BY embedding_v <=> :q` with subject +
-scope-kind WHERE pushed before ordering; FTS leg `tsv @@
-plainto_tsquery(:q)` (T4 adds the dialect branch — compile-asserted,
-never executed in suite).
+`store_chunks` / `ann_search` / `fts_search` / `provider_slice` run on
+SQLite/tests (brute-force cosine + LIKE). `ann_statement` /
+`fts_statement` / `space_statement` build the Postgres legs
+(compile-asserted in T4, never executed in suite): ANN `ORDER BY
+embedding_v <=> :q` with subject + scope-kind WHERE pushed before
+ordering; FTS `tsv @@ plainto_tsquery(:q)` with the same filters;
+space check DISTINCT under the same filter.
 """
 
 from __future__ import annotations
@@ -13,8 +14,9 @@ from __future__ import annotations
 import math
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import TextClause
 
 from app.models.retrieval import RetrievalChunk, RetrievalSource
 
@@ -200,9 +202,85 @@ def provider_slice(
     Genuine pre-ANN lookup (never a post-fetch filter): the search
     route calls this before ANN to detect a post-ingest provider
     switch (→ 503 EMBED_SPACE_MISMATCH). SQLite path scans the scoped
-    base query; the Postgres leg (T4) pushes the same filters before
-    the DISTINCT in SQL.
+    base query; the Postgres leg pushes the same filters before the
+    DISTINCT in SQL (`space_statement`).
     """
     scope_set = set(scope) if scope else None
     rows = db.execute(_base_query(db, subject, scope_set)).all()
     return sorted({(c.embed_provider, c.embed_model) for c, _s in rows})
+
+
+_PG_TEXT_KINDS = "('page','diagram','equation','table','text')"
+
+
+def _pg_scope_fragment(scope: set[str] | list[str] | None) -> str:
+    """Shared Postgres scope filter (single builder — no duplication).
+
+    Returns "" (no filter) or " AND (...)". Same predicate family as
+    `_scope_predicates`, rendered as SQL so ANN/FTS/space legs share
+    one definition.
+    """
+    scope_set = set(scope) if scope else None
+    if not scope_set:
+        return ""
+    conds: list[str] = []
+    if "slides" in scope_set:
+        conds.append(
+            f"(retrieval_sources.kind = 'slides' AND retrieval_chunks.kind IN {_PG_TEXT_KINDS})"
+        )
+    if "textbook" in scope_set:
+        conds.append(
+            "(retrieval_sources.kind IN ('textbook','notes') "
+            f"AND retrieval_chunks.kind IN {_PG_TEXT_KINDS})"
+        )
+    if "lectures" in scope_set:
+        conds.append("(retrieval_chunks.kind = 'transcript')")
+    if not conds:
+        return ""
+    if set(scope_set) >= {"slides", "textbook", "lectures"}:
+        return ""
+    return " AND (" + " OR ".join(conds) + ")"
+
+
+_PG_JOIN = (
+    "FROM retrieval_chunks "
+    "JOIN retrieval_sources ON retrieval_sources.id = retrieval_chunks.source_id "
+    "WHERE retrieval_sources.subject = :subject"
+)
+
+
+def ann_statement(
+    subject: str, scope: set[str] | list[str] | None, query_emb: Sequence[float],
+    limit: int = ANN_FTS_LIMIT,
+) -> TextClause:
+    """Postgres ANN leg: subject + scope WHERE pushed before ORDER BY."""
+    _ = query_emb
+    sql = (
+        "SELECT retrieval_chunks.id " + _PG_JOIN + _pg_scope_fragment(scope) +
+        " ORDER BY retrieval_chunks.embedding_v <=> :q LIMIT :limit"
+    )
+    return text(sql).bindparams(subject=subject)
+
+
+def fts_statement(
+    subject: str, scope: set[str] | list[str] | None, query_text: str,
+    limit: int = ANN_FTS_LIMIT,
+) -> TextClause:
+    """Postgres FTS leg: `tsv @@ plainto_tsquery(:q)` + same filters."""
+    _ = query_text
+    sql = (
+        "SELECT retrieval_chunks.id " + _PG_JOIN + _pg_scope_fragment(scope) +
+        " AND retrieval_chunks.tsv @@ plainto_tsquery(:q) LIMIT :limit"
+    )
+    return text(sql).bindparams(subject=subject)
+
+
+def space_statement(
+    subject: str, scope: set[str] | list[str] | None,
+) -> TextClause:
+    """Postgres space check: DISTINCT stamps under the same filter."""
+    sql = (
+        "SELECT DISTINCT retrieval_chunks.embed_provider, retrieval_chunks.embed_model "
+        + _PG_JOIN + _pg_scope_fragment(scope)
+    )
+    return text(sql).bindparams(subject=subject)
