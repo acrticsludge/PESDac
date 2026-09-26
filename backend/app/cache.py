@@ -86,6 +86,65 @@ def demos_key(user_id) -> str:
     return f"{user_prefix(user_id)}:demos"
 
 
+TTL_RETRIEVAL_RESULT = 300
+TTL_RETRIEVAL_EMB = 86400
+TTL_RETRIEVAL_HEALTH = 60
+TTL_RETRIEVAL_SPACE = 60
+
+
+def _normalize_retrieval_query(query: str) -> str:
+    # Spec §6.2 step 1: trim + collapse whitespace (no lowercasing —
+    # embeddings are case-sensitive, unlike ilike chat search).
+    return " ".join((query or "").split())
+
+
+def _retrieval_scope_csv(scope) -> str:
+    if not scope:
+        return "all"
+    return ",".join(sorted(scope))
+
+
+def retrieval_result_key(subject: str, scope, topK: int, query: str) -> str:
+    """Shared evidence-bundle key (spec §8): no user scope by design.
+
+    Every authenticated user may read every subject (no ACLs, no
+    personalization), so the key is (subject, scope, topK, digest) —
+    topK is IN the key because a topK=20 bundle must never serve topK=5.
+    """
+    normalized = _normalize_retrieval_query(query)
+    scope_csv = _retrieval_scope_csv(scope)
+    raw = f"{subject}|{scope_csv}|{int(topK)}|{normalized}"
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+    return f"{CACHE_PREFIX}:retrieval:result:{subject}:{scope_csv}:{int(topK)}:{digest}"
+
+
+def retrieval_prefix(subject: str | None = None) -> str:
+    """Ingest wipe scope (spec §6.1 step 5): subject result keys only.
+
+    Disjoint from `user_prefix` (`{u:…}`), `rl:` and `lock:` by
+    construction, so account wipe preserves the corpus and ingest wipe
+    preserves rate-limit + lock keys (pinned in test_cache_isolation).
+    Embed keys (`retrieval:emb:`) survive: they are content-addressed,
+    not subject-scoped.
+    """
+    if subject:
+        return f"{CACHE_PREFIX}:retrieval:result:{subject}:"
+    return f"{CACHE_PREFIX}:retrieval:result:"
+
+
+def retrieval_emb_key(provider: str, text: str) -> str:
+    digest = hashlib.sha1((text or "").encode("utf-8")).hexdigest()[:16]
+    return f"{CACHE_PREFIX}:retrieval:emb:{provider}:{digest}"
+
+
+def retrieval_space_key(subject: str, scope) -> str:
+    return f"{CACHE_PREFIX}:retrieval:space:{subject}:{_retrieval_scope_csv(scope)}"
+
+
+def retrieval_health_key() -> str:
+    return f"{CACHE_PREFIX}:retrieval:health"
+
+
 class _NullClient:
     """Disabled-cache client: every read misses, writes vanish."""
 
