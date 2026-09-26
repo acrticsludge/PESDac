@@ -89,6 +89,12 @@ def parse_manifest(payload: dict, r2_public_base: str) -> dict:
     source = payload.get("source")
     if not isinstance(source, dict):
         raise ManifestError("source is required.")
+    # §6.1 request example nests subject/unit inside source too — when
+    # present they must equal the top-level fields (never trusted over
+    # the key, but inconsistency fails loudly instead of half-ingesting).
+    for field, top in (("subject", subject), ("unit", unit)):
+        if source.get(field) is not None and source.get(field) != top:
+            raise ManifestError(f"source.{field} must match {field}.")
     kind = source.get("kind")
     if kind not in SOURCE_KINDS:
         raise ManifestError("source.kind is unknown.")
