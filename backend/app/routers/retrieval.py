@@ -116,6 +116,15 @@ def post_search(
     space_outcome, space_cached = cache.get_json(space_key)
     if space_outcome == cache.HIT and isinstance(space_cached, list):
         stamps = [tuple(s) for s in space_cached]
+    elif _is_pg(db):
+        # Genuine pre-ANN DISTINCT in SQL (never a post-fetch filter);
+        # the SQLite path scans the scoped base query instead.
+        rows = db.execute(
+            chunkstore.space_statement(body.subject, scope_set),
+            {"subject": body.subject},
+        ).all()
+        stamps = [(r[0], r[1]) for r in rows]
+        cache.set_json(space_key, [list(s) for s in stamps], cache.TTL_RETRIEVAL_SPACE)
     else:
         stamps = chunkstore.provider_slice(db, body.subject, scope_set)
         cache.set_json(space_key, [list(s) for s in stamps], cache.TTL_RETRIEVAL_SPACE)

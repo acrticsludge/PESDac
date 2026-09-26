@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import cache, rate_limit
@@ -230,7 +231,32 @@ def post_manifest(
     db.query(IngestEvent).filter(
         IngestEvent.created_at < now - timedelta(days=30)
     ).delete()
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost an idempotency/source race (mirrors the chats adopt-race):
+        # the winner's row is the truth — never a 500.
+        db.rollback()
+        logger.info("ingest_conflict_adopted key=%s", bool(key))
+        if key is not None:
+            winner = (
+                db.query(IngestEvent)
+                .filter(IngestEvent.client_ingest_key == key)
+                .one_or_none()
+            )
+            if winner is not None:
+                cache.invalidate_prefix(cache.retrieval_prefix(src_info["subject"]))
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "source_id": str(winner.source_id),
+                        "chunk_count": winner.chunk_count,
+                    },
+                )
+        return JSONResponse(
+            status_code=409,
+            content=error_body("INGEST_CONFLICT", "Conflicting ingest. Retry."),
+        )
     db.refresh(source)
     cache.invalidate_prefix(cache.retrieval_prefix(src_info["subject"]))
     return JSONResponse(

@@ -7,6 +7,7 @@ error messages feed F1 inline display ("Chunk 14: ...").
 from __future__ import annotations
 
 import re
+from posixpath import normpath as _normpath
 from urllib.parse import urlparse
 
 from app.models.catalog import SUBJECT_CODES
@@ -60,8 +61,10 @@ def _check_asset_url(
         raise ManifestError(f"Chunk {idx}: {field} must be http(s).")
     if _origin(url) != base_origin:
         raise ManifestError(f"Chunk {idx}: {field} must share the media origin.")
-    path = urlparse(url).path or ""
-    if prefix not in path:
+    # Normalize before the prefix check: `..` segments and off-prefix
+    # paths containing the prefix as a substring must not pass.
+    path = _normpath(urlparse(url).path or "")
+    if not path.startswith(prefix):
         raise ManifestError(
             f"Chunk {idx}: {field} must sit under {prefix}."
         )

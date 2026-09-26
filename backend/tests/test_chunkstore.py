@@ -179,3 +179,22 @@ def test_scope_filter_separates_slides_from_transcripts():
         assert {h.text for h in lecture_hits} == {"spoken words"}
     finally:
         db.close()
+
+
+def test_slides_scope_excludes_transcript_kind_even_from_slide_source():
+    db = _db()
+    try:
+        slides = _source(db, kind="slides")
+        chunkstore.store_chunks(db, slides, [
+            {"kind": "text", "text": "slide text", "embedding": [1.0, 0.0],
+             "embed_provider": "hash", "embed_model": "m"},
+            {"kind": "transcript", "text": "stray transcript",
+             "video_start": 1.0, "video_end": 2.0,
+             "embedding": [1.0, 0.0],
+             "embed_provider": "hash", "embed_model": "m"},
+        ])
+        db.commit()
+        hits = chunkstore.ann_search(db, "CN", {"slides"}, [1.0, 0.0])
+        assert {h.text for h in hits} == {"slide text"}
+    finally:
+        db.close()

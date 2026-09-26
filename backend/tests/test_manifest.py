@@ -140,6 +140,23 @@ def test_foreign_origin_asset_url_rejected():
         parse_manifest(bad, BASE)
 
 
+def test_dotdot_and_offprefix_asset_paths_rejected():
+    from app.retrieval.manifest import ManifestError, parse_manifest
+
+    traversal = _valid_payload()
+    traversal["chunks"][0]["page_url"] = (
+        "https://media.example/subjects/CN/unit-1/../../other/p.png"
+    )
+    with pytest.raises(ManifestError, match="Chunk 0"):
+        parse_manifest(traversal, BASE)
+    offprefix = _valid_payload()
+    offprefix["chunks"][0]["page_url"] = (
+        "https://media.example/x/subjects/CN/unit-1/p.png"
+    )
+    with pytest.raises(ManifestError, match="Chunk 0"):
+        parse_manifest(offprefix, BASE)
+
+
 def test_embedding_dim_mismatch_rejected():
     from app.retrieval.manifest import ManifestError, parse_manifest
 

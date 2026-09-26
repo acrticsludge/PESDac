@@ -123,6 +123,8 @@ def _base_query(db: Session, subject: str, scope: set[str] | None):
     )
     if source_kinds is not None and "transcript" not in (chunk_kinds or set()):
         stmt = stmt.where(RetrievalSource.kind.in_(sorted(source_kinds)))
+        if chunk_kinds:
+            stmt = stmt.where(RetrievalChunk.kind.in_(sorted(chunk_kinds)))
     elif source_kinds is not None and chunk_kinds is not None:
         # Mixed slides/textbook + lectures: (slide-source text kinds) OR transcript.
         from sqlalchemy import or_ as _or

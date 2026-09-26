@@ -178,6 +178,30 @@ def test_nothing_persisted_on_embed_failure(client, curator_env, dbsession, monk
     assert dbsession.query(RetrievalSource).count() == before
 
 
+def test_commit_conflict_never_500s(client, curator_env, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session as SASession
+
+    # Warm up so the test-user row exists outside the patched window.
+    assert client.get("/api/v1/auth/me").status_code == 200
+    real_commit = SASession.commit
+    calls = {"n": 0}
+
+    def flaky_commit(self):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise IntegrityError("INSERT INTO ingest_events", {}, Exception("duplicate"))
+        return real_commit(self)
+
+    monkeypatch.setattr(SASession, "commit", flaky_commit)
+    r = client.post(
+        "/api/v1/ingest/manifest", json=_payload(),
+        headers={"x-client-ingest-key": "race-k"},
+    )
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "INGEST_CONFLICT"
+
+
 def test_ingest_wipes_subject_evidence_cache(client, curator_env):
     fake = FakeRedis()
     cache.set_test_client(fake)
