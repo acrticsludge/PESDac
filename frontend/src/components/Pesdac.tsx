@@ -646,7 +646,17 @@ function SidebarAccountFooter({
           showKeyDot || retrievalDot != null ? (
             <>
               {showKeyDot ? (
-                <StatusDot variant="warning" label="No model key connected" />
+                <StatusDot
+                  variant="warning"
+                  label="No model key connected"
+                  // The exported theme's statusdot override points at a
+                  // neutral token that is never defined, and that layered
+                  // (invalid) declaration beats the vendor base style, so
+                  // warning dots paint transparent. Pin the intended token
+                  // via the style prop (ThreadView B43/B46 precedent) —
+                  // no theme edit, same paint the spec mandates.
+                  style={{ backgroundColor: "var(--color-warning)" }}
+                />
               ) : undefined}
               {retrievalDot != null ? (
                 <StatusDot
@@ -658,6 +668,8 @@ function SidebarAccountFooter({
                   // way to dismiss. Background tooltips stay off while
                   // any modal is open.
                   tooltip={!isAnyModalOpen ? retrievalDot.tooltip : undefined}
+                  // Same transparent-dot compensation as above.
+                  style={{ backgroundColor: "var(--color-warning)" }}
                 />
               ) : undefined}
             </>
