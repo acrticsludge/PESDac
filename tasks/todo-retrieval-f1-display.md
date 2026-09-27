@@ -10,7 +10,7 @@ Commands run from `frontend/` unless noted. Branch:
 - [ ] Checkpoint: focused units green, frontend + docs only in `git status`
 
 ## Phase 1 — Bar + dot
-- [ ] T2 — RetrievalBanner component (Astryx only, role mapping)
+- [x] T2 — RetrievalBanner component (Astryx only, role mapping)
 - [ ] T3 — Pesdac wiring (AppShell slot + health dot on existing cadence)
 - [ ] Checkpoint: units + targeted e2e green, no theme/global-CSS diff
 

@@ -95,8 +95,9 @@ Rules:
 - ONE retrieval banner at a time (newest incident replaces; never
   stack 502 over 503). Coexists with unrelated banners (auth expiry
   etc.) — no shared dismissal state (§4.4 keys per incident class).
-- `error` exposes `role="alert"`, `warning` `role="status"` (vendor
-  `statusRole` map) — announce without focus theft; focus stays in
+- `error` and `warning` both expose `role="alert"` (vendor
+  `statusRole` map on 0.5.2: info→status, warning→alert,
+  error→alert) — announce without focus theft; focus stays in
   the composer.
 - Reduced motion: mounted-or-not, no entrance-animation dependency
   (same doctrine as `ThreadView` B43).

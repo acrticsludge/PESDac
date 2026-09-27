@@ -27,6 +27,21 @@ export type RetrievalCopy = {
   status: BannerStatus;
 };
 
+/** Default bar description (§4.2 example) when the envelope has no copy. */
+export const RETRIEVAL_BANNER_DESCRIPTION =
+  "Your course material can't be reached right now. Your chats and settings still work — new questions will wait until search is back.";
+
+/** Dismiss control name (§4.2 example). */
+export const RETRIEVAL_BANNER_DISMISS_LABEL = "Dismiss search outage notice";
+
+export type RetrievalBannerView = {
+  status: BannerStatus;
+  container: "section";
+  title: string;
+  description: string;
+  dismissLabel: string;
+};
+
 const COPY_TABLE: Record<RetrievalIncidentCode, { title: string; status: BannerStatus }> = {
   EMBED_UNREACHABLE: {
     title: "Search is temporarily unavailable",
@@ -140,5 +155,26 @@ export function selectRetrievalCopy(args: {
     title: fallback.title,
     message: envelope ? envelope : fallback.title,
     status: fallback.status,
+  };
+}
+
+/**
+ * Bar view model (§4.2): the exact Banner props the downtime bar
+ * renders. Title stays the per-code fallback; the envelope renders
+ * as the description when present, else the §4.2 default copy.
+ */
+export function retrievalBannerView(args: {
+  code: RetrievalIncidentCode;
+  envelopeMessage?: string | null;
+  isPersistent?: boolean;
+}): RetrievalBannerView {
+  const copy = selectRetrievalCopy(args);
+  const envelope = args.envelopeMessage?.trim();
+  return {
+    status: bannerStatusForCode(args.code, args.isPersistent),
+    container: "section",
+    title: copy.title,
+    description: envelope ? envelope : RETRIEVAL_BANNER_DESCRIPTION,
+    dismissLabel: RETRIEVAL_BANNER_DISMISS_LABEL,
   };
 }

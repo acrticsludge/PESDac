@@ -41,6 +41,7 @@ import {
   clearRetrievalBannerDismissal,
   readRetrievalBannerDismissal,
   recordRetrievalBannerDismissal,
+  retrievalBannerView,
   selectRetrievalCopy,
   shouldShowRetrievalBanner,
 } from "../src/lib/retrieval-banner.ts";
@@ -145,4 +146,35 @@ test("banner status is error for 502 and warning-first for 503", () => {
   assert.equal(bannerStatusForCode("EMBED_UNREACHABLE"), "error");
   assert.equal(bannerStatusForCode("EMBED_MISCONFIGURED"), "warning");
   assert.equal(bannerStatusForCode("EMBED_MISCONFIGURED", true), "error");
+});
+
+test("bar view pins the section container and dismiss label", () => {
+  const view = retrievalBannerView({ code: "EMBED_UNREACHABLE" });
+  assert.equal(view.container, "section");
+  assert.equal(view.dismissLabel, "Dismiss search outage notice");
+});
+
+test("bar view carries the 502 title and default description", () => {
+  const view = retrievalBannerView({ code: "EMBED_UNREACHABLE" });
+  assert.equal(view.status, "error");
+  assert.equal(view.title, "Search is temporarily unavailable");
+  assert.equal(
+    view.description,
+    "Your course material can't be reached right now. Your chats and settings still work — new questions will wait until search is back.",
+  );
+});
+
+test("bar view carries the 503 title with warning status", () => {
+  const view = retrievalBannerView({ code: "EMBED_MISCONFIGURED" });
+  assert.equal(view.status, "warning");
+  assert.equal(view.title, "Search isn't available right now");
+});
+
+test("bar view renders the envelope message as the description", () => {
+  const view = retrievalBannerView({
+    code: "EMBED_UNREACHABLE",
+    envelopeMessage: "Custom backend copy.",
+  });
+  assert.equal(view.title, "Search is temporarily unavailable");
+  assert.equal(view.description, "Custom backend copy.");
 });
