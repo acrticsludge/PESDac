@@ -652,7 +652,12 @@ function SidebarAccountFooter({
                 <StatusDot
                   variant="warning"
                   label={retrievalDot.label}
-                  tooltip={retrievalDot.tooltip}
+                  // Stuck-tooltip gate (same as the sidebar Avatar):
+                  // a showing tooltip has no mouseleave while a dialog
+                  // covers it, so it sticks above the backdrop with no
+                  // way to dismiss. Background tooltips stay off while
+                  // any modal is open.
+                  tooltip={!isAnyModalOpen ? retrievalDot.tooltip : undefined}
                 />
               ) : undefined}
             </>
