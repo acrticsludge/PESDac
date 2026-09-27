@@ -1903,7 +1903,6 @@ const LOGOUT_TIMEOUT_MS = 15000;
                 label="New chat"
                 icon={PlusIcon}
                 href="#"
-                isSelected={selectedChat === null}
                 isDisabled={!isUserReady}
                 onClick={(event) => {
                   event.preventDefault();
