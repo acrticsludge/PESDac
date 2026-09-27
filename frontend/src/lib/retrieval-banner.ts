@@ -7,6 +7,8 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./auth.ts";
 import { shouldForegroundRefetch } from "./cache-revalidation.ts";
+import { parseReferenceIds, sourceTarget } from "./references.ts";
+import type { RetrievalEvidenceItem } from "../content/threads/types.ts";
 
 export const RETRIEVAL_BANNER_KEY = "pesdac:retrieval-banner";
 
@@ -418,4 +420,137 @@ export function useRetrievalHealth(authenticated: boolean): {
   }, []);
 
   return { ...snapshot, refresh: refreshRetrievalHealth };
+}
+
+// ---- Evidence search (§3 backend contract, verbatim) --------------------------
+//
+// Thin client over `POST /retrieval/search` plus pure view helpers.
+// Errors propagate as thrown ApiError/AuthRequiredError (callers map
+// them to §4.1 surfaces); the envelope copy rule lives in
+// selectRetrievalCopy. ThreadView fetch wiring lands separately —
+// this module stays UI-free and unit-tested.
+
+export type RetrievalScope = "slides" | "textbook" | "lectures";
+
+/** All scopes, the implicit default when the question names none. */
+export const RETRIEVAL_SCOPES: RetrievalScope[] = ["slides", "textbook", "lectures"];
+
+/**
+ * Scope from @-mention tokens (references.ts is the single home for
+ * token parsing — never re-implement the regex here). Unknown tokens
+ * are ignored; no tokens means all scopes.
+ */
+export function retrievalScopeForText(text: string): RetrievalScope[] {
+  const ids = parseReferenceIds(text);
+  const known = ids.filter(
+    (id): id is RetrievalScope =>
+      id === "slides" || id === "textbook" || id === "lectures",
+  );
+  return known.length > 0 ? [...new Set(known)] : [...RETRIEVAL_SCOPES];
+}
+
+/** P1 search bundle item (§3, verbatim incl. opaque `bbox`). */
+export type RetrievalBundleItem = {
+  chunk_id: string;
+  kind: string;
+  page: number | null;
+  bbox: unknown;
+  text: string | null;
+  latex: string | null;
+  table_md: string | null;
+  caption: string | null;
+  concepts: string[];
+  thumb_url: string | null;
+  page_url: string | null;
+  video: { url: string; start: number; end: number } | null;
+  score: number;
+};
+
+export type RetrievalBundle = {
+  data: RetrievalBundleItem[];
+  pagination: { limit: number; offset: number; total: number };
+};
+
+export async function apiRetrievalSearch(args: {
+  query: string;
+  subject: string;
+  scope?: RetrievalScope[] | null;
+  topK?: number;
+}): Promise<RetrievalBundle> {
+  return apiFetch<RetrievalBundle>("/retrieval/search", {
+    method: "POST",
+    body: {
+      query: args.query,
+      subject: args.subject,
+      scope: args.scope ?? null,
+      topK: args.topK ?? 10,
+    },
+  });
+}
+
+/** Bundle items stripped to the persisted display shape (drops `bbox`). */
+export function toEvidenceItems(bundle: RetrievalBundle): RetrievalEvidenceItem[] {
+  return bundle.data.map((item) => ({
+    chunk_id: item.chunk_id,
+    kind: item.kind,
+    page: item.page,
+    text: item.text,
+    latex: item.latex,
+    table_md: item.table_md,
+    caption: item.caption,
+    concepts: item.concepts,
+    thumb_url: item.thumb_url,
+    page_url: item.page_url,
+    video: item.video,
+    score: item.score,
+  }));
+}
+
+/** Segment seconds → `mm:ss` for the video open button. Never throws. */
+export function formatVideoTimestamp(totalSeconds: number): string {
+  try {
+    const floored = Number.isFinite(totalSeconds)
+      ? Math.max(0, Math.floor(totalSeconds))
+      : 0;
+    return `${Math.floor(floored / 60)}:${String(floored % 60).padStart(2, "0")}`;
+  } catch {
+    return "0:00";
+  }
+}
+
+/** Seek URL for the video open button (`mp4#t=`). */
+export function videoSeekUrl(url: string, startSeconds: number): string {
+  const at = Number.isFinite(startSeconds) ? Math.max(0, Math.floor(startSeconds)) : 0;
+  return `${url}#t=${at}`;
+}
+
+/** One provenance line: kind + page, or lecture + segment time. */
+export function retrievalSourceLabel(
+  subject: string,
+  item: { kind: string; page: number | null; video: { start: number } | null },
+): string {
+  if (item.video != null) {
+    return `${sourceTarget("lectures", subject)} ${formatVideoTimestamp(item.video.start)}`;
+  }
+  if (item.page != null) {
+    return `${sourceTarget(item.kind, subject)} p.${item.page}`;
+  }
+  return sourceTarget(item.kind, subject);
+}
+
+/** Ordered, deduped provenance lines for the sources banner. */
+export function retrievalSources(
+  subject: string,
+  items: Array<{ kind: string; page: number | null; video: { start: number } | null }>,
+): string[] {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const item of items) {
+    const label = retrievalSourceLabel(subject, item);
+    if (!seen.has(label)) {
+      seen.add(label);
+      labels.push(label);
+    }
+  }
+  return labels;
 }

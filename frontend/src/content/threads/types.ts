@@ -105,7 +105,39 @@ export type AssistantBlock = {
     kind: "failed" | "empty";
     retryText: string;
   };
+  /**
+   * P1 search evidence for this turn (retrieval display binding).
+   * Persisted inside the block's content JSONB (opaque dict, 100KB
+   * cap) like bubbles — never stripped, so reloads keep sources.
+   */
+  evidence?: RetrievalEvidenceItem[];
   time: string;
+};
+
+/** Retrieval video segment (P1 bundle `video`, verbatim). */
+export type RetrievalVideoSegment = {
+  url: string;
+  start: number;
+  end: number;
+};
+
+/**
+ * Retrieval evidence item (P1 search bundle item, display fields
+ * only — `bbox` never renders and is dropped by the mapper).
+ */
+export type RetrievalEvidenceItem = {
+  chunk_id: string;
+  kind: string;
+  page: number | null;
+  text: string | null;
+  latex: string | null;
+  table_md: string | null;
+  caption: string | null;
+  concepts: string[];
+  thumb_url: string | null;
+  page_url: string | null;
+  video: RetrievalVideoSegment | null;
+  score: number;
 };
 
 export type SystemBlock = {

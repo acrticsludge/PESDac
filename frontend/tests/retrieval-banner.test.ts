@@ -38,19 +38,27 @@ import {
   RETRIEVAL_BANNER_KEY,
   RETRIEVAL_BANNER_QUIET_MS,
   RETRIEVAL_RETRY_EVENT,
+  apiRetrievalSearch,
   bannerStatusForCode,
   clearRetrievalBannerDismissal,
   deriveRetrievalHealthState,
+  formatVideoTimestamp,
   getRetrievalIncident,
   readRetrievalBannerDismissal,
   recordRetrievalBannerDismissal,
   retrievalBannerView,
   retrievalDotLabel,
   retrievalDotTooltip,
+  retrievalScopeForText,
+  retrievalSourceLabel,
+  retrievalSources,
   selectRetrievalCopy,
   setRetrievalIncident,
   shouldShowRetrievalBanner,
   shouldShowRetrievalDot,
+  toEvidenceItems,
+  videoSeekUrl,
+  type RetrievalBundle,
 } from "../src/lib/retrieval-banner.ts";
 
 function reset(): void {
@@ -291,4 +299,127 @@ test("incident hook server-renders without throwing (SSR gate)", async () => {
   setRetrievalIncident(null);
   const html = renderToString(createElement(Probe));
   assert.ok(html.includes("none"));
+});
+
+function bundleItem(overrides = {}) {
+  return {
+    chunk_id: "c-1",
+    kind: "slides",
+    page: 42,
+    bbox: { x: 1, y: 2 },
+    text: "Photosynthesis takes in leaf chloroplasts.",
+    latex: null,
+    table_md: null,
+    caption: "Chloroplast diagram",
+    concepts: ["photosynthesis"],
+    thumb_url: "https://cdn.test/t1.png",
+    page_url: "https://cdn.test/p42",
+    video: null,
+    score: 0.91,
+    ...overrides,
+  };
+}
+
+function bundleWith(items: unknown[]): RetrievalBundle {
+  return {
+    data: items as RetrievalBundle["data"],
+    pagination: { limit: 10, offset: 0, total: items.length },
+  };
+}
+
+test("@textbook scopes the search to the textbook", () => {
+  assert.deepEqual(retrievalScopeForText("@textbook explain integrals"), ["textbook"]);
+});
+
+test("no tokens searches all scopes", () => {
+  assert.deepEqual(retrievalScopeForText("explain integrals"), ["slides", "textbook", "lectures"]);
+});
+
+test("unknown tokens are ignored, known ones dedupe", () => {
+  assert.deepEqual(retrievalScopeForText("@slides @nope @slides hi"), ["slides"]);
+});
+
+test("video timestamps render mm:ss", () => {
+  assert.equal(formatVideoTimestamp(0), "0:00");
+  assert.equal(formatVideoTimestamp(65), "1:05");
+  assert.equal(formatVideoTimestamp(852), "14:12");
+});
+
+test("video seek appends the media fragment", () => {
+  assert.equal(videoSeekUrl("https://cdn.test/l14.mp4", 852.7), "https://cdn.test/l14.mp4#t=852");
+});
+
+test("slides source names kind and page", () => {
+  assert.equal(retrievalSourceLabel("CN", bundleItem()), "CN course slides p.42");
+});
+
+test("lecture source names the segment time", () => {
+  const item = bundleItem({
+    kind: "lectures",
+    page: null,
+    video: { url: "https://cdn.test/l14.mp4", start: 852, end: 900 },
+  });
+  assert.equal(retrievalSourceLabel("CN", item), "CN lecture recordings 14:12");
+});
+
+test("sources list dedupes repeat hits", () => {
+  const labels = retrievalSources("CN", [bundleItem(), bundleItem({ chunk_id: "c-2" })]);
+  assert.deepEqual(labels, ["CN course slides p.42"]);
+});
+
+test("empty bundle yields no sources", () => {
+  assert.deepEqual(retrievalSources("CN", []), []);
+});
+
+test("evidence keeps display fields and drops the bbox", () => {
+  const [evidence] = toEvidenceItems(bundleWith([bundleItem()]));
+  assert.equal(evidence.chunk_id, "c-1");
+  assert.equal(evidence.caption, "Chloroplast diagram");
+  assert.equal((evidence as Record<string, unknown>).bbox, undefined);
+});
+
+test("search posts the P1 contract body", async () => {
+  const { __resetAuthCachesForTesting, __setApiRootForTesting, __setAuthBaseForTesting, __setFetchForTesting } =
+    await import("../src/lib/auth.ts");
+  __setAuthBaseForTesting("https://auth.test");
+  __setApiRootForTesting("https://api.test");
+  __resetAuthCachesForTesting();
+  const apiLog: Array<{ method: string; url: string; body: unknown }> = [];
+  const bundle = bundleWith([bundleItem()]);
+  const restore = __setFetchForTesting((async (input: unknown, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/auth/token")) {
+      return new Response(JSON.stringify({ token: "t-search-0" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    let body: unknown;
+    try {
+      body = typeof init?.body === "string" && init.body ? JSON.parse(init.body) : undefined;
+    } catch {
+      body = init?.body;
+    }
+    apiLog.push({ method: init?.method ?? "GET", url, body });
+    return new Response(JSON.stringify(bundle), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch);
+  try {
+    const result = await apiRetrievalSearch({ query: "photosynthesis", subject: "CN" });
+    assert.equal(result.pagination.total, 1);
+    assert.equal(apiLog.length, 1);
+    assert.equal(apiLog[0].method, "POST");
+    assert.ok(apiLog[0].url.endsWith("/api/v1/retrieval/search"));
+    assert.deepEqual(apiLog[0].body, {
+      query: "photosynthesis",
+      subject: "CN",
+      scope: null,
+      topK: 10,
+    });
+  } finally {
+    restore();
+    __resetAuthCachesForTesting();
+  }
 });

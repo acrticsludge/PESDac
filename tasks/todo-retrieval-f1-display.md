@@ -14,9 +14,9 @@ Commands run from `frontend/` unless noted. Branch:
 - [x] T3 — Pesdac wiring (AppShell slot + health dot on existing cadence)
 - [x] Checkpoint: units + targeted e2e green, no theme/global-CSS diff
 
-## Phase 2 — Thread states
-- [ ] T4 — results path (bubbles + sources banner + video button)
-- [ ] T5 — loading / empty / error states (skeleton, pills, bar+retry, 429)
+## Phase 2 — Thread states (wiring deferred per user call)
+- [x] T4 — evidence data layer (types, search client, mapper, units)
+- [ ] T5 — ThreadView wiring later: fetch + results render + loading / empty / error states (skeleton, pills, bar+retry, 429)
 - [ ] Checkpoint: units + targeted e2e green, frontend-only diff
 
 ## Phase 3 — Coverage + leftovers
