@@ -8,9 +8,17 @@
    two properties and nothing else. */
 /* B40: the composer editable is the only Tab stop without a ring —
    draw the standard Astryx keyboard ring (same tokens as every other
-   control) on keyboard focus only. */
-[contenteditable="true"][role="combobox"]:focus-visible,
-[contenteditable="true"][role="textbox"]:focus-visible {
+   control) on keyboard focus only. `:focus-visible` alone is NOT
+   keyboard-only here: browsers match it on mouse click for text
+   inputs/contenteditables, which painted a white box on every click —
+   and a live modality gate re-fires on the first typed character.
+   So the decision is taken once at focus time: AppLayout's focusin
+   handler stamps `data-kb-ring="1"` on editables whose focus arrived
+   via keyboard (keydown always precedes Tab focus). Click-placed
+   cursors stay ringless even while typing; Tab keeps the ring
+   (e2e K13). */
+[contenteditable="true"][role="combobox"][data-kb-ring="1"]:focus-visible,
+[contenteditable="true"][role="textbox"][data-kb-ring="1"]:focus-visible {
   outline-width: var(--focus-outline-width, 2px) !important;
   outline-style: var(--focus-outline-style, solid) !important;
   outline-color: var(--focus-outline-color, var(--color-accent)) !important;
