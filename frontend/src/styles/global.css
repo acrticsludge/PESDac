@@ -25,8 +25,8 @@
   outline-offset: var(--focus-outline-offset, 3px) !important;
 }
 /* B44: vendor button sizes top out at 36px (lg) — explicit 44px boxes
-   on the Send + Dictation composer controls (Attach is sized via its
-   own style prop in AttachButton.tsx). */
+   on the Send + Dictation composer controls. Attach keeps the natural
+   vendor sm size (same as the neighbouring toolbar buttons). */
 .astryx-chat-send-button {
   width: 44px !important;
   height: 44px !important;
