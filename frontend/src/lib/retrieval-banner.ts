@@ -4,6 +4,10 @@
 // Cleared on identity transition and on search success (flap = new
 // incident). Clock is injectable via nowMs (tests stub it, zero sleeps).
 
+import { useEffect, useState } from "react";
+import { apiFetch } from "./auth.ts";
+import { shouldForegroundRefetch } from "./cache-revalidation.ts";
+
 export const RETRIEVAL_BANNER_KEY = "pesdac:retrieval-banner";
 
 /** Quiet window after dismissal before the same code may re-show (1 h). */
@@ -177,4 +181,241 @@ export function retrievalBannerView(args: {
     description: envelope ? envelope : RETRIEVAL_BANNER_DESCRIPTION,
     dismissLabel: RETRIEVAL_BANNER_DISMISS_LABEL,
   };
+}
+
+// ---- Downtime incident slot (§4.2: one bar at a time) ----------------------
+//
+// Memory-only single slot: the newest incident replaces (never stacked).
+// ThreadView sets it on 502/503 search failures (T5) and clears it on
+// search success; Pesdac renders the AppShell banner from it. Dismissal
+// persistence lives in the localStorage store above — clearing the slot
+// never clears the dismissal (the 1 h quiet window still applies).
+
+/** Bus name for bar-Retry: ThreadView replays the last search on it. */
+export const RETRIEVAL_RETRY_EVENT = "pesdac:retrieval-retry";
+
+export type RetrievalIncident = {
+  code: RetrievalIncidentCode;
+  envelopeMessage?: string | null;
+};
+
+let currentIncident: RetrievalIncident | null = null;
+const incidentListeners = new Set<() => void>();
+
+export function getRetrievalIncident(): RetrievalIncident | null {
+  return currentIncident;
+}
+
+export function setRetrievalIncident(incident: RetrievalIncident | null): void {
+  currentIncident = incident;
+  incidentListeners.forEach((notify) => {
+    try {
+      notify();
+    } catch {
+      // A stale listener must not break the refresh for the rest.
+    }
+  });
+}
+
+function subscribeRetrievalIncident(fn: () => void): () => void {
+  incidentListeners.add(fn);
+  return () => {
+    incidentListeners.delete(fn);
+  };
+}
+
+/**
+ * Render the slot value, re-rendering on every set. Subscription idiom
+ * mirrors `useSessionVersion` (SSR-safe: server and first client paint
+ * read the same null, effects never run on the server).
+ */
+export function useRetrievalIncident(): RetrievalIncident | null {
+  const [, setVersion] = useState(0);
+  useEffect(() => {
+    return subscribeRetrievalIncident(() => setVersion((v) => v + 1));
+  }, []);
+  return getRetrievalIncident();
+}
+
+/** Ask ThreadView to replay the last search (bar Retry). Never throws. */
+export function requestRetrievalRetry(): void {
+  try {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new Event(RETRIEVAL_RETRY_EVENT));
+  } catch {
+    // SSR teardown — the click that asked is already gone.
+  }
+}
+
+// ---- Ambient health (§4.5) --------------------------------------------------
+//
+// No polling infrastructure: reads happen on mount (authenticated only —
+// guests stay zero-fetch like every other gate), on foreground return
+// (the existing visibility cadence, coalesced on the foreground floor),
+// and on manual Retry. Every read is one cheap cached GET; concurrent
+// readers share the in-flight promise.
+
+export type RetrievalHealth = {
+  ok: boolean;
+  provider: string | null;
+  dims: number | null;
+  sources: number;
+  chunks: number;
+  neurons_24h_estimate: number;
+};
+
+export type RetrievalHealthState = "unknown" | "ok" | "degraded" | "unreachable";
+
+/**
+ * Pure state derivation: fetch failures read unreachable (fail open —
+ * the dot is ambient, never a gate); `ok: false` reads degraded.
+ */
+export function deriveRetrievalHealthState(args: {
+  health: RetrievalHealth | null;
+  fetchFailed: boolean;
+}): RetrievalHealthState {
+  if (args.fetchFailed) return "unreachable";
+  if (args.health == null) return "unknown";
+  return args.health.ok ? "ok" : "degraded";
+}
+
+/** Dot without bar = "flaky, retries working". Guests get no dot. */
+export function shouldShowRetrievalDot(
+  authenticated: boolean,
+  state: RetrievalHealthState,
+): boolean {
+  return authenticated && (state === "degraded" || state === "unreachable");
+}
+
+export function retrievalDotLabel(state: RetrievalHealthState): string {
+  return state === "degraded" ? "Course search degraded" : "Course search unreachable";
+}
+
+function formatCheckTime(lastCheckAtMs: number | null): string {
+  if (lastCheckAtMs == null) return "unknown time";
+  try {
+    return new Date(lastCheckAtMs).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return "unknown time";
+  }
+}
+
+/** Tooltip: last-check time + provider + Settings retry affordance. */
+export function retrievalDotTooltip(args: {
+  state: RetrievalHealthState;
+  provider: string | null;
+  lastCheckAtMs: number | null;
+}): string {
+  const when = formatCheckTime(args.lastCheckAtMs);
+  const who = args.provider ? ` (${args.provider})` : "";
+  if (args.state === "degraded") {
+    return `Course search is degraded — checked ${when}${who}. Open Settings to retry.`;
+  }
+  return `Course search is unreachable — checked ${when}${who}. Open Settings to retry.`;
+}
+
+let inflightHealth: Promise<RetrievalHealth> | null = null;
+let lastHealthReadAtMs = 0;
+let healthVersion = 0;
+const healthListeners = new Set<() => void>();
+
+function bumpHealthVersion(): void {
+  healthVersion += 1;
+  healthListeners.forEach((notify) => {
+    try {
+      notify();
+    } catch {
+      // A stale listener must not break the refresh for the rest.
+    }
+  });
+}
+
+/** One cheap cached GET; concurrent readers share the in-flight read. */
+export function apiRetrievalHealth(): Promise<RetrievalHealth> {
+  if (inflightHealth == null) {
+    inflightHealth = apiFetch<RetrievalHealth>("/retrieval/health").finally(() => {
+      inflightHealth = null;
+    });
+  }
+  return inflightHealth;
+}
+
+/** Re-read health everywhere (Settings open while degraded, tooltip Retry). */
+export function refreshRetrievalHealth(): void {
+  inflightHealth = null;
+  bumpHealthVersion();
+}
+
+export function useRetrievalHealth(authenticated: boolean): {
+  state: RetrievalHealthState;
+  health: RetrievalHealth | null;
+  lastCheckAtMs: number | null;
+  refresh: () => void;
+} {
+  const [version, setVersion] = useState(healthVersion);
+  const [snapshot, setSnapshot] = useState<{
+    state: RetrievalHealthState;
+    health: RetrievalHealth | null;
+    lastCheckAtMs: number | null;
+  }>({ state: "unknown", health: null, lastCheckAtMs: null });
+
+  useEffect(() => {
+    const notify = () => setVersion(healthVersion);
+    healthListeners.add(notify);
+    return () => {
+      healthListeners.delete(notify);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authenticated) {
+      setSnapshot({ state: "unknown", health: null, lastCheckAtMs: null });
+      return;
+    }
+    let cancelled = false;
+    const at = Date.now();
+    void apiRetrievalHealth().then(
+      (health) => {
+        if (cancelled) return;
+        lastHealthReadAtMs = at;
+        setSnapshot({
+          state: deriveRetrievalHealthState({ health, fetchFailed: false }),
+          health,
+          lastCheckAtMs: at,
+        });
+      },
+      () => {
+        if (cancelled) return;
+        lastHealthReadAtMs = at;
+        setSnapshot((prev) => ({
+          state: deriveRetrievalHealthState({ health: prev.health, fetchFailed: true }),
+          health: prev.health,
+          lastCheckAtMs: at,
+        }));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, version]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return;
+    }
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (!shouldForegroundRefetch(lastHealthReadAtMs, now)) return;
+      lastHealthReadAtMs = now;
+      refreshRetrievalHealth();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  return { ...snapshot, refresh: refreshRetrievalHealth };
 }

@@ -37,13 +37,20 @@ if (typeof (globalThis as Record<string, unknown>).window === "undefined") {
 import {
   RETRIEVAL_BANNER_KEY,
   RETRIEVAL_BANNER_QUIET_MS,
+  RETRIEVAL_RETRY_EVENT,
   bannerStatusForCode,
   clearRetrievalBannerDismissal,
+  deriveRetrievalHealthState,
+  getRetrievalIncident,
   readRetrievalBannerDismissal,
   recordRetrievalBannerDismissal,
   retrievalBannerView,
+  retrievalDotLabel,
+  retrievalDotTooltip,
   selectRetrievalCopy,
+  setRetrievalIncident,
   shouldShowRetrievalBanner,
+  shouldShowRetrievalDot,
 } from "../src/lib/retrieval-banner.ts";
 
 function reset(): void {
@@ -177,4 +184,111 @@ test("bar view renders the envelope message as the description", () => {
   });
   assert.equal(view.title, "Search is temporarily unavailable");
   assert.equal(view.description, "Custom backend copy.");
+});
+
+test("no incident is stored initially", () => {
+  setRetrievalIncident(null);
+  assert.equal(getRetrievalIncident(), null);
+});
+
+test("newest incident replaces the previous one (never stacked)", () => {
+  setRetrievalIncident({ code: "EMBED_UNREACHABLE" });
+  setRetrievalIncident({ code: "EMBED_MISCONFIGURED", envelopeMessage: "Down." });
+  assert.deepEqual(getRetrievalIncident(), {
+    code: "EMBED_MISCONFIGURED",
+    envelopeMessage: "Down.",
+  });
+  setRetrievalIncident(null);
+});
+
+test("clearing the incident empties the slot", () => {
+  setRetrievalIncident({ code: "EMBED_UNREACHABLE" });
+  setRetrievalIncident(null);
+  assert.equal(getRetrievalIncident(), null);
+});
+
+test("healthy backend derives ok", () => {
+  assert.equal(
+    deriveRetrievalHealthState({
+      health: {
+        ok: true,
+        provider: "workers-ai",
+        dims: 768,
+        sources: 3,
+        chunks: 41,
+        neurons_24h_estimate: 12,
+      },
+      fetchFailed: false,
+    }),
+    "ok",
+  );
+});
+
+test("unhealthy backend derives degraded", () => {
+  assert.equal(
+    deriveRetrievalHealthState({
+      health: {
+        ok: false,
+        provider: "workers-ai",
+        dims: 768,
+        sources: 0,
+        chunks: 0,
+        neurons_24h_estimate: 0,
+      },
+      fetchFailed: false,
+    }),
+    "degraded",
+  );
+});
+
+test("no read yet derives unknown", () => {
+  assert.equal(deriveRetrievalHealthState({ health: null, fetchFailed: false }), "unknown");
+});
+
+test("failed read derives unreachable", () => {
+  assert.equal(deriveRetrievalHealthState({ health: null, fetchFailed: true }), "unreachable");
+});
+
+test("dot shows for degraded or unreachable while authenticated", () => {
+  assert.equal(shouldShowRetrievalDot(true, "degraded"), true);
+  assert.equal(shouldShowRetrievalDot(true, "unreachable"), true);
+  assert.equal(shouldShowRetrievalDot(true, "ok"), false);
+  assert.equal(shouldShowRetrievalDot(true, "unknown"), false);
+});
+
+test("dot never shows for guests", () => {
+  assert.equal(shouldShowRetrievalDot(false, "degraded"), false);
+  assert.equal(shouldShowRetrievalDot(false, "unreachable"), false);
+});
+
+test("dot tooltip names last check, provider, and Settings retry", () => {
+  const tip = retrievalDotTooltip({
+    state: "degraded",
+    provider: "workers-ai",
+    lastCheckAtMs: Date.parse("2026-09-27T10:30:00Z"),
+  });
+  assert.ok(tip.includes("workers-ai"));
+  assert.ok(tip.includes("Settings"));
+});
+
+test("dot label names the degraded state", () => {
+  assert.equal(retrievalDotLabel("degraded"), "Course search degraded");
+  assert.equal(retrievalDotLabel("unreachable"), "Course search unreachable");
+});
+
+test("retry event name is the spec bus name", () => {
+  assert.equal(RETRIEVAL_RETRY_EVENT, "pesdac:retrieval-retry");
+});
+
+test("incident hook server-renders without throwing (SSR gate)", async () => {
+  const { createElement } = await import("react");
+  const { renderToString } = await import("react-dom/server");
+  const { useRetrievalIncident } = await import("../src/lib/retrieval-banner.ts");
+  function Probe() {
+    const incident = useRetrievalIncident();
+    return createElement("span", null, incident == null ? "none" : incident.code);
+  }
+  setRetrievalIncident(null);
+  const html = renderToString(createElement(Probe));
+  assert.ok(html.includes("none"));
 });

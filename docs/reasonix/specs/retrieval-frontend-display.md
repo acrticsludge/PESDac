@@ -160,8 +160,10 @@ degraded/unreachable. Tooltip: last-check time + provider + Retry
 affordance re-firing the health read. Click lands on Settings. Dot
 without bar = "flaky, retries working"; bar = "blocked now".
 
-Polling: reuse the existing sidebar polling cadence (no new timer
-infrastructure); every poll is one cheap cached GET.
+Polling: no sidebar polling cadence exists (repo doctrine: no
+intervals) — reads are foreground-gated instead (mount +
+foreground-visible on the existing coalesce floor + manual Retry,
+no new timer infrastructure); every read is one cheap cached GET.
 
 ## 5. Copy table (fallbacks; envelope message wins when present)
 

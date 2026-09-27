@@ -26,6 +26,7 @@ import {
 } from "../lib/attachments";
 import type { Attachment } from "../content/threads/types";
 import ThreadView from "./chat/ThreadView";
+import RetrievalBanner from "./retrieval/RetrievalBanner";
 import { ChatListSkeleton } from "./chat/ChatListSkeleton";
 import { ComposerSkeleton } from "./chat/ComposerSkeleton";
 import type { ProfileTab } from "./profile/profile-tabs";
@@ -41,6 +42,17 @@ import {
 import { tabFromHash } from "./profile/profile-tabs";
 import { useCacheRevalidation } from "../lib/cache-revalidation";
 import { useLlmStatus } from "../lib/llm";
+import {
+  clearRetrievalBannerDismissal,
+  refreshRetrievalHealth,
+  requestRetrievalRetry,
+  retrievalDotLabel,
+  retrievalDotTooltip,
+  setRetrievalIncident,
+  shouldShowRetrievalDot,
+  useRetrievalHealth,
+  useRetrievalIncident,
+} from "../lib/retrieval-banner";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import AttachButton from "./chat/AttachButton";
 
@@ -543,6 +555,7 @@ function SidebarAccountFooter({
   isLoggingOut,
   isAnyModalOpen,
   showKeyDot,
+  retrievalDot,
   onSettings,
   onProfile,
   onLogout,
@@ -555,6 +568,7 @@ function SidebarAccountFooter({
   isLoggingOut: boolean;
   isAnyModalOpen: boolean;
   showKeyDot: boolean;
+  retrievalDot: { label: string; tooltip: string } | null;
   onSettings: () => void;
   onProfile: () => void;
   onLogout: () => void;
@@ -629,8 +643,19 @@ function SidebarAccountFooter({
         href="#"
         isDisabled={!isUserReady}
         endContent={
-          showKeyDot ? (
-            <StatusDot variant="warning" label="No model key connected" />
+          showKeyDot || retrievalDot != null ? (
+            <>
+              {showKeyDot ? (
+                <StatusDot variant="warning" label="No model key connected" />
+              ) : undefined}
+              {retrievalDot != null ? (
+                <StatusDot
+                  variant="warning"
+                  label={retrievalDot.label}
+                  tooltip={retrievalDot.tooltip}
+                />
+              ) : undefined}
+            </>
           ) : undefined
         }
         onClick={(event) => {
@@ -742,6 +767,27 @@ export default function ShellSideNav({
   const showKeyDot =
     authState.status === "authenticated" &&
     (llm.state === "unconfigured" || llm.state === "invalid");
+  // Retrieval health (§4.5): ambient dot on the Settings row while
+  // search is degraded/unreachable. Reads are foreground-gated
+  // (mount + visible + Retry) — no polling timers. Guests stay
+  // zero-fetch; the dot mirrors the showKeyDot pattern.
+  const retrievalHealth = useRetrievalHealth(authState.status === "authenticated");
+  const retrievalIncident = useRetrievalIncident();
+  const showRetrievalDot = shouldShowRetrievalDot(
+    authState.status === "authenticated",
+    retrievalHealth.state,
+  );
+  const retrievalDot =
+    showRetrievalDot
+      ? {
+          label: retrievalDotLabel(retrievalHealth.state),
+          tooltip: retrievalDotTooltip({
+            state: retrievalHealth.state,
+            provider: retrievalHealth.health?.provider ?? null,
+            lastCheckAtMs: retrievalHealth.lastCheckAtMs,
+          }),
+        }
+      : null;
   const isGateOpen = authState.status === "guest";
   // Server→local hydration (auth audit G2, logout/relogin fix): the
   // session store is memory-only and wiped on reload, so seed the
@@ -784,6 +830,19 @@ export default function ShellSideNav({
     return () => {
       cancelled = true;
     };
+  }, [authState.status, authUserId, authEpoch]);
+  // Retrieval dismissal is device-local but incident-scoped: a new
+  // identity must never inherit the old one's bar or quiet window.
+  const retrievalIdentityRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key =
+      authState.status === "authenticated" && authUserId != null
+        ? identitySeedKey(authUserId, authEpoch)
+        : authState.status;
+    if (retrievalIdentityRef.current === key) return;
+    retrievalIdentityRef.current = key;
+    clearRetrievalBannerDismissal();
+    setRetrievalIncident(null);
   }, [authState.status, authUserId, authEpoch]);
   // Chat backing identity (spec §5): authenticated identities hydrate
   // server-side chats; guests and unknown-tag windows (loading status)
@@ -1862,6 +1921,18 @@ const LOGOUT_TIMEOUT_MS = 15000;
       <LayerProvider toast={{ position: "topStart", maxVisible: 3 }}>
       <AppShell
         contentPadding={0}
+        // Retrieval downtime bar (§4.2): one bar at a time from the
+        // incident slot, above sidebar and thread alike. ThreadView
+        // sets the incident on 502/503 and clears it on success.
+        banner={
+          retrievalIncident ? (
+            <RetrievalBanner
+              code={retrievalIncident.code}
+              envelopeMessage={retrievalIncident.envelopeMessage}
+              onRetry={() => requestRetrievalRetry()}
+            />
+          ) : undefined
+        }
         /* ================================================================== */
         /* Sidebar                                                            */
         /* ================================================================== */
@@ -1889,7 +1960,13 @@ const LOGOUT_TIMEOUT_MS = 15000;
                 isLoggingOut={isLoggingOut}
                 isAnyModalOpen={isAnyModalOpen}
                 showKeyDot={showKeyDot}
-                onSettings={() => openSettings()}
+                retrievalDot={retrievalDot}
+                onSettings={() => {
+                  // The Settings open doubles as the health Retry while
+                  // degraded — one cheap cached GET, then the dialog.
+                  if (showRetrievalDot) refreshRetrievalHealth();
+                  openSettings();
+                }}
                 onProfile={() => openProfile("profile")}
                 onLogout={() => void handleLogout()}
                 onLogin={() => navigate("/login")}

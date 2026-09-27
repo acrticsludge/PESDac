@@ -11,8 +11,8 @@ Commands run from `frontend/` unless noted. Branch:
 
 ## Phase 1 — Bar + dot
 - [x] T2 — RetrievalBanner component (Astryx only, role mapping)
-- [ ] T3 — Pesdac wiring (AppShell slot + health dot on existing cadence)
-- [ ] Checkpoint: units + targeted e2e green, no theme/global-CSS diff
+- [x] T3 — Pesdac wiring (AppShell slot + health dot on existing cadence)
+- [x] Checkpoint: units + targeted e2e green, no theme/global-CSS diff
 
 ## Phase 2 — Thread states
 - [ ] T4 — results path (bubbles + sources banner + video button)
