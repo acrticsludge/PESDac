@@ -145,3 +145,32 @@ button {
 div {
 }
 ```
+
+---
+
+## 6. Visual verification is mandatory
+
+Unit tests cannot prove pixels. An element can be present in the DOM
+and "visible" to Playwright while painting nothing (proven case: a
+`StatusDot` with the correct role, label, size, and opacity that
+computed to a fully transparent background).
+
+### NEVER:
+
+- Report a UI fix or feature as done on unit tests alone.
+- Treat element presence, roles, or Playwright "visible" as proof of paint.
+- Commit scratch verification specs or screenshots.
+
+### ALWAYS:
+
+- Verify every visual change in a real browser (Playwright against
+  `astro preview`, or DevTools inspection) before reporting it done.
+- Assert the paint, not the presence: read computed styles
+  (`backgroundColor`, `outlineStyle`, opacity, size) and capture a
+  screenshot of the affected surface.
+- Drive the real user path (hover, click, keyboard Tab, modal
+  open/close) — paint bugs hide behind interaction and layering.
+- Keep verification scratchwork temporary:
+  `frontend/e2e/scratch-*.spec.ts` plus `frontend/test-results/`
+  output, deleted before commit. They must never appear in `git status`
+  at commit time.
