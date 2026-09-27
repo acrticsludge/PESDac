@@ -44,15 +44,17 @@ import { useCacheRevalidation } from "../lib/cache-revalidation";
 import { useLlmStatus } from "../lib/llm";
 import {
   clearRetrievalBannerDismissal,
-  refreshRetrievalHealth,
   requestRetrievalRetry,
-  retrievalDotLabel,
-  retrievalDotTooltip,
   setRetrievalIncident,
-  shouldShowRetrievalDot,
-  useRetrievalHealth,
   useRetrievalIncident,
 } from "../lib/retrieval-banner";
+import {
+  refreshRetrievalHealth,
+  retrievalDotLabel,
+  retrievalDotTooltip,
+  shouldShowRetrievalDot,
+  useRetrievalHealth,
+} from "../lib/retrieval";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import AttachButton from "./chat/AttachButton";
 

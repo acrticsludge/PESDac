@@ -104,6 +104,13 @@ Rules:
 
 ### 4.3 F2 — search states in the thread
 
+Question shaping (T5 binds this): the question text may carry
+`@slides` / `@textbook` / `@lectures` tokens (existing composer
+reference vocabulary, parsed by the canonical `references.ts`
+parser — never re-implemented). The client maps them to the search
+`scope`, strips them from the sent query, ignores unknown tokens;
+no tokens means all scopes (`lib/retrieval.ts`, unit-tested).
+
 States, in order (all inside existing `ThreadView` structure):
 
 1. *Loading*: existing `ChatToolCalls` running chip (`retrieve —
@@ -198,7 +205,11 @@ no new timer infrastructure); every read is one cheap cached GET.
 | File | Change |
 |---|---|
 | `frontend/src/components/retrieval/RetrievalBanner.tsx` | NEW — downtime bar (§4.2), Astryx `Banner` only |
-| `frontend/src/lib/retrieval-banner.ts` | NEW — dismissal store (§4.4), pure + unit-tested |
+| `frontend/src/lib/retrieval.ts` | NEW — search client, health fetch/state, evidence mapper, scope shaping (§3–§4.5), pure + unit-tested |
+| `frontend/src/lib/retrieval-banner.ts` | NEW — dismissal store, copy table, incident slot (§4.2, §4.4), pure + unit-tested |
+| `frontend/src/content/threads/types.ts` | `evidence[]` on assistant blocks (persisted display shape, `bbox` dropped by mapper) |
+| `frontend/src/components/layout/AppLayout.tsx` | Composer ring-modality hook only (keyboard-vs-pointer focus decision; no visual change) |
+| `frontend/src/styles/global.css` | B40 rule gated on `data-kb-ring` (kept per review: browsers match `:focus-visible` on mouse click for contenteditables; hook stamps keyboard arrival) |
 | `frontend/src/components/chat/ThreadView.tsx` | F2 states (§4.3) around existing chips/composer/skeletons |
 | `frontend/src/components/Pesdac.tsx` | Banner slot wiring + health dot (§4.5, `showKeyDot` mirror) |
 | `frontend/src/components/AppToasts.tsx` | 422/429 toast bridges only if missing (reuse first) |
@@ -207,7 +218,7 @@ no new timer infrastructure); every read is one cheap cached GET.
 | `frontend/tests/retrieval-banner.test.ts` | NEW — §6 units |
 | `docs/reasonix/specs/retrieval-frontend-display.md` | THIS file |
 
-`src/theme/`, global CSS, and non-listed components are untouched.
+`src/theme/` and non-listed components are untouched.
 Backend changes: none (needs a seeded backend to test against —
 run P1 ingest first).
 

@@ -12,7 +12,7 @@ Commands run from `frontend/` unless noted. Branch:
 ## Phase 1 — Bar + dot
 - [x] T2 — RetrievalBanner component (Astryx only, role mapping)
 - [x] T3 — Pesdac wiring (AppShell slot + health dot on existing cadence)
-- [x] Checkpoint: units + targeted e2e green, no theme/global-CSS diff
+- [ ] Checkpoint: units green; e2e + global-CSS sign-off still open (review)
 
 ## Phase 2 — Thread states (wiring deferred per user call)
 - [x] T4 — evidence data layer (types, search client, mapper, units)

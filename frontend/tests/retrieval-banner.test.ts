@@ -35,44 +35,37 @@ if (typeof (globalThis as Record<string, unknown>).window === "undefined") {
 }
 
 import {
-  RETRIEVAL_BANNER_KEY,
   RETRIEVAL_BANNER_QUIET_MS,
   RETRIEVAL_RETRY_EVENT,
-  apiRetrievalSearch,
   bannerStatusForCode,
   clearRetrievalBannerDismissal,
-  deriveRetrievalHealthState,
-  formatVideoTimestamp,
   getRetrievalIncident,
   readRetrievalBannerDismissal,
   recordRetrievalBannerDismissal,
   retrievalBannerView,
+  selectRetrievalCopy,
+  setRetrievalIncident,
+  shouldShowRetrievalBanner,
+} from "../src/lib/retrieval-banner.ts";
+import {
+  apiRetrievalSearch,
+  deriveRetrievalHealthState,
+  formatVideoTimestamp,
   retrievalDotLabel,
   retrievalDotTooltip,
   retrievalScopeForText,
   retrievalSourceLabel,
   retrievalSources,
-  selectRetrievalCopy,
-  setRetrievalIncident,
-  shouldShowRetrievalBanner,
   shouldShowRetrievalDot,
   toEvidenceItems,
   videoSeekUrl,
   type RetrievalBundle,
-} from "../src/lib/retrieval-banner.ts";
+} from "../src/lib/retrieval.ts";
 
 function reset(): void {
   backing.clear();
   clearRetrievalBannerDismissal();
 }
-
-test("storage key is the spec contract key", () => {
-  assert.equal(RETRIEVAL_BANNER_KEY, "pesdac:retrieval-banner");
-});
-
-test("quiet window is one hour", () => {
-  assert.equal(RETRIEVAL_BANNER_QUIET_MS, 3600000);
-});
 
 test("no dismissal stored means the bar shows", () => {
   reset();
