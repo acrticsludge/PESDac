@@ -21,6 +21,8 @@ import { Markdown } from "@astryxdesign/core/Markdown";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Button } from "@astryxdesign/core/Button";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { Avatar } from "@astryxdesign/core/Avatar";
@@ -78,6 +80,7 @@ import type {
   Block,
   Bubble,
   McqBubble,
+  RetrievalEvidenceItem,
   StepsBubble,
   Thread,
   ToolCall,
@@ -87,6 +90,7 @@ import {
   REFERENCE_ITEMS,
   referenceIdForLabel,
   parseReferenceIds,
+  stripReferenceTokens,
 } from "../../lib/references";
 import { dayDividerLabel } from "../../lib/chat";
 import {
@@ -133,7 +137,7 @@ import {
   OPEN_FIND_EVENT,
   setFindAvailable,
 } from "../../lib/session";
-import { useAuth, useAuthEpoch } from "../../lib/auth";
+import { useAuth, useAuthEpoch, toUserMessage } from "../../lib/auth";
 import { useLlmStatus } from "../../lib/llm";
 import { latestFollowUps } from "../../lib/setting-followups";
 import {
@@ -142,6 +146,27 @@ import {
   isSameCalendarDay,
 } from "../../lib/format-timestamps";
 import { planResponse, type ResponseMode } from "../../lib/responder";
+import {
+  apiRetrievalSearch,
+  chipTargetForScope,
+  classifyRetrievalFailure,
+  evidenceToBubbles,
+  evidenceVideos,
+  formatVideoTimestamp,
+  retrievalScopeForText,
+  retrievalSources,
+  toEvidenceItems,
+  videoSeekUrl,
+  RETRIEVAL_EMPTY_MESSAGE,
+  RETRIEVAL_EMPTY_PILLS,
+  retrievalFailureMessage,
+} from "../../lib/retrieval";
+import {
+  clearRetrievalBannerDismissal,
+  selectRetrievalCopy,
+  setRetrievalIncident,
+  RETRIEVAL_RETRY_EVENT,
+} from "../../lib/retrieval-banner";
 import {
   newClientKey,
   outboxQueue,
@@ -988,6 +1013,13 @@ export default function ThreadView({
   // a sent prompt hides stale pills until its response lands and persists
   // them (the `live == null` gate below stays as the streaming layer).
   const followUps = latestFollowUps(blocks);
+  // Search-empty recovery pills bypass the follow-ups visibility gate:
+  // they are recovery actions, not suggestions (spec §4.3: never a dead
+  // end). evidence: [] marks the block search-owned (T5); results blocks
+  // carry no followUps so nothing else renders through this path.
+  const lastBlock = blocks.length > 0 ? blocks[blocks.length - 1] : null;
+  const searchOwnedPills =
+    lastBlock != null && lastBlock.from === "assistant" && lastBlock.evidence !== undefined;
 
   // Follow-ups visibility gate: the profile default (My Profile →
   // Assistant → Follow-up suggestions). Render-only — the server keeps
@@ -1103,6 +1135,30 @@ export default function ThreadView({
     text: string;
     message: string;
   } | null>(null);
+  // Retrieval search for the turn (T5): fired from startTurn so every
+  // (re)turn path — send, pill Retry, regenerate, error-bubble Retry —
+  // replays the search without duplicating the user message. Guests skip
+  // (chatAuth null → zero fetches, same doctrine as the history path).
+  // Evidence lands as its own assistant block AFTER the streaming answer
+  // (stashed while live, flushed on settle) — the mock answer is never
+  // suppressed (completions owns planResponse, not this spec).
+  const [retrievalPending, setRetrievalPending] = useState(false);
+  const [retrievalSkeleton, setRetrievalSkeleton] = useState(false);
+  const searchTokenRef = useRef(0);
+  const searchPendingRef = useRef(false);
+  const lastSearchQueryRef = useRef<string | null>(null);
+  const stashedEvidenceRef = useRef<AssistantBlock | null>(null);
+  const retrievalErrorRef = useRef(false);
+  const liveRef = useRef(live);
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
+  useEffect(() => {
+    if (live == null && stashedEvidenceRef.current != null) {
+      appendAndPersist(stashedEvidenceRef.current);
+      stashedEvidenceRef.current = null;
+    }
+  }, [live]);
   // Message edit (index into blocks): prefill the composer; send replaces
   // the turn, Esc cancels. Session-added user turns only.
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -1217,6 +1273,132 @@ export default function ThreadView({
     setLive(null);
   };
 
+  // P1 search for the turn question (T5). Scopes come from the
+  // @-tokens via the canonical parser (never re-implemented) and are
+  // stripped from the sent query; no tokens means all scopes. One
+  // generation token per kickoff: a newer turn (or bar-Retry replay)
+  // invalidates the older settle — stale evidence never appends.
+  const runRetrievalSearch = (question: string) => {
+    if (chatAuth == null) return;
+    const token = ++searchTokenRef.current;
+    const scope = retrievalScopeForText(question);
+    const query = stripReferenceTokens(question) || question.trim();
+    if (!query) return;
+    lastSearchQueryRef.current = question;
+    retrievalErrorRef.current = false;
+    searchPendingRef.current = true;
+    setRetrievalPending(true);
+    setRetrievalSkeleton(false);
+    const startedAt = Date.now();
+    // Skeleton only when the search outlasts first paint (~800 ms) —
+    // the mock turn's running retrieve chip already covers fast ones.
+    // later() is the existing turn-timer idiom (stop clears it too).
+    later(800, () => {
+      if (searchTokenRef.current === token && searchPendingRef.current) {
+        setRetrievalSkeleton(true);
+      }
+    });
+    const finishPending = () => {
+      searchPendingRef.current = false;
+      setRetrievalPending(false);
+      setRetrievalSkeleton(false);
+    };
+    const deliver = (block: AssistantBlock) => {
+      // Evidence trails the streaming answer (stashed while live) so
+      // reading order stays question → answer → sources.
+      if (liveRef.current != null) stashedEvidenceRef.current = block;
+      else appendAndPersist(block);
+    };
+    void apiRetrievalSearch({ query, subject: thread.subject, scope }).then(
+      (bundle) => {
+        if (searchTokenRef.current !== token) return;
+        finishPending();
+        // Resolving clears both surfaces (§4.3): the bar slot plus the
+        // stored dismissal (flap = new incident), and a composer
+        // warning this search set — never one the mock turn owns.
+        setRetrievalIncident(null);
+        clearRetrievalBannerDismissal();
+        if (retrievalErrorRef.current) {
+          retrievalErrorRef.current = false;
+          setSendError(null);
+        }
+        const evidence = toEvidenceItems(bundle);
+        if (evidence.length > 0) {
+          deliver({
+            from: "assistant",
+            bubbles: evidenceToBubbles(evidence, thread.subject),
+            evidence,
+            toolCalls: [
+              {
+                name: "retrieve",
+                target: chipTargetForScope(thread.subject, scope),
+                status: "complete",
+                duration: `${Date.now() - startedAt}ms`,
+              },
+            ],
+            time: new Date().toISOString(),
+            footer: `PESDac · ${thread.subject}`,
+          });
+        } else {
+          // Empty is content, not failure: message + recovery pills, no
+          // banner, no toast. evidence: [] marks the block search-owned
+          // so its pills bypass the follow-ups visibility gate below.
+          deliver({
+            from: "assistant",
+            bubbles: [{ type: "markdown", md: RETRIEVAL_EMPTY_MESSAGE }],
+            evidence: [],
+            followUps: [...RETRIEVAL_EMPTY_PILLS],
+            time: new Date().toISOString(),
+            footer: `PESDac · ${thread.subject}`,
+          });
+        }
+      },
+      (error: unknown) => {
+        if (searchTokenRef.current !== token) return;
+        finishPending();
+        const classified = classifyRetrievalFailure(error);
+        if (classified.surface === "none") return;
+        const message = retrievalFailureMessage(
+          error,
+          toUserMessage(error, "Search failed. Try again."),
+        );
+        if (classified.surface === "bar" && classified.incidentCode != null) {
+          // Downtime bar (§4.2) + composer line with the same copy; the
+          // failed turn keeps its Retry (handleRetry re-enters startTurn,
+          // which replays the search without duplicating the message).
+          // Dismissing the bar never clears this status (separate state).
+          const copy = selectRetrievalCopy({
+            code: classified.incidentCode,
+            envelopeMessage: message,
+          });
+          setRetrievalIncident({ code: classified.incidentCode, envelopeMessage: message });
+          retrievalErrorRef.current = true;
+          setSendError({ text: question, message: copy.message });
+        } else {
+          // 429 deliberately never touches the bar (transient, per-IP,
+          // self-resolving): composer status + Retry only.
+          retrievalErrorRef.current = true;
+          setSendError({ text: question, message });
+        }
+      },
+    );
+  };
+
+  // Bar Retry re-fires the last search only — no new turn, no duplicate
+  // user message (the incident slot + RETRIEVAL_RETRY_EVENT bus are T3).
+  // Latest-ref: the mount-time listener must see settled chatAuth, not
+  // the first-render (still loading) closure.
+  const runSearchRef = useRef(runRetrievalSearch);
+  runSearchRef.current = runRetrievalSearch;
+  useEffect(() => {
+    const onRetrievalRetry = () => {
+      const question = lastSearchQueryRef.current;
+      if (question != null) runSearchRef.current(question);
+    };
+    window.addEventListener(RETRIEVAL_RETRY_EVENT, onRetrievalRetry);
+    return () => window.removeEventListener(RETRIEVAL_RETRY_EVENT, onRetrievalRetry);
+  }, []);
+
   // Assistant side of a turn: plan, stream, settle. handleSend owns the
   // user message; retry/regenerate re-enter here directly (no duplicate).
   const startTurn = (text: string, opts?: { forceOk?: boolean }) => {
@@ -1238,6 +1420,9 @@ export default function ThreadView({
       return;
     }
     const failAt = plan.error === "stream-failed" && !opts?.forceOk;
+    // Search rides every turn (send, pill Retry, regenerate,
+    // error-bubble Retry all enter here) — simulations above stay pure.
+    runRetrievalSearch(text);
     const running = plan.toolCalls.map((t) => ({ ...t, status: "running" as const, duration: "" }));
     setLive({ tools: running, text: "", full: plan.answer, followUps: plan.followUps });
     const words = plan.answer.split(/(\s+)/);
@@ -1824,6 +2009,46 @@ export default function ThreadView({
           }
         />
       ) : null;
+    // Provenance is the product: the sources banner is default ON (never
+    // a top bar). The citations setting changes its verbosity — "always"
+    // lists every source, "on request" compacts to the first three.
+    // Reactive via the useSessionVersion() subscription above.
+    const evidenceItems = block.evidence ?? [];
+    const sourceLabels = evidenceItems.length > 0 ? retrievalSources(thread.subject, evidenceItems) : [];
+    const verboseSources = getProfile().citations === "always";
+    const sourcesDescription =
+      verboseSources || sourceLabels.length <= 3
+        ? sourceLabels.join(" · ")
+        : `${sourceLabels.slice(0, 3).join(" · ")} · +${sourceLabels.length - 3} more`;
+    const videoEntries = evidenceItems.length > 0 ? evidenceVideos(evidenceItems) : [];
+    const evidenceExtra =
+      evidenceItems.length > 0 ? (
+        <>
+          <Banner
+            key="sources"
+            container="card"
+            status="info"
+            title="Answered from your course material"
+            description={sourcesDescription}
+          />
+          {videoEntries.length > 0 ? (
+            <HStack key="videos" gap={2} wrap="wrap" vAlign="center">
+              {videoEntries.map((entry) => (
+                <Button
+                  key={entry.video.url + entry.video.start}
+                  label={`Open at ${formatVideoTimestamp(entry.video.start)}`}
+                  variant="ghost"
+                  size="sm"
+                  tooltip={entry.text ?? entry.caption ?? "Lecture segment"}
+                  href={videoSeekUrl(entry.video.url, entry.video.start)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              ))}
+            </HStack>
+          ) : null}
+        </>
+      ) : null;
     return (
       <ChatMessage
         key={key}
@@ -1849,6 +2074,7 @@ export default function ThreadView({
         {after >= block.bubbles.length || block.bubbles.length === 0
           ? toolCalls
           : null}
+        {evidenceExtra}
         {error && (
           <ChatMessageBubble variant="ghost">
             <HStack gap={2} vAlign="center">
@@ -2321,13 +2547,25 @@ export default function ThreadView({
                           } as CSSProperties
                         }
                       />
+                      {/* Search skeleton (§4.3): gray blocks, not a spinner —
+                          only when the search outlasts first paint. The
+                          running retrieve chip above already announces. */}
+                      {retrievalSkeleton && (
+                        <ChatMessageBubble variant="ghost" width="100%">
+                          <VStack gap={1}>
+                            <Skeleton width="92%" height={12} radius="rounded" index={0} />
+                            <Skeleton width="78%" height={12} radius="rounded" index={1} />
+                            <Skeleton width="85%" height={12} radius="rounded" index={2} />
+                          </VStack>
+                        </ChatMessageBubble>
+                      )}
                       </ChatMessage>
                     )}
                     {/* Follow-ups anchor to the end of the message flow — never
                         in the sticky dock, so scrolled content can't slide
                         under them. No avatar/bubble: centered pills read as
                         "what to ask next", not as another answer. */}
-                    {live == null && ((followUps != null && showFollowUps) || sendError) && (
+                    {live == null && ((followUps != null && (showFollowUps || searchOwnedPills)) || sendError) && (
                       <HStack gap={2} wrap="wrap" vAlign="center" hAlign="center">
                         {sendError ? (
                           <Button

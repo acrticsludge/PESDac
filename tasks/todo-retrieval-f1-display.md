@@ -16,8 +16,8 @@ Commands run from `frontend/` unless noted. Branch:
 
 ## Phase 2 — Thread states (wiring deferred per user call)
 - [x] T4 — evidence data layer (types, search client, mapper, units)
-- [ ] T5 — ThreadView wiring later: fetch + results render + loading / empty / error states (skeleton, pills, bar+retry, 429)
-- [ ] Checkpoint: units + targeted e2e green, frontend-only diff
+- [x] T5 — ThreadView wiring: fetch + results render + loading / empty / error states (skeleton, pills, bar+retry, 429) — 23 units + 4-case headed browser proof (mocked seam), scratch deleted
+- [ ] Checkpoint: full units (449) + build green; targeted e2e folded into T6 section-n
 
 ## Phase 3 — Coverage + leftovers
 - [ ] T6 — e2e section-n spec (full §4.1 matrix, mocked, zero sleeps)

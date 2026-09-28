@@ -5,10 +5,16 @@
 // must not host the search client.
 
 import { useEffect, useState } from "react";
+import { ApiError, AuthRequiredError } from "./api/errors.ts";
 import { apiFetch } from "./auth.ts";
 import { shouldForegroundRefetch } from "./cache-revalidation.ts";
 import { parseReferenceIds, sourceTarget } from "./references.ts";
-import type { RetrievalEvidenceItem } from "../content/threads/types.ts";
+import type { RetrievalIncidentCode } from "./retrieval-banner.ts";
+import type {
+  Bubble,
+  RetrievalEvidenceItem,
+  RetrievalVideoSegment,
+} from "../content/threads/types.ts";
 
 // ---- Ambient health (§4.5) --------------------------------------------------
 //
@@ -314,4 +320,130 @@ export function retrievalSources(
     }
   }
   return labels;
+}
+
+// ---- ThreadView turn bindings (§4.1, §4.3) -----------------------------------
+//
+// Pure helpers behind the ThreadView wiring (T5). The classifier maps
+// every search failure to exactly one surface; the mapper turns bundle
+// items into existing bubble parts (video opens via buttons rendered
+// from the persisted evidence, never a bubble).
+
+export type RetrievalFailureSurface = "bar" | "composer" | "none";
+
+export type ClassifiedRetrievalFailure = {
+  surface: RetrievalFailureSurface;
+  incidentCode: RetrievalIncidentCode | null;
+};
+
+const INCIDENT_CODES: RetrievalIncidentCode[] = [
+  "EMBED_UNREACHABLE",
+  "EMBED_MISCONFIGURED",
+  "EMBED_SPACE_MISMATCH",
+];
+
+function asIncidentCode(code: string | null | undefined): RetrievalIncidentCode | null {
+  return code != null && (INCIDENT_CODES as string[]).includes(code)
+    ? (code as RetrievalIncidentCode)
+    : null;
+}
+
+/**
+ * Exactly one surface per failure (§4.1):
+ * - 401 → none (apiFetch already fired AUTH_REQUIRED_EVENT; the
+ *   global re-login flow owns it — no new UI).
+ * - 502/503 with a known incident code → the site-wide bar.
+ * - everything else (429, 422, unknown 5xx codes, network/auth-service
+ *   outages, the unexpected) → composer status + Retry, never the bar.
+ */
+export function classifyRetrievalFailure(error: unknown): ClassifiedRetrievalFailure {
+  if (error instanceof AuthRequiredError) {
+    return { surface: "none", incidentCode: null };
+  }
+  if (error instanceof ApiError) {
+    if (error.status === 401) return { surface: "none", incidentCode: null };
+    if (error.status === 502 || error.status === 503) {
+      const incidentCode = asIncidentCode(error.body?.code);
+      if (incidentCode != null) return { surface: "bar", incidentCode };
+    }
+    return { surface: "composer", incidentCode: null };
+  }
+  return { surface: "composer", incidentCode: null };
+}
+
+/**
+ * Failure copy (§3 copy rule): the envelope error.message wins when
+ * present — backend 502/503 copy is UI-ready by contract. Only
+ * unreadable bodies (network failure, no envelope) fall through to the
+ * generic user-safe copy. (toUserMessage's 5xx branch deliberately
+ * masks server text on generic paths; the retrieval path opts out.)
+ */
+export function retrievalFailureMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    const envelope = error.body?.message?.trim();
+    if (envelope) return envelope;
+  }
+  return fallback;
+}
+
+/** Running-chip target for the turn scope (mirrors the mock responder). */
+export function chipTargetForScope(subject: string, scope: RetrievalScope[]): string {
+  if (scope.length === 1 && scope[0] != null) return sourceTarget(scope[0], subject);
+  return `${subject} course material`;
+}
+
+/** Empty-bundle assistant message (§5, verbatim). */
+export const RETRIEVAL_EMPTY_MESSAGE = "Nothing in your course material covers this yet.";
+
+/** Empty-bundle recovery pills (§4.3: never a dead end). */
+export const RETRIEVAL_EMPTY_PILLS: string[] = [
+  "Try rephrasing",
+  "Search a different source",
+  "Quiz me on what we've covered",
+];
+
+function nonBlank(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+/**
+ * Bundle items → existing bubble parts. Text-like fields (text, then
+ * latex, then table) become one markdown card carrying the
+ * "View full page" link when `page_url` is present; thumbnails become
+ * image bubbles (caption = alt, Lightbox on click via the existing
+ * image path). Video-only items render no bubble — the "Open at mm:ss"
+ * button (rendered from the persisted evidence) covers them.
+ */
+export function evidenceToBubbles(items: RetrievalEvidenceItem[], subject: string): Bubble[] {
+  const bubbles: Bubble[] = [];
+  for (const item of items) {
+    const body = nonBlank(item.text) ?? nonBlank(item.latex) ?? nonBlank(item.table_md);
+    const link = item.page_url != null ? `\n\n[View full page](${item.page_url})` : "";
+    if (body != null) {
+      bubbles.push({ type: "markdown", md: `${body}${link}` });
+    } else if (item.page_url != null) {
+      bubbles.push({ type: "markdown", md: `[View full page](${item.page_url})` });
+    }
+    if (item.thumb_url != null) {
+      const caption = nonBlank(item.caption);
+      bubbles.push({
+        type: "image",
+        src: item.thumb_url,
+        alt: caption ?? "Course material excerpt",
+        label: caption ?? retrievalSourceLabel(subject, item),
+      });
+    }
+  }
+  return bubbles;
+}
+
+/** Video-bearing evidence for the "Open at mm:ss" buttons. */
+export function evidenceVideos(
+  items: RetrievalEvidenceItem[],
+): Array<{ video: RetrievalVideoSegment; text: string | null; caption: string | null }> {
+  return items.flatMap((item) =>
+    item.video != null ? [{ video: item.video, text: item.text, caption: item.caption }] : [],
+  );
 }
