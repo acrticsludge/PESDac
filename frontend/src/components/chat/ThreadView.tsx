@@ -159,6 +159,8 @@ import {
   RETRIEVAL_EMPTY_MESSAGE,
   RETRIEVAL_EMPTY_PILLS,
   retrievalFailureMessage,
+  retrievalToastForFailure,
+  sourcesBannerDescription,
   withSearchToolCall,
   withoutFabricatedSearch,
   type SearchPhase,
@@ -1158,10 +1160,31 @@ export default function ThreadView({
   // the request it reports on.
   const liveCalls: ToolCall[] =
     live == null ? [] : withSearchToolCall(live.tools, searchPhase);
+  // Group expansion is OURS for the whole turn, never conditionally
+  // delegated. Passing `isExpanded` while searching and `undefined`
+  // afterwards made the vendor component controlled-then-uncontrolled: its
+  // toggle early-returns while controlled (the user's collapse was
+  // swallowed) and its internal state was still the mount-time `false`, so
+  // the group vanished when the search settled. Held here instead — the
+  // kickoff opens it so the spinner is readable, and every later click is
+  // the user's.
+  const [toolsExpanded, setToolsExpanded] = useState(false);
   const searchTokenRef = useRef(0);
   const lastSearchQueryRef = useRef<string | null>(null);
   const stashedEvidenceRef = useRef<AssistantBlock | null>(null);
+  // True while `sendError` holds copy produced by a RETRIEVAL search (never
+  // the mock turn's own error, which the pill Retry owns).
   const retrievalErrorRef = useRef(false);
+  // Clear the retrieval-owned composer error as one unit. The flag and the
+  // copy used to be reset on different paths: the kickoff cleared the flag
+  // while the copy stayed on screen, and only the success branch read the
+  // flag — so a bar-Retry that succeeded left the previous outage copy
+  // sitting under a recovered search, indefinitely.
+  const clearSearchComposerError = () => {
+    if (!retrievalErrorRef.current) return;
+    retrievalErrorRef.current = false;
+    setSendError(null);
+  };
   const liveRef = useRef(live);
   useEffect(() => {
     liveRef.current = live;
@@ -1298,13 +1321,16 @@ export default function ThreadView({
     const query = stripReferenceTokens(question) || question.trim();
     if (!query) return;
     lastSearchQueryRef.current = question;
-    retrievalErrorRef.current = false;
     const startedAt = Date.now();
     // The tool-call row is the indicator: spinner from the first paint
     // (no delay — the row is already on screen, and a spinner that waits
     // looks like the search hasn't started), real duration on settle.
     const target = chipTargetForScope(thread.subject, scope);
     setSearchPhase({ status: "running", target });
+    // Open the group at kickoff so the spinner reads in place rather than
+    // behind a collapsed summary; the user owns it from here (see
+    // toolsExpanded).
+    setToolsExpanded(true);
     const deliver = (block: AssistantBlock) => {
       // Evidence trails the streaming answer (stashed while live) so
       // reading order stays question → answer → sources.
@@ -1324,10 +1350,7 @@ export default function ThreadView({
         // warning this search set — never one the mock turn owns.
         setRetrievalIncident(null);
         clearRetrievalBannerDismissal();
-        if (retrievalErrorRef.current) {
-          retrievalErrorRef.current = false;
-          setSendError(null);
-        }
+        clearSearchComposerError();
         const evidence = toEvidenceItems(bundle);
         if (evidence.length > 0) {
           deliver({
@@ -1363,9 +1386,15 @@ export default function ThreadView({
         if (searchTokenRef.current !== token) return;
         const classified = classifyRetrievalFailure(error);
         if (classified.surface === "none") {
-          // No user-facing surface (401 re-login flow owns it) — the row
-          // must not sit spinning forever, so settle it as a quiet stop.
+          // 401: the global re-login flow owns the message, so this search
+          // contributes no row and no copy. The search DID run — it just has
+          // nothing to report — which is the same "render no row" outcome
+          // as a turn that ran no search, so it settles to `idle` (see
+          // SearchPhase) rather than stranding a spinner. Clear the
+          // composer error this lineage owned so a stale 502 copy cannot
+          // outlive the attempt that produced it.
           setSearchPhase({ status: "idle" });
+          clearSearchComposerError();
           return;
         }
         const message = retrievalFailureMessage(
@@ -1389,9 +1418,21 @@ export default function ThreadView({
           setSendError({ text: question, message: copy.message });
         } else {
           // 429 deliberately never touches the bar (transient, per-IP,
-          // self-resolving): composer status + Retry only.
+          // self-resolving): composer status + Retry only. 422/429 add
+          // one error toast beside the inline copy (T7, §4.1) — same
+          // copy, vendor-deduped per question episode (uniqueID +
+          // ignore), so same-question retries never stack.
           retrievalErrorRef.current = true;
           setSendError({ text: question, message });
+          const toastSpec = retrievalToastForFailure(error, question);
+          if (toastSpec != null) {
+            toast({
+              body: toastSpec.body,
+              type: "error",
+              uniqueID: toastSpec.uniqueID,
+              collisionBehavior: "ignore",
+            });
+          }
         }
       },
     );
@@ -2034,10 +2075,7 @@ export default function ThreadView({
     const evidenceItems = block.evidence ?? [];
     const sourceLabels = evidenceItems.length > 0 ? retrievalSources(thread.subject, evidenceItems) : [];
     const verboseSources = getProfile().citations === "always";
-    const sourcesDescription =
-      verboseSources || sourceLabels.length <= 3
-        ? sourceLabels.join(" · ")
-        : `${sourceLabels.slice(0, 3).join(" · ")} · +${sourceLabels.length - 3} more`;
+    const sourcesDescription = sourcesBannerDescription(sourceLabels, verboseSources);
     const videoEntries = evidenceItems.length > 0 ? evidenceVideos(evidenceItems) : [];
     const evidenceExtra =
       evidenceItems.length > 0 ? (
@@ -2556,11 +2594,8 @@ export default function ThreadView({
                       </ChatMessageBubble>
                       <ChatToolCalls
                         calls={liveCalls}
-                        // Open the group while the search is in flight so
-                        // the spinner is read next to the row that owns
-                        // it; on settle the user's own toggle takes over
-                        // (controlled → uncontrolled, so no snap-back).
-                        isExpanded={searchPhase.status === "running" ? true : undefined}
+                        isExpanded={toolsExpanded}
+                        onExpandedChange={setToolsExpanded}
                         // B46: same disabled→secondary promotion as the
                         // history instance above (live row, same failure).
                         style={

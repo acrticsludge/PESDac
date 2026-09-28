@@ -252,7 +252,7 @@ test("N1 — 200 with results renders bubbles, chips, sources banner, video seek
   // No other surface: no outage bar, no expiry toast.
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(await page.getByText(EXPIRY_COPY).count()).toBe(0);
-  await expectCleanEnv(errors, true);
+  await expectCleanEnv(errors);
 });
 
 // ---- N2 --------------------------------------------------------------------
@@ -319,7 +319,7 @@ test("N2 — slow search spins the tool-call row, then the tick lands", async ({
 
   // The group opens itself while searching, so the spinner is readable in
   // context rather than hidden behind a collapsed summary.
-  const group = page.getByRole("button", { name: /tool calls/i });
+  const group = groupHeader(page);
   await expect(group).toBeVisible({ timeout: 15000 });
   await expect(group).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("status", { name: "Loading" }).first()).toBeVisible({ timeout: 15000 });
@@ -333,7 +333,7 @@ test("N2 — slow search spins the tool-call row, then the tick lands", async ({
   // Settled: the spinner is gone and the record carries a REAL duration.
   await expect(page.getByRole("status", { name: "Loading" })).toHaveCount(0);
   await expect(toolGroup(page)).toContainText(/\d+ms/);
-  await expectCleanEnv(errors, true);
+  await expectCleanEnv(errors);
 });
 
 test("N2b — the row never ticks before the search ran", async ({ page, context }) => {
@@ -356,6 +356,74 @@ test("N2b — the row never ticks before the search ran", async ({ page, context
   expect(inFlight.missing, "search row is present while in flight").toBe(false);
   expect(inFlight.isSpinner, "in-flight row shows the spinner").toBe(true);
   expect(inFlight.text, "in-flight row reports no duration").not.toMatch(/\d+ms/);
+  await expectCleanEnv(errors);
+});
+
+// ---- N2c -------------------------------------------------------------------
+// Regression (code review): the group used to be handed
+// `isExpanded={searchPhase.status === "running" ? true : undefined}` —
+// controlled while searching, uncontrolled after. The vendor toggle
+// early-returns while controlled, so the user's collapse was swallowed, and
+// its internal state was still the mount-time `false`, so the group
+// VANISHED when the search settled. The collapse must stick and the group
+// must survive the settle.
+
+/** The multi-call group header (the collapsible control itself). */
+const groupHeader = (page: Page) =>
+  page.locator(".astryx-chat-tool-calls [role='button'][aria-expanded][aria-controls]").last();
+
+/**
+ * The tool-call group header's aria-expanded, or null when no multi-call
+ * group is on screen. Found structurally, NOT by its label: the vendor
+ * renders the "N tool calls" summary only while expanded and falls back to
+ * the latest call's name when collapsed, so text matching disappears
+ * exactly when this needs to read `false`.
+ */
+const groupExpanded = (page: Page) =>
+  page.evaluate(() => {
+    const groups = Array.from(document.querySelectorAll(".astryx-chat-tool-calls"));
+    for (const group of groups) {
+      // The group header is the only [role=button] that owns the collapsible
+      // content it controls.
+      const header = group.querySelector('[role="button"][aria-expanded][aria-controls]');
+      if (header != null) return header.getAttribute("aria-expanded");
+    }
+    return null;
+  });
+
+test("N2c — the user's collapse of the tool-call group sticks", async ({ page, context }) => {
+  const errors = await collectErrors(page);
+  await addSession(context);
+  const c = newCounters();
+  await mockBackend(page, c, {
+    search: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      return { status: 200, body: bundle([bundleItem()]) };
+    },
+  });
+  await openThread(page);
+  // A deep answer so the group is multi-call and the turn outlives the wait.
+  await threadSend(page, "teach me TCP in depth step by step");
+
+  // Kickoff opens it so the spinner is readable.
+  await expect(page.getByRole("status", { name: "Loading" }).first()).toBeVisible({ timeout: 15000 });
+  await expect.poll(() => groupExpanded(page), { timeout: 10000 }).toBe("true");
+
+  // The user collapses it mid-search. Previously swallowed by the
+  // controlled prop.
+  await groupHeader(page).click();
+  await expect.poll(() => groupExpanded(page), { timeout: 10000 }).toBe("false");
+
+  // The search settles while the (long) turn is still streaming: the group
+  // must still be there and STILL collapsed — not remounted open, and not
+  // dropped into the vendor's uncontrolled mount-time default.
+  await expect(page.getByRole("status", { name: "Loading" })).toHaveCount(0, { timeout: 20000 });
+  await expect.poll(() => groupExpanded(page), { timeout: 10000 }).toBe("false");
+  await expect(groupHeader(page)).toBeVisible();
+
+  // Re-expanding still works (the toggle was never dead, just overridden).
+  await groupHeader(page).click();
+  await expect.poll(() => groupExpanded(page), { timeout: 10000 }).toBe("true");
   await expectCleanEnv(errors, true);
 });
 
@@ -374,12 +442,12 @@ test("N3 — 200 empty renders the message plus pills; never a banner", async ({
   await expect(page.getByRole("button", { name: "Quiz me on what we've covered" })).toBeVisible();
   await expect(page.getByText("Answered from your course material")).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await expectCleanEnv(errors, true);
+  await expectCleanEnv(errors);
 });
 
 // ---- N4 --------------------------------------------------------------------
 
-test("N4 — 422 shows composer copy; never the bar (toast lands in T7)", async ({ page, context }) => {
+test("N4 — 422 shows composer copy plus one error toast; never the bar", async ({ page, context }) => {
   const errors = await collectErrors(page);
   await addSession(context);
   const c = newCounters();
@@ -388,22 +456,25 @@ test("N4 — 422 shows composer copy; never the bar (toast lands in T7)", async 
   });
   await openThread(page);
   await threadSend(page, "hi");
-  // The copy lands twice on purpose: on the failed tool-call row (as the
-  // vendor's visually-hidden error text) and in the composer status. Scope
-  // to the composer so this stays a test of the composer surface.
+  // Composer copy is the durable surface (the failed tool-call row
+  // unmounts when the mock turn settles, so total-copy counts would
+  // race the stream — scope here and to the toast instead).
   await expect(
     page.getByRole("status").filter({ hasText: "Query too short — ask in a few more words." }),
   ).toBeVisible({ timeout: 30000 });
-  await expect(page.getByText("Query too short — ask in a few more words.")).toHaveCount(2);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  // Exactly one toast (the bar's titles are absent — never the bar).
+  const toast = page.locator('[data-toast-id]').filter({ hasText: "Query too short — ask in a few more words." });
+  await expect(toast).toBeVisible({ timeout: 15000 });
+  await expect(toast).toHaveCount(1);
+  await expect(page.getByText("Search is temporarily unavailable")).toHaveCount(0);
+  await expect(page.getByText("Search isn't available right now")).toHaveCount(0);
   await expect(page.getByText("Answered from your course material")).toHaveCount(0);
-  // T7 adds the one error toast beside this inline copy.
-  await expectCleanEnv(errors, true);
+  await expectCleanEnv(errors);
 });
 
 // ---- N5 --------------------------------------------------------------------
 
-test("N5 — 429 is composer status plus Retry only; never the bar (one-toast-max lands in T7)", async ({
+test("N5 — 429 is composer status plus one toast-max; never the bar", async ({
   page,
   context,
 }) => {
@@ -415,14 +486,23 @@ test("N5 — 429 is composer status plus Retry only; never the bar (one-toast-ma
   });
   await openThread(page);
   await threadSend(page, "what is mitochondria");
-  // Row + composer, as in N4 (see there for why the copy appears twice).
+  // Composer copy, as in N4 (durable surface; the row unmounts on
+  // settle so only the composer and the toast are counted).
   await expect(
     page.getByRole("status").filter({ hasText: "Slow down a little" }),
   ).toBeVisible({ timeout: 30000 });
-  await expect(page.getByText("Slow down a little")).toHaveCount(2);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  const toast = page.locator('[data-toast-id]').filter({ hasText: "Slow down a little" });
+  await expect(toast).toBeVisible({ timeout: 15000 });
+  await expect(toast).toHaveCount(1);
   await expect(page.getByText("Search is temporarily unavailable")).toHaveCount(0);
-  await expectCleanEnv(errors, true);
+  // One-toast-max: retrying the same question re-fails but never stacks
+  // a second toast (vendor uniqueID + ignore; the error toast stands
+  // until dismissed).
+  await searchRetry(page);
+  await expect.poll(() => c.search, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
+  await expect(toast).toHaveCount(1);
+  await expect(page.getByText("Search is temporarily unavailable")).toHaveCount(0);
+  await expectCleanEnv(errors);
 });
 
 test("N5b — a failed search leaves a red cross on the row, never a tick", async ({
@@ -457,7 +537,7 @@ test("N5b — a failed search leaves a red cross on the row, never a tick", asyn
     expect(failed.iconColor, "failed row paints the error token").toBe(ERROR_TOKEN);
     expect(failed.text, "failed row reports no duration").not.toMatch(/\d+ms/);
   }
-  await expectCleanEnv(errors, true);
+  await expectCleanEnv(errors);
 });
 
 // ---- N6 --------------------------------------------------------------------
@@ -492,7 +572,7 @@ test("N6 — 502 mounts the bar plus composer status; Retry replays without dupl
   await expect(page.getByText("Answered from your course material")).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByRole("article", { name: "Message from user" })).toHaveCount(1);
-  await expectCleanEnv(errors, true);
+  await expectCleanEnv(errors);
 });
 
 // ---- N7 --------------------------------------------------------------------
@@ -577,7 +657,7 @@ test("N7 — dismissal matrix: different code re-shows, same code stays quiet, 1
   await expect(page.getByText("Answered from your course material")).toBeVisible({ timeout: 30000 });
   await expect(bar).toHaveCount(0);
   expect(await page.getByText("Search is down for maintenance").count()).toBe(0);
-  await expectCleanEnv(errors, true);
+  await expectCleanEnv(errors);
 });
 
 // ---- N8 --------------------------------------------------------------------
@@ -627,6 +707,7 @@ test.describe("reduced motion", () => {
     await expect(bar.getByText("Search is temporarily unavailable")).toBeVisible({ timeout: 30000 });
     await bar.getByRole("button", { name: "Retry" }).click();
     await expect(page.getByText("Answered from your course material")).toBeVisible({ timeout: 30000 });
-    await expectCleanEnv(errors, true);
+    await expectCleanEnv(errors);
   });
 });
+

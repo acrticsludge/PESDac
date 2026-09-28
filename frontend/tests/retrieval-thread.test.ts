@@ -12,7 +12,9 @@ import {
   classifyRetrievalFailure,
   evidenceToBubbles,
   retrievalFailureMessage,
+  retrievalToastForFailure,
   searchToolCall,
+  sourcesBannerDescription,
   withSearchToolCall,
   withoutFabricatedSearch,
   RETRIEVAL_EMPTY_MESSAGE,
@@ -402,5 +404,85 @@ describe("withoutFabricatedSearch (persisted history)", () => {
       { name: "retrieve", target: "CN course slides", status: "complete", duration: "38ms" },
     ];
     assert.deepEqual(withoutFabricatedSearch(planned), planned);
+  });
+});
+
+describe("retrievalToastForFailure (T7: one toast beside the composer copy)", () => {
+  test("422 toasts the envelope copy with a stable per-question ID", () => {
+    const spec = retrievalToastForFailure(
+      new ApiError(422, { code: "VALIDATION_ERROR", message: "Query too short." }, "Unprocessable"),
+      "hi",
+    );
+    assert.equal(spec?.body, "Query too short.");
+    assert.match(spec?.uniqueID ?? "", /^retrieval-search:422:/);
+    assert.ok((spec?.uniqueID ?? "").includes("hi"));
+  });
+
+  test("429 toasts the envelope copy with a stable per-question ID", () => {
+    const spec = retrievalToastForFailure(
+      new ApiError(429, { code: "RATE_LIMITED", message: "Slow down a little" }, "Too Many Requests"),
+      "what is mitochondria",
+    );
+    assert.equal(spec?.body, "Slow down a little");
+    assert.match(spec?.uniqueID ?? "", /^retrieval-search:429:/);
+  });
+
+  test("same question retries share the ID (vendor ignore = one-toast-max)", () => {
+    const err = new ApiError(429, { code: "RATE_LIMITED", message: "Slow down" }, "Too Many Requests");
+    const first = retrievalToastForFailure(err, "same question");
+    const second = retrievalToastForFailure(err, "same question");
+    assert.equal(first?.uniqueID, second?.uniqueID);
+  });
+
+  test("a new question is a new episode (fresh toast)", () => {
+    const err = new ApiError(429, { code: "RATE_LIMITED", message: "Slow down" }, "Too Many Requests");
+    const first = retrievalToastForFailure(err, "question one");
+    const second = retrievalToastForFailure(err, "question two");
+    assert.notEqual(first?.uniqueID, second?.uniqueID);
+  });
+
+  test("502/503 never toast (the bar IS the notice)", () => {
+    assert.equal(
+      retrievalToastForFailure(
+        new ApiError(502, { code: "EMBED_UNREACHABLE", message: "down" }, "Bad Gateway"),
+        "q",
+      ),
+      null,
+    );
+    assert.equal(
+      retrievalToastForFailure(
+        new ApiError(503, { code: "EMBED_MISCONFIGURED", message: "no creds" }, "Unavailable"),
+        "q",
+      ),
+      null,
+    );
+  });
+
+  test("401 and network failures never toast", () => {
+    assert.equal(
+      retrievalToastForFailure(new AuthRequiredError({ code: "AUTH_REQUIRED", message: "sign in" }), "q"),
+      null,
+    );
+    assert.equal(retrievalToastForFailure(new TypeError("Failed to fetch"), "q"), null);
+  });
+});
+
+describe("sourcesBannerDescription (citations verbosity, no shape change)", () => {
+  test("always-lists-everything in verbose mode", () => {
+    const labels = ["a p.1", "b p.2", "c 1:00", "d p.4", "e p.5"];
+    assert.equal(sourcesBannerDescription(labels, true), labels.join(" · "));
+  });
+
+  test("compacts past three labels when not verbose", () => {
+    assert.equal(
+      sourcesBannerDescription(["a p.1", "b p.2", "c 1:00", "d p.4"], false),
+      "a p.1 · b p.2 · c 1:00 · +1 more",
+    );
+  });
+
+  test("three or fewer labels render in full either way", () => {
+    const labels = ["a p.1", "b p.2", "c 1:00"];
+    assert.equal(sourcesBannerDescription(labels, false), labels.join(" · "));
+    assert.equal(sourcesBannerDescription(labels, true), labels.join(" · "));
   });
 });

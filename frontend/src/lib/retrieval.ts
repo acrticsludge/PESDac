@@ -5,7 +5,7 @@
 // must not host the search client.
 
 import { useEffect, useState } from "react";
-import { ApiError, AuthRequiredError } from "./api/errors.ts";
+import { ApiError, AuthRequiredError, toUserMessage } from "./api/errors.ts";
 import { apiFetch } from "./auth.ts";
 import { shouldForegroundRefetch } from "./cache-revalidation.ts";
 import { parseReferenceIds, sourceTarget } from "./references.ts";
@@ -387,6 +387,38 @@ export function retrievalFailureMessage(error: unknown, fallback: string): strin
   return fallback;
 }
 
+/**
+ * Toast for a search failure (T7, §4.1): 422 and 429 surface one error
+ * toast beside the composer copy. 502/503 own the bar (no toast spam —
+ * the bar IS the notice); 401 owns the global re-login flow; network
+ * and unknown failures stay composer-only.
+ *
+ * One-toast-max is the vendor's, not a latch: the uniqueID is stable
+ * per question episode, so same-question retries hit
+ * collisionBehavior "ignore" while a toast stands, and a new question
+ * (a new episode) mints a fresh one.
+ */
+export function retrievalToastForFailure(
+  error: unknown,
+  question: string,
+): { body: string; uniqueID: string } | null {
+  const status = error instanceof ApiError ? error.status : null;
+  if (status !== 422 && status !== 429) return null;
+  const body = retrievalFailureMessage(error, toUserMessage(error, "Search failed. Try again."));
+  if (!body.trim()) return null;
+  return { body, uniqueID: `retrieval-search:${status}:${question}` };
+}
+
+/**
+ * Sources-banner description for the citations setting (T7, §4.3 —
+ * provenance default ON, no shape change): "always" lists every source,
+ * otherwise the banner compacts past three with a +N more tail.
+ */
+export function sourcesBannerDescription(labels: string[], verbose: boolean): string {
+  if (verbose || labels.length <= 3) return labels.join(" · ");
+  return `${labels.slice(0, 3).join(" · ")} · +${labels.length - 3} more`;
+}
+
 /** Running-chip target for the turn scope (mirrors the mock responder). */
 export function chipTargetForScope(subject: string, scope: RetrievalScope[]): string {
   if (scope.length === 1 && scope[0] != null) return sourceTarget(scope[0], subject);
@@ -397,8 +429,13 @@ export function chipTargetForScope(subject: string, scope: RetrievalScope[]): st
  * Live state of the real search for the current turn. Deliberately 1:1
  * with `ToolCall["status"]` so the tool-call row is the loading signal:
  * `running` → vendor Spinner, `complete` → green tick + the real
- * duration, `error` → red ✕ + the failure copy. `idle` means this turn
- * ran no search (guests, or the turn returned before one was kicked off).
+ * duration, `error` → red ✕ + the failure copy.
+ *
+ * `idle` is the single "render no search row" outcome and covers both ways
+ * to get there: the turn ran no search (guests, or a turn that returned
+ * before one was kicked off), and a search whose outcome is owned by
+ * another surface (401 → the global re-login flow). It never means
+ * "still loading" — a row is never left spinning.
  */
 export type SearchPhase =
   | { status: "idle" }

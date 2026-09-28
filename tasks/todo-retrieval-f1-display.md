@@ -21,8 +21,8 @@ Commands run from `frontend/` unless noted. Branch:
 
 ## Phase 3 — Coverage + leftovers
 - [x] T6 — e2e section-n spec (full §4.1 matrix N1–N9 + N2b/N5b, mocked, zero sleeps) — 11/11 headed green + tool-call-row refactor + banner key fix
-- [ ] T7 — toasts + citations leftovers (reuse only)
-- [ ] Checkpoint: complete — full units + build + e2e green, spec §8 ticked, ready for review, no merge yet
+- [x] T7 — toasts + citations leftovers: 422 one error toast, 429 one-toast-max (vendor uniqueID+ignore), sources description helper + units; N4/N5 toast assertions green
+- [x] Checkpoint: complete — full units (472) + build + e2e section (11/11) green, spec §8 ticked, ready for review, no merge yet
 
 ## Standing rules (every task)
 - RED first (must fail), GREEN minimal, REFACTOR only while green
