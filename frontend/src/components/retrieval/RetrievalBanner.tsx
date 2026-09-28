@@ -32,6 +32,13 @@ export default function RetrievalBanner({
   const view = retrievalBannerView({ code, envelopeMessage, isPersistent });
   return (
     <Banner
+      // Fresh mount per incident class: the vendor Banner owns an
+      // internal dismissed flag that never resets on prop change, and
+      // dismissing writes localStorage only (no React state), so without
+      // the key a dismissed instance is reused across codes and a new
+      // incident (502→503) stays invisible (section-n N7). Same-code
+      // re-failures keep the key and stay hidden per the quiet window.
+      key={code}
       status={view.status}
       container={view.container}
       title={view.title}

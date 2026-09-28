@@ -12,10 +12,14 @@ import {
   classifyRetrievalFailure,
   evidenceToBubbles,
   retrievalFailureMessage,
+  searchToolCall,
+  withSearchToolCall,
+  withoutFabricatedSearch,
   RETRIEVAL_EMPTY_MESSAGE,
   RETRIEVAL_EMPTY_PILLS,
+  type SearchPhase,
 } from "../src/lib/retrieval.ts";
-import type { RetrievalEvidenceItem } from "../src/content/threads/types.ts";
+import type { RetrievalEvidenceItem, ToolCall } from "../src/content/threads/types.ts";
 
 function item(overrides: Partial<RetrievalEvidenceItem> = {}): RetrievalEvidenceItem {
   return {
@@ -218,5 +222,185 @@ describe("empty state copy", () => {
       "Search a different source",
       "Quiz me on what we've covered",
     ]);
+  });
+});
+
+// The tool-call row is the turn's only loading signal (it replaces the
+// skeleton bar). These pin the mapping onto ChatToolCall.status, which is
+// all ChatToolCalls reads to pick a spinner / tick / cross.
+describe("searchToolCall (loading state on the tool-call row)", () => {
+  test("idle contributes no row (guest turns, pre-kickoff)", () => {
+    assert.equal(searchToolCall({ status: "idle" }), null);
+  });
+
+  test("running maps to the vendor spinner and carries no duration", () => {
+    // A duration here is what made the old chip tick for a request that
+    // had not been made — the row must stay duration-less until it lands.
+    assert.deepEqual(searchToolCall({ status: "running", target: "CN textbook" }), {
+      name: "search",
+      target: "CN textbook",
+      status: "running",
+      duration: "",
+    });
+  });
+
+  test("complete maps to the green tick with the real duration", () => {
+    assert.deepEqual(
+      searchToolCall({ status: "complete", target: "CN textbook", duration: "312ms" }),
+      { name: "search", target: "CN textbook", status: "complete", duration: "312ms" },
+    );
+  });
+
+  test("error maps to the red cross and keeps the failure copy", () => {
+    assert.deepEqual(
+      searchToolCall({
+        status: "error",
+        target: "CN course material",
+        message: "Search is temporarily unavailable.",
+      }),
+      {
+        name: "search",
+        target: "CN course material",
+        status: "error",
+        duration: "",
+        errorMessage: "Search is temporarily unavailable.",
+      },
+    );
+  });
+
+  test("every non-idle phase produces a row the vendor can render", () => {
+    const phases: SearchPhase[] = [
+      { status: "running", target: "CN textbook" },
+      { status: "complete", target: "CN textbook", duration: "1ms" },
+      { status: "error", target: "CN textbook", message: "down" },
+    ];
+    for (const phase of phases) {
+      const row = searchToolCall(phase) as ToolCall;
+      // ChatToolCalls picks its icon from `status` alone (STATUS_ICON_NAMES
+      // + the running Spinner branch) and only shows `duration` when the
+      // status is complete — so these three are the whole contract.
+      assert.equal(row.status, phase.status);
+      assert.ok(["running", "complete", "error"].includes(row.status));
+      if (phase.status !== "complete") assert.equal(row.duration, "");
+    }
+  });
+});
+
+describe("withSearchToolCall (the real search owns the search row)", () => {
+  const mockRetrieve: ToolCall = {
+    name: "retrieve",
+    target: "CN course slides",
+    status: "running",
+    duration: "",
+  };
+  // What lib/responder.ts plans in its `deep` branch: a duration seeded
+  // off the question length, i.e. a green tick for a request that had not
+  // been made.
+  const mockSearch: ToolCall = {
+    name: "search",
+    target: "CN textbook",
+    status: "complete",
+    duration: "82ms",
+  };
+  // What it plans in its "simulate a tool error" branch: the failed call
+  // IS the narrative, so it must survive.
+  const simulatedSearchError: ToolCall = {
+    name: "search",
+    target: "CN textbook",
+    status: "error",
+    duration: "",
+    errorMessage: "Search timed out after 8s",
+  };
+
+  test("replaces the mock's fabricated search success, keeping the planned rows", () => {
+    const merged = withSearchToolCall([mockRetrieve, mockSearch], {
+      status: "running",
+      target: "CN textbook",
+    });
+    assert.deepEqual(merged, [
+      mockRetrieve,
+      { name: "search", target: "CN textbook", status: "running", duration: "" },
+    ]);
+    // Exactly one search row, and it is not the fabricated one.
+    assert.equal(merged.filter((t) => t.name === "search").length, 1);
+    assert.equal(merged[1]?.duration, "");
+  });
+
+  test("a failed real search never leaves the fabricated tick behind", () => {
+    const merged = withSearchToolCall([mockRetrieve, mockSearch], {
+      status: "error",
+      target: "CN textbook",
+      message: "Search is temporarily unavailable.",
+    });
+    assert.deepEqual(merged[1], {
+      name: "search",
+      target: "CN textbook",
+      status: "error",
+      duration: "",
+      errorMessage: "Search is temporarily unavailable.",
+    });
+    assert.ok(merged.every((t) => !(t.name === "search" && t.status === "complete")));
+  });
+
+  test("planned order is preserved and the real row lands last", () => {
+    const merged = withSearchToolCall([mockRetrieve], {
+      status: "complete",
+      target: "CN textbook",
+      duration: "9ms",
+    });
+    assert.deepEqual(merged, [
+      mockRetrieve,
+      { name: "search", target: "CN textbook", status: "complete", duration: "9ms" },
+    ]);
+  });
+
+  test("idle returns the planned rows untouched (no row invented)", () => {
+    const planned = [mockRetrieve];
+    assert.deepEqual(withSearchToolCall(planned, { status: "idle" }), planned);
+  });
+
+  test("a plan with no search row still gains the real one", () => {
+    const merged = withSearchToolCall([mockRetrieve], {
+      status: "running",
+      target: "CN course material",
+    });
+    assert.equal(merged.length, 2);
+    assert.equal(merged[1]?.name, "search");
+  });
+
+  test("a simulated search ERROR stands, and no real row is added over it", () => {
+    // The demo branch that shows a failed tool call must keep telling that
+    // story — a real result landing beside it would contradict it.
+    for (const phase of [
+      { status: "running", target: "CN textbook" },
+      { status: "complete", target: "CN textbook", duration: "5ms" },
+    ] as SearchPhase[]) {
+      const merged = withSearchToolCall([mockRetrieve, simulatedSearchError], phase);
+      assert.deepEqual(merged, [mockRetrieve, simulatedSearchError]);
+    }
+  });
+});
+
+describe("withoutFabricatedSearch (persisted history)", () => {
+  test("drops a completed search row, keeps a retrieve row", () => {
+    const planned: ToolCall[] = [
+      { name: "retrieve", target: "CN course slides", status: "complete", duration: "63ms" },
+      { name: "search", target: "CN textbook", status: "complete", duration: "82ms" },
+    ];
+    assert.deepEqual(withoutFabricatedSearch(planned), [planned[0]]);
+  });
+
+  test("keeps a simulated search error verbatim", () => {
+    const planned: ToolCall[] = [
+      { name: "search", target: "CN textbook", status: "error", duration: "", errorMessage: "Search timed out after 8s" },
+    ];
+    assert.deepEqual(withoutFabricatedSearch(planned), planned);
+  });
+
+  test("leaves a plan with no search row alone", () => {
+    const planned: ToolCall[] = [
+      { name: "retrieve", target: "CN course slides", status: "complete", duration: "38ms" },
+    ];
+    assert.deepEqual(withoutFabricatedSearch(planned), planned);
   });
 });

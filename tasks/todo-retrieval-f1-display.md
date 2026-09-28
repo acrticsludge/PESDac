@@ -20,7 +20,7 @@ Commands run from `frontend/` unless noted. Branch:
 - [ ] Checkpoint: full units (449) + build green; targeted e2e folded into T6 section-n
 
 ## Phase 3 — Coverage + leftovers
-- [ ] T6 — e2e section-n spec (full §4.1 matrix, mocked, zero sleeps)
+- [x] T6 — e2e section-n spec (full §4.1 matrix N1–N9 + N2b/N5b, mocked, zero sleeps) — 11/11 headed green + tool-call-row refactor + banner key fix
 - [ ] T7 — toasts + citations leftovers (reuse only)
 - [ ] Checkpoint: complete — full units + build + e2e green, spec §8 ticked, ready for review, no merge yet
 

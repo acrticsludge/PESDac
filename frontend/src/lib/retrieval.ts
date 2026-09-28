@@ -14,6 +14,7 @@ import type {
   Bubble,
   RetrievalEvidenceItem,
   RetrievalVideoSegment,
+  ToolCall,
 } from "../content/threads/types.ts";
 
 // ---- Ambient health (§4.5) --------------------------------------------------
@@ -390,6 +391,67 @@ export function retrievalFailureMessage(error: unknown, fallback: string): strin
 export function chipTargetForScope(subject: string, scope: RetrievalScope[]): string {
   if (scope.length === 1 && scope[0] != null) return sourceTarget(scope[0], subject);
   return `${subject} course material`;
+}
+
+/**
+ * Live state of the real search for the current turn. Deliberately 1:1
+ * with `ToolCall["status"]` so the tool-call row is the loading signal:
+ * `running` → vendor Spinner, `complete` → green tick + the real
+ * duration, `error` → red ✕ + the failure copy. `idle` means this turn
+ * ran no search (guests, or the turn returned before one was kicked off).
+ */
+export type SearchPhase =
+  | { status: "idle" }
+  | { status: "running"; target: string }
+  | { status: "complete"; target: string; duration: string }
+  | { status: "error"; target: string; message: string };
+
+/**
+ * The search row for the tool-call group, or null when the turn runs no
+ * search. The chip IS the progress indicator — no separate skeleton.
+ */
+export function searchToolCall(phase: SearchPhase): ToolCall | null {
+  if (phase.status === "idle") return null;
+  return {
+    name: "search",
+    target: phase.target,
+    status: phase.status,
+    duration: phase.status === "complete" ? phase.duration : "",
+    ...(phase.status === "error" ? { errorMessage: phase.message } : {}),
+  };
+}
+
+/**
+ * True for a planned `search` row that is a fabricated SUCCESS — the mock
+ * responder seeds its duration off the question length, so it paints a
+ * green tick for a request that had not been made (and would survive a
+ * search that then failed). The real search owns that row instead.
+ *
+ * A planned `search` row with status `error` is left alone: responder.ts
+ * plans it only for the "simulate a tool error" branch, where the failed
+ * call IS the narrative and must survive into persisted history.
+ */
+function isFabricatedSearchSuccess(tool: ToolCall): boolean {
+  return tool.name === "search" && tool.status === "complete";
+}
+
+/** The turn's tool calls with any fabricated `search` success removed. */
+export function withoutFabricatedSearch(tools: ToolCall[]): ToolCall[] {
+  return tools.filter((t) => !isFabricatedSearchSuccess(t));
+}
+
+/**
+ * Merge the real search row into the turn's tool calls, replacing any
+ * fabricated `search` success. A deliberate `search` error (the simulate
+ * branch) is preserved and the real row is not appended beside it, so the
+ * demo's failed-call story is never papered over by a real result.
+ */
+export function withSearchToolCall(tools: ToolCall[], phase: SearchPhase): ToolCall[] {
+  const kept = withoutFabricatedSearch(tools);
+  if (kept.some((t) => t.name === "search")) return kept;
+  const real = searchToolCall(phase);
+  if (real == null) return kept;
+  return [...kept, real];
 }
 
 /** Empty-bundle assistant message (§5, verbatim). */

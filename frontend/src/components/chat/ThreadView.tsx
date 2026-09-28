@@ -22,7 +22,6 @@ import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { Avatar } from "@astryxdesign/core/Avatar";
@@ -160,6 +159,9 @@ import {
   RETRIEVAL_EMPTY_MESSAGE,
   RETRIEVAL_EMPTY_PILLS,
   retrievalFailureMessage,
+  withSearchToolCall,
+  withoutFabricatedSearch,
+  type SearchPhase,
 } from "../../lib/retrieval";
 import {
   clearRetrievalBannerDismissal,
@@ -1142,10 +1144,21 @@ export default function ThreadView({
   // Evidence lands as its own assistant block AFTER the streaming answer
   // (stashed while live, flushed on settle) — the mock answer is never
   // suppressed (completions owns planResponse, not this spec).
-  const [retrievalPending, setRetrievalPending] = useState(false);
-  const [retrievalSkeleton, setRetrievalSkeleton] = useState(false);
+  // The real P1 search is the turn's ONLY loading signal, and it rides the
+  // tool-call row: vendor Spinner while in flight, green tick with the real
+  // duration on success, red ✕ plus the failure copy on error — all three
+  // render from `status` alone (ChatToolCalls). No skeleton bar: it sat
+  // under a chip that had already ticked "searched", so it read as a second,
+  // contradictory signal for work that was one request.
+  const [searchPhase, setSearchPhase] = useState<SearchPhase>({
+    status: "idle",
+  });
+  // Live tool-call rows: the mock's planned `retrieve` rows plus the real
+  // search row in its slot. Derived (not stored) so the row can never lag
+  // the request it reports on.
+  const liveCalls: ToolCall[] =
+    live == null ? [] : withSearchToolCall(live.tools, searchPhase);
   const searchTokenRef = useRef(0);
-  const searchPendingRef = useRef(false);
   const lastSearchQueryRef = useRef<string | null>(null);
   const stashedEvidenceRef = useRef<AssistantBlock | null>(null);
   const retrievalErrorRef = useRef(false);
@@ -1286,23 +1299,12 @@ export default function ThreadView({
     if (!query) return;
     lastSearchQueryRef.current = question;
     retrievalErrorRef.current = false;
-    searchPendingRef.current = true;
-    setRetrievalPending(true);
-    setRetrievalSkeleton(false);
     const startedAt = Date.now();
-    // Skeleton only when the search outlasts first paint (~800 ms) —
-    // the mock turn's running retrieve chip already covers fast ones.
-    // later() is the existing turn-timer idiom (stop clears it too).
-    later(800, () => {
-      if (searchTokenRef.current === token && searchPendingRef.current) {
-        setRetrievalSkeleton(true);
-      }
-    });
-    const finishPending = () => {
-      searchPendingRef.current = false;
-      setRetrievalPending(false);
-      setRetrievalSkeleton(false);
-    };
+    // The tool-call row is the indicator: spinner from the first paint
+    // (no delay — the row is already on screen, and a spinner that waits
+    // looks like the search hasn't started), real duration on settle.
+    const target = chipTargetForScope(thread.subject, scope);
+    setSearchPhase({ status: "running", target });
     const deliver = (block: AssistantBlock) => {
       // Evidence trails the streaming answer (stashed while live) so
       // reading order stays question → answer → sources.
@@ -1312,7 +1314,11 @@ export default function ThreadView({
     void apiRetrievalSearch({ query, subject: thread.subject, scope }).then(
       (bundle) => {
         if (searchTokenRef.current !== token) return;
-        finishPending();
+        setSearchPhase({
+          status: "complete",
+          target,
+          duration: `${Date.now() - startedAt}ms`,
+        });
         // Resolving clears both surfaces (§4.3): the bar slot plus the
         // stored dismissal (flap = new incident), and a composer
         // warning this search set — never one the mock turn owns.
@@ -1331,7 +1337,7 @@ export default function ThreadView({
             toolCalls: [
               {
                 name: "retrieve",
-                target: chipTargetForScope(thread.subject, scope),
+                target,
                 status: "complete",
                 duration: `${Date.now() - startedAt}ms`,
               },
@@ -1355,13 +1361,20 @@ export default function ThreadView({
       },
       (error: unknown) => {
         if (searchTokenRef.current !== token) return;
-        finishPending();
         const classified = classifyRetrievalFailure(error);
-        if (classified.surface === "none") return;
+        if (classified.surface === "none") {
+          // No user-facing surface (401 re-login flow owns it) — the row
+          // must not sit spinning forever, so settle it as a quiet stop.
+          setSearchPhase({ status: "idle" });
+          return;
+        }
         const message = retrievalFailureMessage(
           error,
           toUserMessage(error, "Search failed. Try again."),
         );
+        // Red ✕ on the row: the tick this chip would have shown never
+        // arrives, and the row is where the user watched for it.
+        setSearchPhase({ status: "error", target, message });
         if (classified.surface === "bar" && classified.incidentCode != null) {
           // Downtime bar (§4.2) + composer line with the same copy; the
           // failed turn keeps its Retry (handleRetry re-enters startTurn,
@@ -1422,8 +1435,13 @@ export default function ThreadView({
     const failAt = plan.error === "stream-failed" && !opts?.forceOk;
     // Search rides every turn (send, pill Retry, regenerate,
     // error-bubble Retry all enter here) — simulations above stay pure.
+    // The real search owns the `search` row: the mock's fabricated
+    // success (a duration seeded off the question length) is dropped
+    // before it can tick for a request that was never made. A planned
+    // `search` ERROR (the "simulate a tool error" narrative) is kept.
+    const planned = withoutFabricatedSearch(plan.toolCalls);
     runRetrievalSearch(text);
-    const running = plan.toolCalls.map((t) => ({ ...t, status: "running" as const, duration: "" }));
+    const running = planned.map((t) => ({ ...t, status: "running" as const, duration: "" }));
     setLive({ tools: running, text: "", full: plan.answer, followUps: plan.followUps });
     const words = plan.answer.split(/(\s+)/);
     // B43: reduced-motion calming — one settled paint instead of the
@@ -1438,8 +1456,8 @@ export default function ThreadView({
         .slice(0, Math.max(2, Math.floor(words.length / 2)))
         .join("");
       later(150, () => {
-        if (failAt) failTurn(plan.toolCalls, partial, text);
-        else finalizeTurn(plan.toolCalls, plan.answer, plan.followUps, text);
+        if (failAt) failTurn(planned, partial, text);
+        else finalizeTurn(planned, plan.answer, plan.followUps, text);
       });
       return;
     }
@@ -1449,19 +1467,19 @@ export default function ThreadView({
         i += 2;
         const partial = words.slice(0, i).join("");
         if (failAt && i >= Math.max(2, Math.floor(words.length / 2))) {
-          failTurn(plan.toolCalls, partial, text);
+          failTurn(planned, partial, text);
           return;
         }
         if (i >= words.length) {
-          finalizeTurn(plan.toolCalls, plan.answer, plan.followUps, text);
+          finalizeTurn(planned, plan.answer, plan.followUps, text);
           return;
         }
-        setLive({ tools: plan.toolCalls, text: partial, full: plan.answer, followUps: plan.followUps });
+        setLive({ tools: planned, text: partial, full: plan.answer, followUps: plan.followUps });
         // Demo pacing (slow on purpose so stop is testable; backend
         // streams at its own rate later).
         later(80, step);
       };
-      setLive({ tools: plan.toolCalls, text: "", full: plan.answer, followUps: plan.followUps });
+      setLive({ tools: planned, text: "", full: plan.answer, followUps: plan.followUps });
       later(150, step);
     });
   };
@@ -2537,7 +2555,12 @@ export default function ThreadView({
                         </Markdown>
                       </ChatMessageBubble>
                       <ChatToolCalls
-                        calls={live.tools}
+                        calls={liveCalls}
+                        // Open the group while the search is in flight so
+                        // the spinner is read next to the row that owns
+                        // it; on settle the user's own toggle takes over
+                        // (controlled → uncontrolled, so no snap-back).
+                        isExpanded={searchPhase.status === "running" ? true : undefined}
                         // B46: same disabled→secondary promotion as the
                         // history instance above (live row, same failure).
                         style={
@@ -2547,18 +2570,6 @@ export default function ThreadView({
                           } as CSSProperties
                         }
                       />
-                      {/* Search skeleton (§4.3): gray blocks, not a spinner —
-                          only when the search outlasts first paint. The
-                          running retrieve chip above already announces. */}
-                      {retrievalSkeleton && (
-                        <ChatMessageBubble variant="ghost" width="100%">
-                          <VStack gap={1}>
-                            <Skeleton width="92%" height={12} radius="rounded" index={0} />
-                            <Skeleton width="78%" height={12} radius="rounded" index={1} />
-                            <Skeleton width="85%" height={12} radius="rounded" index={2} />
-                          </VStack>
-                        </ChatMessageBubble>
-                      )}
                       </ChatMessage>
                     )}
                     {/* Follow-ups anchor to the end of the message flow — never
